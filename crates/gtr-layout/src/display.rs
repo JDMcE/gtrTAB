@@ -102,6 +102,15 @@ pub enum Item {
         y: f64,
         h: f64,
     },
+    /// A quadratic curve from `(x1, y1)` to `(x2, y2)`, pulled towards `(cx, cy)`.
+    Curve {
+        x1: f64,
+        y1: f64,
+        cx: f64,
+        cy: f64,
+        x2: f64,
+        y2: f64,
+    },
     Text {
         x: f64,
         /// Vertical centre of the text, or the glyph origin for [`Font::Music`].
@@ -141,6 +150,32 @@ impl Item {
             h: r(h),
             c,
         }
+    }
+
+    pub(crate) fn curve(x1: f64, y1: f64, cx: f64, cy: f64, x2: f64, y2: f64) -> Item {
+        Item::Curve {
+            x1: r(x1),
+            y1: r(y1),
+            cx: r(cx),
+            cy: r(cy),
+            x2: r(x2),
+            y2: r(y2),
+        }
+    }
+
+    /// Makes a text item erase what is behind it.
+    pub(crate) fn knockout(mut self) -> Item {
+        if let Item::Text { knockout, .. } = &mut self {
+            *knockout = true;
+        }
+        self
+    }
+
+    pub(crate) fn colored(mut self, color: Color) -> Item {
+        if let Item::Text { c, .. } = &mut self {
+            *c = color;
+        }
+        self
     }
 
     pub(crate) fn text(x: f64, y: f64, s: impl Into<String>, size: f64, font: Font) -> Item {

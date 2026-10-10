@@ -5,5 +5,5 @@
 mod events;
 mod synth;
 
-pub use events::{BeatTime, Click, NoteEvent, Options, Timeline, compile};
+pub use events::{BeatTime, Click, NoteEvent, Options, Timeline, Tone, compile};
 pub use synth::render;

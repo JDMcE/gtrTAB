@@ -27,9 +27,8 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
         tuplet: (a % 2 == 1).then_some(Tuplet::TRIPLET),
     };
     let note = Note {
-        string: a % 7,
-        fret: b % 25,
         tied: b % 2 == 0,
+        ..Note::new(a % 7, b % 25)
     };
     let time_signature = TimeSignature {
         numerator: a % 13,
@@ -64,10 +63,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
         },
         2 => Command::InsertBeat {
             at,
-            beat: Beat {
-                duration,
-                notes: vec![note],
-            },
+            beat: Beat::new(duration, vec![note]),
         },
         3 => Command::InsertBeat {
             at,

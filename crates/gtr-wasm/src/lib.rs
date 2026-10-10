@@ -1,9 +1,9 @@
 //! JavaScript API over the core crates. Structured data crosses the boundary as JSON.
 
 use gtr_audio::Options;
-use gtr_edit::{Editor, Move};
+use gtr_edit::{Editor, Move, Technique};
 use gtr_io::{guitar_pro, native};
-use gtr_model::{NoteValue, Score, ScoreInfo, TimeSignature, Tuning, demo_score};
+use gtr_model::{Bend, BendKind, NoteValue, Score, ScoreInfo, TimeSignature, Tuning, demo_score};
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
@@ -191,6 +191,28 @@ impl Document {
     #[wasm_bindgen(js_name = toggleTriplet)]
     pub fn toggle_triplet(&mut self) -> Result<(), JsError> {
         Ok(self.editor.toggle_triplet()?)
+    }
+
+    /// Switches a playing technique on or off, e.g. `"palm_mute"`, `"hammer"` or
+    /// `"slide_shift"`. See `gtr_edit::Technique` for the full list.
+    #[wasm_bindgen(js_name = toggleTechnique)]
+    pub fn toggle_technique(&mut self, technique: &str) -> Result<(), JsError> {
+        let technique: Technique = parse_name(technique)?;
+        Ok(self.editor.toggle_technique(technique)?)
+    }
+
+    /// Sets a bend of `quarter_tones` (4 is a full step). `kind` is one of bend,
+    /// bend_release, prebend, prebend_release, or an empty string to remove the bend.
+    #[wasm_bindgen(js_name = setBend)]
+    pub fn set_bend(&mut self, kind: &str, quarter_tones: u8) -> Result<(), JsError> {
+        let bend = match kind {
+            "" => None,
+            kind => Some(Bend {
+                kind: parse_name::<BendKind>(kind)?,
+                quarter_tones,
+            }),
+        };
+        Ok(self.editor.set_bend(bend)?)
     }
 
     pub fn delete(&mut self) -> Result<(), JsError> {

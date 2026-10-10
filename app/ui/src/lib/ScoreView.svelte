@@ -44,7 +44,7 @@
   }
 
   function itemY(item: Item): number {
-    return item.t === 'line' ? item.y1 : item.y;
+    return item.t === 'line' || item.t === 'curve' ? item.y1 : item.y;
   }
 
   function draw() {
@@ -101,6 +101,14 @@
           context.beginPath();
           context.moveTo(item.x1, item.y);
           context.quadraticCurveTo((item.x1 + item.x2) / 2, item.y - item.h * 2, item.x2, item.y);
+          context.stroke();
+          break;
+        case 'curve':
+          context.strokeStyle = colors.ink;
+          context.lineWidth = 1.1;
+          context.beginPath();
+          context.moveTo(item.x1, item.y1);
+          context.quadraticCurveTo(item.cx, item.cy, item.x2, item.y2);
           context.stroke();
           break;
         case 'text': {

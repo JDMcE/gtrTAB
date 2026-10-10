@@ -90,16 +90,23 @@ Still to check by hand: how playback sounds, autosave recovery, recent files, an
 
 Each item needs notation, input and playback.
 
-- [ ] Hammer-on, pull-off, legato slides, shift slides, slide in and out
-- [ ] Bends with a bend editor (bend, release, pre-bend, bend-release, custom curves)
-- [ ] Vibrato (slight, wide) and whammy bar with a curve editor
-- [ ] Palm mute, let ring, dead notes, ghost notes, staccato
-- [ ] Accents, heavy accents, dynamics, crescendo and decrescendo
-- [ ] Natural, artificial, pinch, tapped and semi harmonics
-- [ ] Tapping, slapping, popping, pick strokes, strum directions, arpeggios, rasgueado
-- [ ] Tremolo picking, trills, grace notes
-- [ ] Tuplets, including nested tuplets
+- [x] Hammer-on, pull-off, legato slides, shift slides, slide in and out
+- [x] Bends from presets: bend, bend and release, pre-bend, pre-bend and release, from a quarter tone to two tones
+- [ ] Bend editor with custom curves. Imported bend curves are reduced to the nearest preset for now
+- [x] Vibrato (slight, wide)
+- [ ] Whammy bar with a curve editor
+- [x] Palm mute, let ring, dead notes, ghost notes, staccato
+- [x] Accents, heavy accents
+- [ ] Dynamics, crescendo and decrescendo
+- [x] Natural, artificial, pinch, tapped and semi harmonics. Natural harmonics play at their true pitch; the others are approximated as an octave above the fretted note
+- [x] Tapping, pick strokes
+- [ ] Slapping, popping, strum directions, arpeggios, rasgueado
+- [x] Tremolo picking
+- [ ] Trills, grace notes
+- [x] Tuplets (triplets from the keyboard; other tuplets import and display)
+- [ ] Nested tuplets, and entering tuplets other than triplets
 - [ ] Fingering for both hands
+- [x] Guitar Pro import brings in every technique above that is ticked
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 

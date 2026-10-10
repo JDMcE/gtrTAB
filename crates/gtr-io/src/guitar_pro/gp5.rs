@@ -3,7 +3,8 @@
 //! ones the importer has no use for.
 
 use gtr_model::{
-    Beat, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Voice,
+    Accent, Beat, BeatEffects, Bend, Harmonic, MasterBar, Note, NoteEffects, NoteValue, PickStroke,
+    Score, ScoreInfo, Staff, TimeSignature, Track, Vibrato, Voice,
 };
 
 use super::{ImportError, Skipped, bar, beat, duration, tuning};
@@ -275,6 +276,14 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     })
 }
 
+/// Effects Guitar Pro 5 stores on the beat that the model keeps on each note.
+#[derive(Default)]
+struct BeatWide {
+    vibrato: Option<Vibrato>,
+    tapped: bool,
+    stroke: Option<PickStroke>,
+}
+
 /// Reads one beat, and whether it is a placeholder rather than a note or written rest.
 fn read_beat(
     r: &mut Reader,
@@ -320,9 +329,10 @@ fn read_beat(
         r.string()?;
         skipped.add("text");
     }
-    if flags & 0x08 != 0 {
-        read_beat_effects(r, skipped)?;
-    }
+    let wide = match flags & 0x08 != 0 {
+        true => read_beat_effects(r, skipped)?,
+        false => BeatWide::default(),
+    };
     if flags & 0x10 != 0 {
         read_mix_change(r, newer, skipped)?;
     }
@@ -330,11 +340,16 @@ fn read_beat(
     // One bit per string, the highest string in bit 6.
     let strings = r.byte()?;
     let mut notes = Vec::new();
+    let mut tremolo = None;
     for string in 0..7u8 {
-        if strings & (0x40 >> string) != 0
-            && let Some(note) = read_note(r, string, track, skipped)?
-        {
-            notes.push(note);
+        if strings & (0x40 >> string) != 0 {
+            let (note, note_tremolo) = read_note(r, string, track, skipped)?;
+            tremolo = tremolo.or(note_tremolo);
+            if let Some(mut note) = note {
+                note.effects.vibrato = note.effects.vibrato.or(wide.vibrato);
+                note.effects.tapped |= wide.tapped;
+                notes.push(note);
+            }
         }
     }
 
@@ -342,16 +357,31 @@ fn read_beat(
     if r.byte()? & 0x08 != 0 {
         r.skip(1)?;
     }
-    Ok((beat(read_duration, notes, track.string_count), empty))
+    let mut read = beat(read_duration, notes, track.string_count);
+    if !read.is_rest() {
+        read.effects = BeatEffects {
+            tremolo,
+            stroke: wide.stroke,
+        };
+    }
+    Ok((read, empty))
 }
 
-fn read_beat_effects(r: &mut Reader, skipped: &mut Skipped) -> Result<()> {
+fn read_beat_effects(r: &mut Reader, skipped: &mut Skipped) -> Result<BeatWide> {
     let flags1 = r.byte()?;
     let flags2 = r.byte()?;
-    skipped.add_if(flags1 & 0x03 != 0, "vibrato");
+    let mut wide = BeatWide {
+        // Bit 0 is finger vibrato and bit 1 vibrato with the tremolo bar.
+        vibrato: (flags1 & 0x03 != 0).then_some(Vibrato::Slight),
+        ..BeatWide::default()
+    };
+    skipped.add_if(flags1 & 0x10 != 0, "fade in");
+    skipped.add_if(flags2 & 0x01 != 0, "rasgueado");
     if flags1 & 0x20 != 0 {
-        r.skip(1)?;
-        skipped.add("tapping");
+        match r.byte()? {
+            1 => wide.tapped = true,
+            _ => skipped.add("slap and pop"),
+        }
     }
     if flags2 & 0x04 != 0 {
         read_bend(r)?;
@@ -362,17 +392,26 @@ fn read_beat_effects(r: &mut Reader, skipped: &mut Skipped) -> Result<()> {
         skipped.add("strum directions");
     }
     if flags2 & 0x02 != 0 {
-        r.skip(1)?;
-        skipped.add("pick strokes");
+        wide.stroke = match r.byte()? {
+            1 => Some(PickStroke::Up),
+            2 => Some(PickStroke::Down),
+            _ => None,
+        };
     }
-    Ok(())
+    Ok(wide)
 }
 
-/// Skips a bend or whammy bar curve.
-fn read_bend(r: &mut Reader) -> Result<()> {
+/// Reads a bend or whammy bar curve and reduces it to the nearest preset shape. Heights are
+/// stored in hundredths of a whole tone.
+fn read_bend(r: &mut Reader) -> Result<Option<Bend>> {
     r.skip(5)?; // type and height
-    let points = r.count("bend point count", 1_000)?;
-    r.skip(points * 9)
+    let mut heights = Vec::new();
+    for _ in 0..r.count("bend point count", 1_000)? {
+        r.skip(4)?; // position
+        heights.push(r.int()?);
+        r.skip(1)?; // vibrato
+    }
+    Ok(super::bend_from_heights(&heights))
 }
 
 fn read_mix_change(r: &mut Reader, newer: bool, skipped: &mut Skipped) -> Result<()> {
@@ -404,15 +443,14 @@ fn read_mix_change(r: &mut Reader, newer: bool, skipped: &mut Skipped) -> Result
     Ok(())
 }
 
+/// Reads one note, and the tremolo picking speed if it has one.
 fn read_note(
     r: &mut Reader,
     string: u8,
     track: &mut TrackInfo,
     skipped: &mut Skipped,
-) -> Result<Option<Note>> {
+) -> Result<(Option<Note>, Option<NoteValue>)> {
     let flags = r.byte()?;
-    skipped.add_if(flags & 0x42 != 0, "accents");
-    skipped.add_if(flags & 0x04 != 0, "ghost notes");
     let kind = if flags & 0x20 != 0 { r.byte()? } else { 1 };
     if flags & 0x10 != 0 {
         r.skip(1)?; // dynamic
@@ -428,12 +466,19 @@ fn read_note(
         r.skip(8)?;
     }
     r.skip(1)?;
-    if flags & 0x08 != 0 {
-        read_note_effects(r, skipped)?;
-    }
+    let (mut effects, tremolo) = match flags & 0x08 != 0 {
+        true => read_note_effects(r, skipped)?,
+        false => (NoteEffects::default(), None),
+    };
+    effects.ghost = flags & 0x04 != 0;
+    effects.dead = kind == 3;
+    effects.accent = match flags {
+        f if f & 0x02 != 0 => Some(Accent::Heavy),
+        f if f & 0x40 != 0 => Some(Accent::Normal),
+        _ => None,
+    };
 
     let tied = kind == 2;
-    skipped.add_if(kind == 3, "dead notes");
     let memory = &mut track.last_fret[usize::from(string)];
     if tied {
         fret = *memory;
@@ -441,44 +486,65 @@ fn read_note(
         *memory = fret;
     }
     // Percussion tracks store drum numbers as frets, which mean nothing as tablature.
-    Ok((!track.percussion).then_some(Note { string, fret, tied }))
+    let note = (!track.percussion).then_some(Note {
+        string,
+        fret,
+        tied,
+        effects,
+    });
+    Ok((note, tremolo))
 }
 
-fn read_note_effects(r: &mut Reader, skipped: &mut Skipped) -> Result<()> {
+fn read_note_effects(
+    r: &mut Reader,
+    skipped: &mut Skipped,
+) -> Result<(NoteEffects, Option<NoteValue>)> {
     let flags1 = r.byte()?;
     let flags2 = r.byte()?;
-    skipped.add_if(flags1 & 0x02 != 0, "hammer-ons and pull-offs");
-    skipped.add_if(flags1 & 0x08 != 0, "let ring");
-    skipped.add_if(flags2 & 0x01 != 0, "staccato");
-    skipped.add_if(flags2 & 0x02 != 0, "palm muting");
-    skipped.add_if(flags2 & 0x40 != 0, "vibrato");
+    let mut effects = NoteEffects {
+        hammer: flags1 & 0x02 != 0,
+        let_ring: flags1 & 0x08 != 0,
+        staccato: flags2 & 0x01 != 0,
+        palm_mute: flags2 & 0x02 != 0,
+        vibrato: (flags2 & 0x40 != 0).then_some(Vibrato::Slight),
+        ..NoteEffects::default()
+    };
+    let mut tremolo = None;
     if flags1 & 0x01 != 0 {
-        read_bend(r)?;
-        skipped.add("bends");
+        effects.bend = read_bend(r)?;
     }
     if flags1 & 0x10 != 0 {
         r.skip(5)?;
         skipped.add("grace notes");
     }
     if flags2 & 0x04 != 0 {
-        r.skip(1)?;
-        skipped.add("tremolo picking");
+        tremolo = match r.byte()? {
+            1 => Some(NoteValue::Eighth),
+            2 => Some(NoteValue::Sixteenth),
+            _ => Some(NoteValue::ThirtySecond),
+        };
     }
     if flags2 & 0x08 != 0 {
-        r.skip(1)?;
-        skipped.add("slides");
+        effects.slide = super::slide_from_flags(r.byte()?);
     }
     if flags2 & 0x10 != 0 {
-        match r.byte()? {
-            2 => r.skip(3)?,
-            3 => r.skip(1)?,
-            _ => {}
-        }
-        skipped.add("harmonics");
+        effects.harmonic = match r.byte()? {
+            2 => {
+                r.skip(3)?;
+                Some(Harmonic::Artificial)
+            }
+            3 => {
+                r.skip(1)?;
+                Some(Harmonic::Tapped)
+            }
+            4 => Some(Harmonic::Pinch),
+            5 => Some(Harmonic::Semi),
+            _ => Some(Harmonic::Natural),
+        };
     }
     if flags2 & 0x20 != 0 {
         r.skip(2)?;
         skipped.add("trills");
     }
-    Ok(())
+    Ok((effects, tremolo))
 }

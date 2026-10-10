@@ -7,7 +7,10 @@ mod gp7;
 
 use std::collections::BTreeSet;
 
-use gtr_model::{Bar, Beat, Duration, ModelError, Note, NoteValue, Score, Tuning, Tuplet, Voice};
+use gtr_model::{
+    Bar, Beat, Bend, BendKind, Duration, ModelError, Note, NoteValue, Score, Slide, Tuning, Tuplet,
+    Voice,
+};
 
 /// A score read from another program's file.
 #[derive(Debug)]
@@ -90,7 +93,7 @@ fn beat(duration: Duration, mut notes: Vec<Note>, string_count: usize) -> Beat {
     notes.retain(|n| usize::from(n.string) < string_count);
     notes.sort_by_key(|n| n.string);
     notes.dedup_by_key(|n| n.string);
-    Beat { duration, notes }
+    Beat::new(duration, notes)
 }
 
 /// Builds a bar from its voices, leaving out trailing voices that have no notes.
@@ -115,4 +118,40 @@ fn tuning(strings: Vec<u8>) -> Tuning {
     } else {
         Tuning::new(strings)
     }
+}
+
+/// Reduces a bend curve to the nearest preset shape. `heights` are the curve's points in
+/// hundredths of a whole tone, in time order.
+fn bend_from_heights(heights: &[i32]) -> Option<Bend> {
+    let highest = heights.iter().copied().max()?;
+    let quarter_tones = ((highest + 12) / 25).clamp(0, i32::from(Bend::MAX_QUARTER_TONES)) as u8;
+    if quarter_tones == 0 {
+        return None;
+    }
+    let prebend = heights[0] > 12;
+    let release = heights[heights.len() - 1] < highest - 12;
+    Some(Bend {
+        kind: match (prebend, release) {
+            (false, false) => BendKind::Bend,
+            (false, true) => BendKind::BendRelease,
+            (true, false) => BendKind::Prebend,
+            (true, true) => BendKind::PrebendRelease,
+        },
+        quarter_tones,
+    })
+}
+
+/// Guitar Pro's slide bit flags, shared by its binary and XML formats.
+fn slide_from_flags(flags: u8) -> Option<Slide> {
+    [
+        (0x01, Slide::Shift),
+        (0x02, Slide::Legato),
+        (0x04, Slide::OutDown),
+        (0x08, Slide::OutUp),
+        (0x10, Slide::InFromBelow),
+        (0x20, Slide::InFromAbove),
+    ]
+    .into_iter()
+    .find(|(bit, _)| flags & bit != 0)
+    .map(|(_, slide)| slide)
 }

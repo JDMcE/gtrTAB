@@ -21,16 +21,57 @@ export interface Duration {
   tuplet: Tuplet | null;
 }
 
+export type Slide =
+  | 'shift'
+  | 'legato'
+  | 'in_from_below'
+  | 'in_from_above'
+  | 'out_down'
+  | 'out_up';
+
+export type BendKind = 'bend' | 'bend_release' | 'prebend' | 'prebend_release';
+
+export interface Bend {
+  kind: BendKind;
+  /** Height in quarter tones: 4 is a full step. */
+  quarter_tones: number;
+}
+
+export type Harmonic = 'natural' | 'artificial' | 'pinch' | 'tapped' | 'semi';
+
+/** Techniques on a note. Fields that are off are left out of the JSON. */
+export interface NoteEffects {
+  hammer?: boolean;
+  slide?: Slide;
+  bend?: Bend;
+  vibrato?: 'slight' | 'wide';
+  harmonic?: Harmonic;
+  accent?: 'normal' | 'heavy';
+  palm_mute?: boolean;
+  let_ring?: boolean;
+  dead?: boolean;
+  ghost?: boolean;
+  staccato?: boolean;
+  tapped?: boolean;
+}
+
+export interface BeatEffects {
+  tremolo?: NoteValue;
+  stroke?: 'down' | 'up';
+}
+
 export interface Note {
   /** Index into the staff tuning; 0 is the highest string. */
   string: number;
   fret: number;
   tied: boolean;
+  effects?: NoteEffects;
 }
 
 export interface Beat {
   duration: Duration;
   notes: Note[];
+  effects?: BeatEffects;
 }
 
 export interface Voice {
@@ -110,6 +151,10 @@ export interface EditorState {
   /** First and last selected `[bar, beat]`, inclusive. */
   selection: [[number, number], [number, number]] | null;
   duration: Duration;
+  /** The note under the cursor. */
+  note: Note | null;
+  /** Effects of the beat under the cursor. */
+  beat_effects: BeatEffects | null;
   can_undo: boolean;
   can_redo: boolean;
   can_paste: boolean;
@@ -125,6 +170,7 @@ export type Item =
   | { t: 'rect'; x: number; y: number; w: number; h: number; c: Color }
   | { t: 'dot'; x: number; y: number; r: number }
   | { t: 'arc'; x1: number; x2: number; y: number; h: number }
+  | { t: 'curve'; x1: number; y1: number; cx: number; cy: number; x2: number; y2: number }
   | {
       t: 'text';
       x: number;

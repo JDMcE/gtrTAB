@@ -41,6 +41,17 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | / | Triplet |
 | R | Rest |
 | L | Tie |
+| H | Hammer-on or pull-off to the next note |
+| S | Shift slide to the next note |
+| B | Full bend |
+| V | Vibrato |
+| P | Palm mute |
+| I | Let ring |
+| X | Dead note |
+| G | Ghost note |
+| A | Accent |
+| N | Natural harmonic |
+| T | Tapping |
 | Delete | Remove the note, or the beat if it is a rest |
 | Ctrl+Delete | Remove the beat or the selected beats |
 | Insert | Insert a rest before the cursor |
@@ -49,6 +60,8 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | Ctrl+Z / Ctrl+Y | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
+
+Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord. The toolbar has the rest: other slides, bends and harmonics, wide vibrato, staccato, heavy accent, tremolo picking and pick strokes.
 
 Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp`, `.gp5`) open through Open or by dropping them on the window.
 

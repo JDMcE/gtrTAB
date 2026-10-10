@@ -23,6 +23,34 @@
   const UNTITLED = `untitled.${EXTENSION}`;
   const VALUE_LABELS = ['1', '2', '4', '8', '16', '32', '64'];
   const VALUE_NAMES = ['Whole', 'Half', 'Quarter', 'Eighth', '16th', '32nd', '64th'];
+  const SLIDES = [
+    ['slide_shift', 'Shift slide'],
+    ['slide_legato', 'Legato slide'],
+    ['slide_in_below', 'Slide in from below'],
+    ['slide_in_above', 'Slide in from above'],
+    ['slide_out_down', 'Slide out downwards'],
+    ['slide_out_up', 'Slide out upwards'],
+  ];
+  const HARMONICS = [
+    ['harmonic_natural', 'Natural (N.H.)'],
+    ['harmonic_artificial', 'Artificial (A.H.)'],
+    ['harmonic_pinch', 'Pinch (P.H.)'],
+    ['harmonic_tapped', 'Tapped (T.H.)'],
+    ['harmonic_semi', 'Semi (S.H.)'],
+  ];
+  const BEND_KINDS = [
+    ['bend', 'Bend'],
+    ['bend_release', 'Bend and release'],
+    ['prebend', 'Pre-bend'],
+    ['prebend_release', 'Pre-bend and release'],
+  ];
+  const BEND_HEIGHTS = [
+    [1, '¼'],
+    [2, '½'],
+    [4, 'full'],
+    [6, '1½'],
+    [8, '2'],
+  ] as const;
   /** Longest pause between two digits that still makes one fret number. */
   const DIGIT_WINDOW_MS = 900;
   const AUTOSAVE_DELAY_MS = 1500;
@@ -219,6 +247,27 @@
 
   const togglePlay = () => (playing ? stop() : play());
 
+  // --- Techniques ---
+
+  const technique = (name: string) => edit((d) => d.toggleTechnique(name));
+  const effects = $derived(editor?.note?.effects ?? {});
+  const slideValue = $derived(
+    effects.slide ? `slide_${effects.slide.replace('_from', '')}` : '',
+  );
+  const harmonicValue = $derived(effects.harmonic ? `harmonic_${effects.harmonic}` : '');
+  const bendValue = $derived(effects.bend ? `${effects.bend.kind}:${effects.bend.quarter_tones}` : '');
+
+  function setBend(value: string) {
+    const [kind, height] = value.split(':');
+    edit((d) => d.setBend(kind ?? '', Number(height ?? 0)));
+  }
+
+  /** Chooses one of a set of exclusive techniques from a dropdown; '' clears it. */
+  function chooseTechnique(current: string, chosen: string) {
+    if (chosen !== '') technique(chosen);
+    else if (current !== '') technique(current);
+  }
+
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
@@ -286,6 +335,17 @@
       case 'R': return () => edit((d) => d.rest());
       case 'l':
       case 'L': return () => edit((d) => d.toggleTie());
+      case 'h': return () => technique('hammer');
+      case 's': return () => technique('slide_shift');
+      case 'b': return () => setBend(effects.bend ? '' : 'bend:4');
+      case 'v': return () => technique('vibrato');
+      case 'p': return () => technique('palm_mute');
+      case 'i': return () => technique('let_ring');
+      case 'x': return () => technique('dead');
+      case 'g': return () => technique('ghost');
+      case 'a': return () => technique('accent');
+      case 'n': return () => technique('harmonic_natural');
+      case 't': return () => technique('tapped');
       case ' ': return togglePlay;
     }
     return undefined;
@@ -434,6 +494,91 @@
         </select>
       </div>
 
+      <div class="group techniques">
+        <button class:active={effects.hammer} onclick={() => technique('hammer')} title="Hammer-on or pull-off to the next note (H)">
+          H/P
+        </button>
+        <select
+          aria-label="Slide"
+          title="Slide (S for a shift slide)"
+          class:active={slideValue !== ''}
+          value={slideValue}
+          onchange={(e) => chooseTechnique(slideValue, e.currentTarget.value)}
+        >
+          <option value="">Slide</option>
+          {#each SLIDES as [value, label]}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+        <select
+          aria-label="Bend"
+          title="Bend (B for a full bend)"
+          class:active={bendValue !== ''}
+          value={bendValue}
+          onchange={(e) => setBend(e.currentTarget.value)}
+        >
+          <option value="">Bend</option>
+          {#each BEND_KINDS as [kind, kindLabel]}
+            <optgroup label={kindLabel}>
+              {#each BEND_HEIGHTS as [height, heightLabel]}
+                <option value="{kind}:{height}">{kindLabel} {heightLabel}</option>
+              {/each}
+            </optgroup>
+          {/each}
+        </select>
+        <button class:active={effects.vibrato === 'slight'} onclick={() => technique('vibrato')} title="Vibrato (V)">
+          Vib
+        </button>
+        <button class:active={effects.vibrato === 'wide'} onclick={() => technique('wide_vibrato')} title="Wide vibrato">
+          Wide vib
+        </button>
+        <button class:active={effects.palm_mute} onclick={() => technique('palm_mute')} title="Palm mute (P)">
+          P.M.
+        </button>
+        <button class:active={effects.let_ring} onclick={() => technique('let_ring')} title="Let ring (I)">
+          Let ring
+        </button>
+        <button class="tight" class:active={effects.dead} onclick={() => technique('dead')} title="Dead note (X)">
+          X
+        </button>
+        <button class="tight" class:active={effects.ghost} onclick={() => technique('ghost')} title="Ghost note (G)">
+          ( )
+        </button>
+        <button class:active={effects.staccato} onclick={() => technique('staccato')} title="Staccato">
+          Stacc
+        </button>
+        <button class="tight" class:active={effects.accent === 'normal'} onclick={() => technique('accent')} title="Accent (A)">
+          &gt;
+        </button>
+        <button class="tight" class:active={effects.accent === 'heavy'} onclick={() => technique('heavy_accent')} title="Heavy accent">
+          ∧
+        </button>
+        <select
+          aria-label="Harmonic"
+          title="Harmonic (N for a natural harmonic)"
+          class:active={harmonicValue !== ''}
+          value={harmonicValue}
+          onchange={(e) => chooseTechnique(harmonicValue, e.currentTarget.value)}
+        >
+          <option value="">Harmonic</option>
+          {#each HARMONICS as [value, label]}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+        <button class="tight" class:active={effects.tapped} onclick={() => technique('tapped')} title="Tapping (T)">
+          T
+        </button>
+        <button class:active={!!editor.beat_effects?.tremolo} onclick={() => technique('tremolo')} title="Tremolo picking">
+          Trem
+        </button>
+        <button class="tight" class:active={editor.beat_effects?.stroke === 'down'} onclick={() => technique('stroke_down')} title="Downstroke">
+          ↓
+        </button>
+        <button class="tight" class:active={editor.beat_effects?.stroke === 'up'} onclick={() => technique('stroke_up')} title="Upstroke">
+          ↑
+        </button>
+      </div>
+
       <div class="group end">
         <select aria-label="Zoom" title="Zoom" bind:value={zoom}>
           {#each [0.75, 1, 1.25, 1.5, 2] as option}
@@ -549,7 +694,8 @@
     padding: 4px 6px;
   }
 
-  button.active {
+  button.active,
+  select.active {
     border-color: var(--accent);
     color: var(--accent);
   }

@@ -1,5 +1,6 @@
 use gtr_model::{
-    Bar, Beat, Duration, MasterBar, Note, Score, ScoreInfo, Staff, TimeSignature, Tuning, Voice,
+    Bar, Beat, BeatEffects, Duration, MasterBar, Note, Score, ScoreInfo, Staff, TimeSignature,
+    Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -35,6 +36,10 @@ pub enum Command {
     SetDuration {
         at: BeatRef,
         duration: Duration,
+    },
+    SetBeatEffects {
+        at: BeatRef,
+        effects: BeatEffects,
     },
     /// Inserts a bar in every staff. `bars` holds one bar per staff, grouped by track.
     InsertBar {
@@ -117,6 +122,9 @@ impl Command {
                 if usize::from(note.string) >= staff(score, &at)?.tuning.strings.len() {
                     return Err(EditError::StringOutOfRange);
                 }
+                if note.effects.bend.is_some_and(|b| !b.is_valid()) {
+                    return Err(EditError::InvalidBeat);
+                }
                 let notes = &mut beat_mut(score, &at)?.notes;
                 Ok(
                     match notes.binary_search_by_key(&note.string, |n| n.string) {
@@ -173,6 +181,16 @@ impl Command {
                 Ok(Command::SetDuration {
                     at,
                     duration: std::mem::replace(&mut beat.duration, duration),
+                })
+            }
+            Command::SetBeatEffects { at, effects } => {
+                if !effects.is_valid() {
+                    return Err(EditError::InvalidBeat);
+                }
+                let beat = beat_mut(score, &at)?;
+                Ok(Command::SetBeatEffects {
+                    at,
+                    effects: std::mem::replace(&mut beat.effects, effects),
                 })
             }
             Command::InsertBar {

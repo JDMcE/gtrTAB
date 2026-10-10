@@ -1,10 +1,11 @@
 use gtr_model::{
-    Bar, Beat, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track,
-    Tuning, Tuplet,
+    Bar, Beat, BeatEffects, Bend, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff,
+    TimeSignature, Track, Tuning, Tuplet,
 };
 use serde::{Deserialize, Serialize};
 
-use crate::{BeatRef, Command, EditError, History};
+use crate::technique::Target;
+use crate::{BeatRef, Command, EditError, History, Technique};
 
 pub const MAX_FRET: u8 = 36;
 
@@ -48,6 +49,10 @@ pub struct EditorState {
     pub selection: Option<[Position; 2]>,
     /// Duration of the beat under the cursor, or of the next beat to be entered.
     pub duration: Duration,
+    /// The note under the cursor, if there is one.
+    pub note: Option<Note>,
+    /// Effects of the beat under the cursor, if there is one.
+    pub beat_effects: Option<BeatEffects>,
     pub can_undo: bool,
     pub can_redo: bool,
     pub can_paste: bool,
@@ -134,6 +139,10 @@ impl Editor {
             cursor: self.cursor,
             selection: self.selection().map(|(a, b)| [a, b]),
             duration: self.duration,
+            note: (self.current_beat())
+                .and_then(|b| b.note_on(self.cursor.string))
+                .copied(),
+            beat_effects: self.current_beat().map(|b| b.effects),
             can_undo: self.history.can_undo(),
             can_redo: self.history.can_redo(),
             can_paste: self.clipboard.is_some(),
@@ -334,6 +343,78 @@ impl Editor {
             Some(&note) => self.put_note(Note { tied: true, ..note }),
             None => Ok(()),
         }
+    }
+
+    // --- Techniques ---
+
+    /// The notes a technique or bend applies to: every note of the selected beats, or
+    /// without a selection the note under the cursor, or its whole chord if `chord`.
+    fn target_notes(&self, chord: bool) -> Vec<(BeatRef, Note)> {
+        let mut beats = self.selected_beats();
+        let everything = chord || !beats.is_empty();
+        if beats.is_empty() && self.current_beat().is_some() {
+            beats.push((self.cursor.bar, self.cursor.beat));
+        }
+        beats
+            .into_iter()
+            .flat_map(|(bar, beat)| {
+                let at = self.beat_ref(bar, beat);
+                (self.beats(bar)[beat].notes.iter())
+                    .filter(move |n| everything || n.string == self.cursor.string)
+                    .map(move |n| (at, *n))
+            })
+            .collect()
+    }
+
+    /// Switches a technique on, or off if everything it applies to already has it.
+    pub fn toggle_technique(&mut self, technique: Technique) -> Result<(), EditError> {
+        let commands: Vec<Command> = match technique.target() {
+            Target::Beat => {
+                let mut beats = self.selected_beats();
+                if beats.is_empty() && self.current_beat().is_some() {
+                    beats.push((self.cursor.bar, self.cursor.beat));
+                }
+                beats.retain(|&(bar, beat)| !self.beats(bar)[beat].is_rest());
+                let on = !(beats.iter())
+                    .all(|&(bar, beat)| technique.on_beat(&self.beats(bar)[beat].effects));
+                beats
+                    .into_iter()
+                    .map(|(bar, beat)| {
+                        let mut effects = self.beats(bar)[beat].effects;
+                        technique.set_on_beat(&mut effects, on);
+                        Command::SetBeatEffects {
+                            at: self.beat_ref(bar, beat),
+                            effects,
+                        }
+                    })
+                    .collect()
+            }
+            target => {
+                let notes = self.target_notes(matches!(target, Target::Chord));
+                let on = !notes.iter().all(|(_, n)| technique.on_note(&n.effects));
+                notes
+                    .into_iter()
+                    .map(|(at, mut note)| {
+                        technique.set_on_note(&mut note.effects, on);
+                        Command::PutNote { at, note }
+                    })
+                    .collect()
+            }
+        };
+        self.keep_selection(|e| e.run(Command::Batch(commands)))
+    }
+
+    /// Sets or clears the bend on the note under the cursor, or on the selected notes.
+    pub fn set_bend(&mut self, bend: Option<Bend>) -> Result<(), EditError> {
+        let commands = self
+            .target_notes(false)
+            .into_iter()
+            .map(|(at, mut note)| {
+                note.effects.bend = bend;
+                Command::PutNote { at, note }
+            })
+            .collect();
+        self.keep_selection(|e| e.run(Command::Batch(commands)))
     }
 
     // --- Durations ---
@@ -545,6 +626,7 @@ impl Editor {
         let string_count = self.string_count();
         let fit = |beat: &Beat| Beat {
             duration: beat.duration,
+            effects: beat.effects,
             notes: beat
                 .notes
                 .iter()

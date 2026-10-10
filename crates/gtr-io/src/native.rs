@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 1;
+pub const FORMAT_VERSION: u64 = 2;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -74,7 +74,8 @@ pub fn load(bytes: &[u8]) -> Result<Score, NativeError> {
 
 /// Upgrades score JSON written by an older format version to the current layout.
 fn migrate(_from: u64, _score: &mut Value) {
-    // No migrations yet: version 1 is the only format.
+    // Version 2 added note and beat effects as optional fields, so version 1 files are
+    // already valid and need no changes.
 }
 
 #[cfg(test)]

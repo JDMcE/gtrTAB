@@ -98,7 +98,15 @@ fn sample_files_import_cleanly() {
                 );
                 let bars = ta.staves[0].bars.iter().zip(&tb.staves[0].bars);
                 for (i, (bar_a, bar_b)) in bars.enumerate() {
-                    assert_eq!(music(bar_a), music(bar_b), "{a_name} vs {b_name}: bar {i}");
+                    let (beats_a, beats_b) = (music(bar_a), music(bar_b));
+                    assert_eq!(
+                        beats_a.len(),
+                        beats_b.len(),
+                        "{a_name} vs {b_name}: bar {i}"
+                    );
+                    for (j, (beat_a, beat_b)) in beats_a.iter().zip(beats_b).enumerate() {
+                        assert_eq!(beat_a, beat_b, "{a_name} vs {b_name}: bar {i} beat {j}");
+                    }
                 }
             }
         }

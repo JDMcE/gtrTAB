@@ -5,11 +5,16 @@
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
-use gtr_model::{MasterBar, Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Voice};
+use gtr_model::{
+    Accent, BeatEffects, Harmonic, MasterBar, Note, NoteEffects, NoteValue, PickStroke, Score,
+    ScoreInfo, Staff, TimeSignature, Track, Vibrato, Voice,
+};
 use roxmltree::{Document, Node};
 use zip::ZipArchive;
 
-use super::{ImportError, Skipped, bar, beat, duration, tuning};
+use super::{
+    ImportError, Skipped, bar, beat, bend_from_heights, duration, slide_from_flags, tuning,
+};
 
 const SCORE_ENTRY: &str = "Content/score.gpif";
 
@@ -194,7 +199,6 @@ fn read_beat(
     skipped: &mut Skipped,
 ) -> gtr_model::Beat {
     skipped.add_if(child(node, "GraceNotes").is_some(), "grace notes");
-    skipped.add_if(child(node, "Tremolo").is_some(), "tremolo picking");
     skipped.add_if(child(node, "Whammy").is_some(), "whammy bar");
     skipped.add_if(child(node, "Chord").is_some(), "chord names");
     skipped.add_if(child(node, "FreeText").is_some(), "text");
@@ -233,22 +237,6 @@ fn read_beat(
         .split_whitespace()
         .filter_map(|id| notes.get(id))
         .filter_map(|note| {
-            for (name, what) in [
-                ("Bended", "bends"),
-                ("Slide", "slides"),
-                ("HopoOrigin", "hammer-ons and pull-offs"),
-                ("HarmonicType", "harmonics"),
-                ("PalmMuted", "palm muting"),
-                ("Muted", "dead notes"),
-                ("Tapped", "tapping"),
-            ] {
-                skipped.add_if(property(*note, name).is_some(), what);
-            }
-            skipped.add_if(child(*note, "Vibrato").is_some(), "vibrato");
-            skipped.add_if(child(*note, "LetRing").is_some(), "let ring");
-            skipped.add_if(child(*note, "Accent").is_some(), "accents");
-            skipped.add_if(child(*note, "AntiAccent").is_some(), "ghost notes");
-
             let fret: u8 = text(property(*note, "Fret")?, "Fret").parse().ok()?;
             // Strings are numbered from the lowest; the model counts from the highest.
             let from_low: usize = text(property(*note, "String")?, "String").parse().ok()?;
@@ -257,8 +245,88 @@ fn read_beat(
                 string: string as u8,
                 fret,
                 tied: child(*note, "Tie").and_then(|t| t.attribute("destination")) == Some("true"),
+                effects: read_note_effects(*note),
             })
         })
+        .collect::<Vec<Note>>();
+    // Vibrato made with the tremolo bar is stored on the beat; the model keeps it per note.
+    let bar_vibrato = match property(node, "VibratoWTremBar").map(|p| text(p, "Strength")) {
+        Some("Slight") => Some(Vibrato::Slight),
+        Some("Wide") => Some(Vibrato::Wide),
+        _ => None,
+    };
+    let read_notes = read_notes
+        .into_iter()
+        .map(|mut note| {
+            note.effects.vibrato = note.effects.vibrato.or(bar_vibrato);
+            note
+        })
         .collect();
-    beat(read_duration, read_notes, string_count)
+    let mut read = beat(read_duration, read_notes, string_count);
+    if !read.is_rest() {
+        read.effects = BeatEffects {
+            tremolo: match text(node, "Tremolo") {
+                "1/2" => Some(NoteValue::Eighth),
+                "1/4" => Some(NoteValue::Sixteenth),
+                "1/8" => Some(NoteValue::ThirtySecond),
+                _ => None,
+            },
+            stroke: match property(node, "PickStroke").map(|p| text(p, "Direction")) {
+                Some("Up") => Some(PickStroke::Up),
+                Some("Down") => Some(PickStroke::Down),
+                _ => None,
+            },
+        };
+    }
+    read
+}
+
+fn read_note_effects(note: Node) -> NoteEffects {
+    let enabled = |name| property(note, name).is_some_and(|p| child(p, "Enable").is_some());
+    let float = |name| {
+        property(note, name)
+            .and_then(|p| text(p, "Float").parse::<f64>().ok())
+            .unwrap_or(0.0)
+            .round() as i32
+    };
+    let accent_bits: u8 = text(note, "Accent").parse().unwrap_or(0);
+    NoteEffects {
+        hammer: enabled("HopoOrigin"),
+        slide: property(note, "Slide")
+            .and_then(|p| text(p, "Flags").parse().ok())
+            .and_then(slide_from_flags),
+        bend: enabled("Bended")
+            .then(|| {
+                bend_from_heights(&[
+                    float("BendOriginValue"),
+                    float("BendMiddleValue"),
+                    float("BendDestinationValue"),
+                ])
+            })
+            .flatten(),
+        vibrato: match text(note, "Vibrato") {
+            "Slight" => Some(Vibrato::Slight),
+            "Wide" => Some(Vibrato::Wide),
+            _ => None,
+        },
+        harmonic: property(note, "HarmonicType").and_then(|p| match text(p, "HType") {
+            "Natural" => Some(Harmonic::Natural),
+            "Artificial" => Some(Harmonic::Artificial),
+            "Pinch" => Some(Harmonic::Pinch),
+            "Tap" => Some(Harmonic::Tapped),
+            "Semi" => Some(Harmonic::Semi),
+            _ => None,
+        }),
+        accent: match accent_bits {
+            bits if bits & 0x04 != 0 => Some(Accent::Heavy),
+            bits if bits & 0x08 != 0 => Some(Accent::Normal),
+            _ => None,
+        },
+        palm_mute: enabled("PalmMuted"),
+        let_ring: child(note, "LetRing").is_some(),
+        dead: enabled("Muted"),
+        ghost: child(note, "AntiAccent").is_some(),
+        staccato: accent_bits & 0x01 != 0,
+        tapped: enabled("Tapped"),
+    }
 }
