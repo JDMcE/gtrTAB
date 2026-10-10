@@ -1,0 +1,10 @@
+[package]
+name = "gtr-model"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+num-rational.workspace = true
+serde.workspace = true
+thiserror.workspace = true

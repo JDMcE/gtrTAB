@@ -1,0 +1,120 @@
+use std::num::NonZeroU8;
+
+use serde::{Deserialize, Serialize};
+
+/// Exact musical time, measured in whole notes.
+pub type Rational = num_rational::Ratio<i64>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NoteValue {
+    Whole,
+    Half,
+    Quarter,
+    Eighth,
+    Sixteenth,
+    ThirtySecond,
+    SixtyFourth,
+}
+
+impl NoteValue {
+    pub const ALL: [NoteValue; 7] = [
+        NoteValue::Whole,
+        NoteValue::Half,
+        NoteValue::Quarter,
+        NoteValue::Eighth,
+        NoteValue::Sixteenth,
+        NoteValue::ThirtySecond,
+        NoteValue::SixtyFourth,
+    ];
+
+    pub fn length(self) -> Rational {
+        Rational::new(1, 1 << (self as u32))
+    }
+
+    /// The next shorter value, e.g. quarter → eighth.
+    pub fn shorter(self) -> Option<NoteValue> {
+        Self::ALL.get(self as usize + 1).copied()
+    }
+
+    /// The next longer value, e.g. quarter → half.
+    pub fn longer(self) -> Option<NoteValue> {
+        (self as usize).checked_sub(1).map(|i| Self::ALL[i])
+    }
+
+    /// Number of flags or beams: 0 up to a quarter, 1 for an eighth, and so on.
+    pub fn flags(self) -> u32 {
+        (self as u32).saturating_sub(NoteValue::Quarter as u32)
+    }
+}
+
+/// `actual` notes played in the time of `normal`, e.g. 3:2 for a triplet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Tuplet {
+    pub actual: NonZeroU8,
+    pub normal: NonZeroU8,
+}
+
+impl Tuplet {
+    pub const TRIPLET: Tuplet = Tuplet {
+        actual: NonZeroU8::new(3).unwrap(),
+        normal: NonZeroU8::new(2).unwrap(),
+    };
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Duration {
+    pub value: NoteValue,
+    #[serde(default)]
+    pub dots: u8,
+    #[serde(default)]
+    pub tuplet: Option<Tuplet>,
+}
+
+impl Duration {
+    pub const MAX_DOTS: u8 = 2;
+
+    pub fn new(value: NoteValue) -> Self {
+        Duration {
+            value,
+            dots: 0,
+            tuplet: None,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.dots <= Self::MAX_DOTS
+    }
+
+    /// Length in whole notes. Dots beyond [`Self::MAX_DOTS`] are ignored.
+    pub fn length(&self) -> Rational {
+        let dots = u32::from(self.dots.min(Self::MAX_DOTS));
+        // n dots multiply the length by 2 - 1/2^n.
+        let dotted = self.value.length() * Rational::new((2 << dots) - 1, 1 << dots);
+        match self.tuplet {
+            Some(t) => dotted * Rational::new(t.normal.get().into(), t.actual.get().into()),
+            None => dotted,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lengths() {
+        assert_eq!(NoteValue::Quarter.length(), Rational::new(1, 4));
+        assert_eq!(NoteValue::SixtyFourth.length(), Rational::new(1, 64));
+
+        let mut d = Duration::new(NoteValue::Quarter);
+        d.dots = 1;
+        assert_eq!(d.length(), Rational::new(3, 8));
+        d.dots = 2;
+        assert_eq!(d.length(), Rational::new(7, 16));
+
+        let mut triplet = Duration::new(NoteValue::Eighth);
+        triplet.tuplet = Some(Tuplet::TRIPLET);
+        assert_eq!(triplet.length() * 3, Rational::new(1, 4));
+    }
+}

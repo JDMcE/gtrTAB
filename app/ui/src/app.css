@@ -1,0 +1,41 @@
+:root {
+  color-scheme: light dark;
+  --bg: light-dark(#f6f5f2, #1b1c1f);
+  --panel: light-dark(#ffffff, #26272b);
+  --border: light-dark(#d9d6cf, #3a3c42);
+  --text: light-dark(#1f2023, #e8e6e1);
+  --muted: light-dark(#6b6d73, #9a9ca3);
+  --accent: light-dark(#b4532a, #e58a5c);
+  font-family: system-ui, sans-serif;
+  font-size: 14px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+@font-face {
+  font-family: 'Bravura';
+  src: url('/fonts/Bravura.woff2') format('woff2');
+  font-display: block;
+}
+
+:root {
+  --paper: light-dark(#fffefb, #202124);
+  --ink: light-dark(#1b1c1f, #e8e6e1);
+  --staff: light-dark(#9a9ba0, #6f7178);
+  --error: light-dark(#c8372d, #f0695f);
+  --select: light-dark(rgb(180 83 42 / 16%), rgb(229 138 92 / 22%));
+}

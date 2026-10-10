@@ -1,0 +1,13 @@
+[package]
+name = "gtr-edit"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+gtr-model.workspace = true
+serde.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+proptest.workspace = true

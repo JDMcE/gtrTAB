@@ -1,0 +1,189 @@
+# gtrTab — Plan
+
+A guitar tablature editor aiming for feature parity with Guitar Pro 8, shipped as a standalone desktop app and a web version from one codebase.
+
+## Decisions
+
+| # | Decision | Outcome |
+|---|---|---|
+| 1 | Stack | Rust core + Svelte/TypeScript UI + Tauri 2 |
+| 2 | Licence | Will be open source eventually. Only bundle assets with open licences (e.g. Bravura under OFL, freely licensed SoundFonts). Specific licence still to be chosen |
+| 3 | Guitar Pro import | Simple read-only importer in phase 2, full import and export in phase 5 |
+
+## Stack
+
+| Layer | Choice | Why |
+|---|---|---|
+| Core (score model, editing, layout, file I/O, synth) | Rust workspace | One codebase runs natively and as WASM; fast enough for layout and real-time audio |
+| UI (toolbars, panels, mixer, dialogs) | TypeScript + Svelte | Same UI on desktop and web |
+| Desktop shell | Tauri 2 | Small installers, native file dialogs, Rust backend in-process |
+| Score drawing | Rust layout engine emits a display list, drawn to Canvas | The same display list feeds PDF/SVG/PNG export |
+| Music glyphs | SMuFL font (Bravura) | Open standard, full notation coverage |
+| Audio | Rust SoundFont synth + effects in an AudioWorklet | One audio path for web and desktop; native backend later if latency demands it |
+
+## Repository layout
+
+```
+crates/
+  gtr-model/     score data model, rational durations, tunings
+  gtr-edit/      commands, undo/redo, selection and cursor logic
+  gtr-layout/    engraving engine -> display list
+  gtr-render/    display list -> SVG / PDF / PNG
+  gtr-audio/     score -> event stream, SoundFont synth, effects
+  gtr-io/        native format, Guitar Pro, MusicXML, MIDI, ASCII
+  gtr-wasm/      wasm-bindgen API over the crates above
+app/
+  ui/            Svelte app (shared by web and desktop)
+  desktop/       Tauri shell
+tests/
+  corpus/        sample scores for import and rendering tests
+  golden/        reference images for rendering regression tests
+```
+
+## Architecture
+
+- **Score model:** Score → Tracks → Staves → Bars → Voices → Beats → Notes. Bar-level properties shared across tracks (time signature, key, repeats, tempo, sections) live in a separate master-bar list. Durations are exact rationals, never floats.
+- **Editing:** every edit is a command object with apply and revert. This gives undo/redo, makes the editor testable without a UI, and leaves room for collaboration later.
+- **Layout:** the engraving engine takes the model plus a stylesheet and produces a display list of positioned glyphs, lines and paths. It handles horizontal spacing, beaming, stem direction, line and page breaking, and placement of effects above and below the staff. This is the hardest part of the project.
+- **Rendering:** the UI draws the display list to Canvas and only redraws bars that changed. Export backends consume the same display list.
+- **Playback:** the score compiles to a timed event stream. Techniques become synth events: bends and whammy as pitch curves, slides as pitch ramps, vibrato as modulation, palm mute and dead notes as sample or envelope changes, let-ring as extended note-offs.
+- **Audio threading:** the synth runs in an AudioWorklet as WASM. The UI thread sends events and reads the playback position; it never touches audio buffers.
+- **Native file format:** zipped JSON with a schema version and migrations from the first release.
+
+## Phases
+
+Each phase ends with something usable. Phases 1–3 make a useful riff-writing tool; later phases are the long tail towards parity.
+
+### Phase 1 — Foundations
+
+- [x] Cargo workspace and crate skeletons
+- [x] Score model with rational durations and tunings
+- [x] Command system with undo/redo
+- [x] Native file format (`.gtrtab`): save, load, version field
+- [x] WASM build and TypeScript bindings (score and command types in `app/ui/src/lib/model.ts` are hand-written; generate them from Rust later)
+- [x] Svelte app running in the browser and inside Tauri
+- [ ] CI: build, test, lint for Rust and TypeScript on Windows, macOS, Linux (workflow written in `.github/workflows/ci.yml`, not yet run on GitHub)
+- [x] Check open and save through the native file dialogs in the desktop app (automated once through Windows UI Automation; not part of the test suite)
+
+**Done when:** a hard-coded score round-trips through save and load on web and desktop.
+
+### Phase 2 — Tab editor MVP
+
+- [x] Layout: single tab staff, bar lines, time signature, rhythm stems and beams, line breaking
+- [x] Canvas renderer with scrolling and zoom
+- [x] Cursor movement across strings, beats and bars
+- [x] Keyboard note entry: fret numbers, durations, dots, rests, ties
+- [x] Insert, delete, copy, cut and paste of beats and bars (cut empties bars rather than removing them, so other tracks keep theirs)
+- [x] Time signature, tempo and tuning dialogs, including capo and 6/7/8-string guitars and 4/5-string bass
+- [x] Bar validation: highlight incomplete and overfull bars
+- [x] Playback with a moving cursor, from the cursor's bar or over the selected bars
+- [ ] SoundFont synth. Playback currently uses a built-in plucked-string model with no sample files, and renders the passage to a buffer up front instead of streaming from an AudioWorklet. Revisit when other instruments arrive in phase 4
+- [x] Metronome and count-in
+- [x] File open, save, recent files (desktop only), autosave with recovery on start
+- [x] Simple read-only Guitar Pro import (`.gp` and `.gp5`): notes, rests, ties, rhythms, tunings, starting tempo and time signatures for all tracks, with one track shown at a time. Anything else is skipped and listed in the status bar after import
+
+Still to check by hand: how playback sounds, autosave recovery, recent files, and drag-and-drop and the unsaved-changes prompt in the desktop app.
+
+**Done when:** a riff can be written, played back, saved and reopened without touching the mouse, and an existing Guitar Pro file opens with its notes and rhythms intact.
+
+### Phase 3 — Guitar techniques
+
+Each item needs notation, input and playback.
+
+- [ ] Hammer-on, pull-off, legato slides, shift slides, slide in and out
+- [ ] Bends with a bend editor (bend, release, pre-bend, bend-release, custom curves)
+- [ ] Vibrato (slight, wide) and whammy bar with a curve editor
+- [ ] Palm mute, let ring, dead notes, ghost notes, staccato
+- [ ] Accents, heavy accents, dynamics, crescendo and decrescendo
+- [ ] Natural, artificial, pinch, tapped and semi harmonics
+- [ ] Tapping, slapping, popping, pick strokes, strum directions, arpeggios, rasgueado
+- [ ] Tremolo picking, trills, grace notes
+- [ ] Tuplets, including nested tuplets
+- [ ] Fingering for both hands
+
+**Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
+
+### Phase 4 — Full scores
+
+- [ ] Standard notation staff linked to tab: clefs, key signatures, accidentals, stems, beams, ledger lines
+- [ ] Tab-only, notation-only, combined and slash notation views
+- [ ] Multiple tracks with a track panel; single-track and multitrack views
+- [ ] Up to four voices per staff
+- [ ] Drum tracks: percussion notation, drum tab and a drum kit map
+- [ ] Bass, keyboard (grand staff), ukulele, banjo and other fretted instruments
+- [ ] Repeats, alternate endings, directions (coda, segno, D.S., D.C., fine)
+- [ ] Tempo, volume and pan automation; fermatas; swing and triplet feel
+- [ ] Sections, rehearsal marks, free text, timers
+- [ ] Lyrics with multiple lines
+- [ ] Chord diagrams and names with a chord builder
+- [ ] Mixer: volume, pan, mute, solo, instrument selection per track
+- [ ] Score information and page headers
+
+**Done when:** a full band arrangement can be written and played back.
+
+### Phase 5 — Import and export
+
+- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 4
+- [ ] Guitar Pro export: `.gp`
+- [ ] MusicXML import and export
+- [ ] MIDI import and export
+- [ ] ASCII tab import and export
+- [ ] PDF, SVG and PNG export; printing
+- [ ] Audio export: WAV, MP3, FLAC, OGG
+- [ ] Import test corpus with rendering comparisons against reference output
+
+**Done when:** the import corpus opens without errors and renders recognisably.
+
+### Phase 6 — Practice tools
+
+- [ ] Loop a selection, with optional tempo increase per pass (speed trainer)
+- [ ] Relative playback speed
+- [ ] Visual metronome
+- [ ] Tuner using microphone or line-in
+- [ ] Fretboard, keyboard and drum kit views that follow playback and accept input
+- [ ] Chord library and scale library with fretboard diagrams
+- [ ] Scale finder from a selection
+
+### Phase 7 — Sound
+
+- [ ] Per-track effects chain: amp simulation, cabinet, overdrive, distortion, compressor, EQ, chorus, delay, reverb, wah
+- [ ] Pedalboard view and presets
+- [ ] Per-track sound banks with switching mid-score via automation
+- [ ] Master track effects
+- [ ] Audio track: import an audio file and sync the score to it with tempo mapping
+- [ ] Line-in: play a real guitar through the track's effects
+- [ ] Native audio backend on desktop if AudioWorklet latency is not good enough
+
+### Phase 8 — Polish and release
+
+- [ ] Stylesheets: fonts, spacing, symbol sizes, notation conventions
+- [ ] Design mode: manual bar widths, line breaks, system layout
+- [ ] Page and screen layouts: page, parchment, horizontal and vertical scroll
+- [ ] Command palette
+- [ ] Customisable keyboard shortcuts
+- [ ] Batch file conversion
+- [ ] Preferences, themes, localisation scaffolding
+- [ ] Signed installers and auto-update for Windows, macOS, Linux
+- [ ] Offline-capable web app with local file access
+
+## Testing
+
+- **Model and editing:** unit tests plus property tests that apply random command sequences and check undo returns the original score.
+- **Layout and rendering:** golden-image tests per notation feature; a diff means review, not automatic failure.
+- **File formats:** round-trip tests for the native format; a corpus of real files for each import format. No Guitar Pro files are in the repository yet: `crates/gtr-io/tests/gp_samples.rs` runs against a directory named by `GTR_GP_SAMPLES`. Add files we are free to redistribute to `tests/corpus/`.
+- **Audio:** snapshot tests on the event stream rather than on audio samples.
+- **UI:** end-to-end tests for the core entry workflow.
+
+## Risks
+
+- **Scope:** Guitar Pro 8 is years of work by a commercial team. The phase order front-loads the parts needed for writing riffs and songs.
+- **Engraving quality:** spacing and collision avoidance are open-ended. Budget for ongoing refinement rather than a one-off implementation.
+- **Sound quality:** Guitar Pro's sound comes from proprietary sample banks. Feature parity is achievable; tonal parity depends on the freely licensed SoundFonts available.
+- **Web audio latency:** fine for playback, possibly not for line-in monitoring. Phase 7 has a native fallback for desktop.
+- **File format coverage:** Guitar Pro formats are undocumented and have many edge cases. Coverage will improve with the corpus over time.
+
+## Reference
+
+- alphaTab: open-source library that renders and plays Guitar Pro files. Viewer, not editor. Useful for file format details and rendering comparison.
+- SMuFL specification and the Bravura font.
+- MusicXML 4.0 specification.

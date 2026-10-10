@@ -1,0 +1,27 @@
+{
+  "name": "gtrtab-ui",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "wasm": "wasm-pack build ../../crates/gtr-wasm --target web --out-dir ../../app/ui/src/wasm",
+    "dev": "npm run wasm -- --dev && vite",
+    "build": "npm run wasm && vite build",
+    "preview": "vite preview",
+    "check": "svelte-check --tsconfig ./tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.1",
+    "@tsconfig/svelte": "^5.0.8",
+    "svelte": "^5.57.2",
+    "svelte-check": "^4.7.6",
+    "typescript": "^6.0.3",
+    "vite": "^8.3.4",
+    "wasm-pack": "^0.15.0"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.12.2",
+    "@tauri-apps/plugin-dialog": "^2.8.1",
+    "@tauri-apps/plugin-fs": "^2.6.0"
+  }
+}

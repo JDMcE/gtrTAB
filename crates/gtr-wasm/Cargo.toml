@@ -1,0 +1,18 @@
+[package]
+name = "gtr-wasm"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+gtr-edit.workspace = true
+gtr-io.workspace = true
+gtr-model.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
+gtr-audio.workspace = true
+gtr-layout.workspace = true
+serde.workspace = true

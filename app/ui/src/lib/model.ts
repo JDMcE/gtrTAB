@@ -1,0 +1,184 @@
+// Mirrors the serde JSON of the `gtr-model` and `gtr-edit` crates. Keep in sync by hand
+// until the types are generated from Rust.
+
+export type NoteValue =
+  | 'whole'
+  | 'half'
+  | 'quarter'
+  | 'eighth'
+  | 'sixteenth'
+  | 'thirty_second'
+  | 'sixty_fourth';
+
+export interface Tuplet {
+  actual: number;
+  normal: number;
+}
+
+export interface Duration {
+  value: NoteValue;
+  dots: number;
+  tuplet: Tuplet | null;
+}
+
+export interface Note {
+  /** Index into the staff tuning; 0 is the highest string. */
+  string: number;
+  fret: number;
+  tied: boolean;
+}
+
+export interface Beat {
+  duration: Duration;
+  notes: Note[];
+}
+
+export interface Voice {
+  beats: Beat[];
+}
+
+export interface Bar {
+  voices: Voice[];
+}
+
+export interface Tuning {
+  /** Open-string MIDI pitches from the highest string to the lowest. */
+  strings: number[];
+}
+
+export interface Staff {
+  tuning: Tuning;
+  capo: number;
+  bars: Bar[];
+}
+
+export interface Track {
+  name: string;
+  staves: Staff[];
+}
+
+export interface TimeSignature {
+  numerator: number;
+  denominator: number;
+}
+
+export interface MasterBar {
+  time_signature: TimeSignature;
+}
+
+export interface ScoreInfo {
+  title: string;
+  artist: string;
+  album: string;
+}
+
+export interface Score {
+  info: ScoreInfo;
+  tempo: number;
+  master_bars: MasterBar[];
+  tracks: Track[];
+}
+
+export interface BeatRef {
+  track: number;
+  staff: number;
+  bar: number;
+  voice: number;
+  beat: number;
+}
+
+export type Command =
+  | { type: 'put_note'; at: BeatRef; note: Note }
+  | { type: 'remove_note'; at: BeatRef; string: number }
+  | { type: 'insert_beat'; at: BeatRef; beat: Beat }
+  | { type: 'remove_beat'; at: BeatRef }
+  | { type: 'set_duration'; at: BeatRef; duration: Duration }
+  | { type: 'insert_bar'; index: number; master_bar: MasterBar; bars: Bar[][] }
+  | { type: 'remove_bar'; index: number }
+  | { type: 'set_time_signature'; bar: number; time_signature: TimeSignature }
+  | { type: 'set_tempo'; tempo: number };
+
+export interface Cursor {
+  track: number;
+  bar: number;
+  beat: number;
+  string: number;
+}
+
+export interface EditorState {
+  cursor: Cursor;
+  /** First and last selected `[bar, beat]`, inclusive. */
+  selection: [[number, number], [number, number]] | null;
+  duration: Duration;
+  can_undo: boolean;
+  can_redo: boolean;
+  can_paste: boolean;
+  dirty: boolean;
+  /** Changes whenever the score does. */
+  revision: number;
+}
+
+export type Color = 'ink' | 'muted' | 'error';
+
+export type Item =
+  | { t: 'line'; x1: number; y1: number; x2: number; y2: number; w: number; c: Color }
+  | { t: 'rect'; x: number; y: number; w: number; h: number; c: Color }
+  | { t: 'dot'; x: number; y: number; r: number }
+  | { t: 'arc'; x1: number; x2: number; y: number; h: number }
+  | {
+      t: 'text';
+      x: number;
+      y: number;
+      s: string;
+      size: number;
+      font: 'text' | 'fret' | 'music';
+      align: 'left' | 'center';
+      knockout: boolean;
+      c: Color;
+    };
+
+export interface SystemBox {
+  top: number;
+  y: number;
+  bottom: number;
+}
+
+export interface BarBox {
+  system: number;
+  x: number;
+  w: number;
+  beats: number[];
+  slot: number | null;
+  status: 'empty' | 'incomplete' | 'complete' | 'overfull';
+}
+
+export interface Layout {
+  width: number;
+  height: number;
+  string_spacing: number;
+  string_count: number;
+  items: Item[];
+  systems: SystemBox[];
+  bars: BarBox[];
+}
+
+export interface BeatTime {
+  bar: number;
+  beat: number;
+  time: number;
+}
+
+export interface Timeline {
+  beats: BeatTime[];
+  duration: number;
+}
+
+export const NOTE_VALUES: NoteValue[] = [
+  'whole',
+  'half',
+  'quarter',
+  'eighth',
+  'sixteenth',
+  'thirty_second',
+  'sixty_fourth',
+];
