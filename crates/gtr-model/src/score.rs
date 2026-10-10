@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{Duration, Rational, Tuning};
+use crate::{BeatEffects, Duration, NoteEffects, Rational, Tuning};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Score {
@@ -95,14 +95,21 @@ pub struct Beat {
     /// Sorted by string, at most one note per string.
     #[serde(default)]
     pub notes: Vec<Note>,
+    #[serde(default, skip_serializing_if = "BeatEffects::is_none")]
+    pub effects: BeatEffects,
 }
 
 impl Beat {
-    pub fn rest(duration: Duration) -> Self {
+    pub fn new(duration: Duration, notes: Vec<Note>) -> Self {
         Beat {
             duration,
-            notes: Vec::new(),
+            notes,
+            effects: BeatEffects::default(),
         }
+    }
+
+    pub fn rest(duration: Duration) -> Self {
+        Beat::new(duration, Vec::new())
     }
 
     pub fn is_rest(&self) -> bool {
@@ -117,6 +124,8 @@ impl Beat {
     /// Checks the beat against a staff with `string_count` strings.
     pub fn is_valid_for(&self, string_count: usize) -> bool {
         self.duration.is_valid()
+            && self.effects.is_valid()
+            && self.notes.iter().all(|n| n.effects.is_valid())
             && self
                 .notes
                 .iter()
@@ -125,13 +134,15 @@ impl Beat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Note {
     /// Index into the staff tuning; 0 is the highest string.
     pub string: u8,
     pub fret: u8,
     #[serde(default)]
     pub tied: bool,
+    #[serde(default, skip_serializing_if = "NoteEffects::is_none")]
+    pub effects: NoteEffects,
 }
 
 impl Note {
@@ -140,6 +151,7 @@ impl Note {
             string,
             fret,
             tied: false,
+            effects: NoteEffects::default(),
         }
     }
 }

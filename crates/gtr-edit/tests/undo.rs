@@ -22,14 +22,13 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
         beat: idx[2] % (beats + 1),
     };
     let duration = Duration {
-        value: NoteValue::ALL[usize::from(a) % NoteValue::ALL.len()],
         dots: b % 4,
         tuplet: (a % 2 == 1).then_some(Tuplet::TRIPLET),
+        ..Duration::new(NoteValue::ALL[usize::from(a) % NoteValue::ALL.len()])
     };
     let note = Note {
-        string: a % 7,
-        fret: b % 25,
         tied: b % 2 == 0,
+        ..Note::new(a % 7, b % 25)
     };
     let time_signature = TimeSignature {
         numerator: a % 13,
@@ -64,10 +63,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
         },
         2 => Command::InsertBeat {
             at,
-            beat: Beat {
-                duration,
-                notes: vec![note],
-            },
+            beat: Beat::new(duration, vec![note]),
         },
         3 => Command::InsertBeat {
             at,

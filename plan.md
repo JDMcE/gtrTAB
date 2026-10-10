@@ -90,16 +90,25 @@ Still to check by hand: how playback sounds, autosave recovery, recent files, an
 
 Each item needs notation, input and playback.
 
-- [ ] Hammer-on, pull-off, legato slides, shift slides, slide in and out
-- [ ] Bends with a bend editor (bend, release, pre-bend, bend-release, custom curves)
-- [ ] Vibrato (slight, wide) and whammy bar with a curve editor
-- [ ] Palm mute, let ring, dead notes, ghost notes, staccato
-- [ ] Accents, heavy accents, dynamics, crescendo and decrescendo
-- [ ] Natural, artificial, pinch, tapped and semi harmonics
-- [ ] Tapping, slapping, popping, pick strokes, strum directions, arpeggios, rasgueado
-- [ ] Tremolo picking, trills, grace notes
-- [ ] Tuplets, including nested tuplets
-- [ ] Fingering for both hands
+- [x] Hammer-on, pull-off, legato slides, shift slides, slide in and out
+- [x] Bends with a bend editor: presets (bend, release, pre-bend, pre-bend and release) and custom curves
+- [x] Vibrato (slight, wide) and whammy bar with a curve editor
+- [x] Palm mute, let ring, dead notes, ghost notes, staccato
+- [x] Accents, heavy accents, dynamics, crescendo and decrescendo
+- [x] Natural, artificial, pinch, tapped and semi harmonics
+- [x] Tapping, slapping, popping, pick strokes, strum directions, arpeggios, rasgueado
+- [x] Tremolo picking, trills, grace notes
+- [x] Tuplets, including nested tuplets
+- [x] Fingering for both hands
+- [x] Guitar Pro import brings in all of the above
+
+Known simplifications, to revisit:
+
+- A custom bend is drawn as the nearest common shape, labelled with its highest point; playback follows the real curve.
+- Only natural harmonics play at their true pitch. The other kinds sound an octave above the fretted note.
+- Tapping, pick strokes and fingering are notation only.
+- A grace note is a single note on the same string as the note it decorates.
+- Rasgueado plays as a slow strum.
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 

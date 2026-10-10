@@ -1,6 +1,6 @@
 use std::f32::consts::TAU;
 
-use crate::Timeline;
+use crate::{NoteEvent, Timeline, Tone};
 
 const NOTE_GAIN: f32 = 0.22;
 const CLICK_GAIN: f32 = 0.35;
@@ -8,6 +8,11 @@ const CLICK_GAIN: f32 = 0.35;
 const RELEASE: f32 = 0.06;
 /// Seconds of silence appended so the last notes can die away.
 const TAIL: f64 = 0.3;
+/// Samples between updates of a bending note's pitch.
+const CONTROL_PERIOD: usize = 32;
+const VIBRATO_HZ: f32 = 5.5;
+/// Seconds into a note before vibrato starts.
+const VIBRATO_DELAY: f32 = 0.08;
 
 /// Renders a timeline to mono samples in `-1.0..=1.0`.
 pub fn render(timeline: &Timeline, sample_rate: u32) -> Vec<f32> {
@@ -20,7 +25,7 @@ pub fn render(timeline: &Timeline, sample_rate: u32) -> Vec<f32> {
         let length = ((note.duration as f32 + RELEASE) * rate) as usize;
         let end = (start + length).min(total);
         if start < end {
-            pluck(&mut out[start..end], note.pitch, rate, index as u32);
+            pluck(&mut out[start..end], note, rate, index as u32);
         }
     }
     for click in &timeline.clicks {
@@ -42,83 +47,133 @@ pub fn render(timeline: &Timeline, sample_rate: u32) -> Vec<f32> {
     out
 }
 
+/// Pitch offset in semitones at `t` seconds into a note, from its bend or slide curve.
+fn curve_at(curve: &[(f32, f32)], t: f32) -> f32 {
+    let Some(&(first_time, first_value)) = curve.first() else {
+        return 0.0;
+    };
+    if t <= first_time {
+        return first_value;
+    }
+    for pair in curve.windows(2) {
+        let ((t0, v0), (t1, v1)) = (pair[0], pair[1]);
+        if t < t1 {
+            return v0 + (v1 - v0) * (t - t0) / (t1 - t0).max(1e-6);
+        }
+    }
+    curve[curve.len() - 1].1
+}
+
 /// Adds one plucked note to `out` using the Karplus-Strong string model: a burst of noise
 /// circulating in a delay line one period long, losing its high frequencies on each pass.
-fn pluck(out: &mut [f32], pitch: u8, rate: f32, seed: u32) {
-    let frequency = 440.0 * 2f32.powf((f32::from(pitch) - 69.0) / 12.0);
-    let period = rate / frequency;
-    // The averaging filter delays by half a sample; an all-pass filter supplies the
-    // remaining fraction so that high notes stay in tune.
-    let whole = (period - 0.6).floor().max(2.0);
-    let fraction = period - 0.5 - whole;
-    let allpass = (1.0 - fraction) / (1.0 + fraction);
+/// Changing the length of the delay while the note sounds bends its pitch.
+fn pluck(out: &mut [f32], note: &NoteEvent, rate: f32, seed: u32) {
+    let frequency = 440.0 * 2f32.powf((f32::from(note.pitch) - 69.0) / 12.0);
+    let base_period = rate / frequency;
+    let steady = note.pitch_curve.is_empty() && note.vibrato == 0.0;
 
+    // Room for the longest period the note can reach when bent or slid downwards.
+    let lowest = (note.pitch_curve.iter())
+        .map(|&(_, semitones)| semitones)
+        .fold(0.0f32, f32::min)
+        - note.vibrato;
+    let size = (base_period * 2f32.powf(-lowest / 12.0)).ceil() as usize + 4;
+
+    // The excitation: bright noise for a picked note, duller for a hammered or muted one,
+    // and a single sine cycle for the bell-like tone of a harmonic.
+    let smoothing = match (note.tone, note.soft) {
+        (Tone::PalmMute, _) => 4,
+        (_, true) => 3,
+        _ => 1,
+    };
     let mut state = seed.wrapping_mul(2_654_435_761).wrapping_add(0x9E37_79B9) | 1;
-    let mut previous = 0.0;
-    let mut line: Vec<f32> = (0..whole as usize)
-        .map(|_| {
+    let mut line: Vec<f32> = (0..size)
+        .map(|i| {
+            if note.tone == Tone::Harmonic {
+                return (TAU * i as f32 / base_period).sin();
+            }
             state = state.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
-            let noise = (state >> 8) as f32 / (1u32 << 23) as f32 - 1.0;
-            // Soften the pick attack.
-            previous = 0.5 * (noise + previous);
-            previous
+            (state >> 8) as f32 / (1u32 << 23) as f32 - 1.0
         })
         .collect();
+    for _ in 0..smoothing {
+        let mut previous = 0.0;
+        for sample in &mut line {
+            previous = 0.5 * (*sample + previous);
+            *sample = previous;
+        }
+    }
 
-    // Lower strings ring longer.
-    let decay = 0.9985 - 0.004 * (frequency / 1500.0).min(1.0);
+    // How much of the string's energy survives each trip round the loop. Lower strings
+    // ring longer; muting damps the string hard.
+    let decay = match note.tone {
+        Tone::Dead => 0.80,
+        Tone::PalmMute => 0.955 - 0.01 * (frequency / 400.0).min(1.0),
+        Tone::Harmonic => 0.9992,
+        Tone::Normal => 0.9985 - 0.004 * (frequency / 1500.0).min(1.0),
+    };
+    let gain = NOTE_GAIN * note.velocity * if note.soft { 0.8 } else { 1.0 };
+
     let release_start = out.len().saturating_sub((RELEASE * rate) as usize);
     let release_length = (out.len() - release_start).max(1) as f32;
-    let (mut filtered, mut ap_in, mut ap_out) = (0.0, 0.0, 0.0);
-    let mut position = 0;
+    // The averaging filter itself delays by half a sample.
+    let mut delay = base_period - 0.5;
+    let mut filtered = 0.0;
+    let mut write = 0;
     for (i, sample) in out.iter_mut().enumerate() {
-        let current = line[position];
-        let gain = match i.checked_sub(release_start) {
+        if !steady && i % CONTROL_PERIOD == 0 {
+            let t = i as f32 / rate;
+            let mut semitones = curve_at(&note.pitch_curve, t);
+            if note.vibrato > 0.0 && t > VIBRATO_DELAY {
+                let swell = ((t - VIBRATO_DELAY) * 6.0).min(1.0);
+                semitones += note.vibrato * swell * (TAU * VIBRATO_HZ * t).sin();
+            }
+            delay = base_period * 2f32.powf(-semitones / 12.0) - 0.5;
+        }
+
+        // Read the line `delay` samples back, between two stored samples.
+        let position = (write as f32 - delay).rem_euclid(size as f32);
+        let index = position as usize % size;
+        let fraction = position - position.floor();
+        let current = line[index] + (line[(index + 1) % size] - line[index]) * fraction;
+
+        let envelope = match i.checked_sub(release_start) {
             Some(into) => 1.0 - into as f32 / release_length,
             None => 1.0,
         };
-        *sample += NOTE_GAIN * gain * current;
+        *sample += gain * envelope * current;
 
-        let averaged = decay * 0.5 * (current + filtered);
+        line[write] = decay * 0.5 * (current + filtered);
         filtered = current;
-        ap_out = allpass * averaged + ap_in - allpass * ap_out;
-        ap_in = averaged;
-        line[position] = ap_out;
-        position = (position + 1) % line.len();
+        write = (write + 1) % size;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{NoteEvent, Timeline};
-
     use super::*;
 
-    fn single_note(pitch: u8) -> Vec<f32> {
+    fn render_one(note: NoteEvent) -> Vec<f32> {
         let timeline = Timeline {
-            notes: vec![NoteEvent {
-                time: 0.0,
-                duration: 1.0,
-                pitch,
-            }],
+            duration: note.duration,
+            notes: vec![note],
             clicks: Vec::new(),
             beats: Vec::new(),
-            duration: 1.0,
         };
         render(&timeline, 44_100)
     }
 
-    /// Estimates the fundamental from the autocorrelation peak, with parabolic interpolation.
-    fn measured_frequency(samples: &[f32], expected: f32) -> f32 {
-        let window = &samples[2_000..12_000];
+    /// Estimates the fundamental of `window` from its autocorrelation peak near `expected`.
+    fn measured_frequency(window: &[f32], expected: f32) -> f32 {
+        let span = window.len() / 2;
         let correlation = |lag: usize| -> f32 {
-            (window.iter().zip(&window[lag..]))
+            (window[..span].iter().zip(&window[lag..]))
                 .map(|(a, b)| a * b)
                 .sum()
         };
         let guess = 44_100.0 / expected;
         let lags = (guess * 0.9) as usize..=(guess * 1.1) as usize + 1;
-        let best = (lags.clone())
+        let best = lags
             .max_by(|&a, &b| correlation(a).total_cmp(&correlation(b)))
             .unwrap();
         let (l, c, r) = (
@@ -130,22 +185,60 @@ mod tests {
         44_100.0 / (best as f32 + shift)
     }
 
+    fn cents(actual: f32, expected: f32) -> f32 {
+        1200.0 * (actual / expected).log2()
+    }
+
     #[test]
     fn notes_are_in_tune() {
         // Low E, A440 and the 24th fret of the high E string.
         for (pitch, expected) in [(40, 82.41), (69, 440.0), (88, 1318.5)] {
-            let actual = measured_frequency(&single_note(pitch), expected);
-            let cents = 1200.0 * (actual / expected).log2();
-            assert!(
-                cents.abs() < 6.0,
-                "pitch {pitch}: {actual} Hz, {cents} cents off"
+            let samples = render_one(NoteEvent::plain(0.0, 1.0, pitch));
+            let off = cents(
+                measured_frequency(&samples[2_000..14_000], expected),
+                expected,
             );
+            assert!(off.abs() < 6.0, "pitch {pitch}: {off} cents off");
         }
     }
 
     #[test]
+    fn a_bend_raises_the_pitch() {
+        let mut note = NoteEvent::plain(0.0, 1.0, 64);
+        note.pitch_curve = vec![(0.0, 0.0), (0.2, 2.0)];
+        let samples = render_one(note);
+        // E4 at the start, bent up a whole tone to F#4 once the bend has landed.
+        let early = cents(measured_frequency(&samples[..1_200], 329.63), 329.63);
+        let late = cents(measured_frequency(&samples[20_000..30_000], 369.99), 369.99);
+        assert!(early.abs() < 60.0, "start is {early} cents from E");
+        assert!(late.abs() < 8.0, "bent note is {late} cents from F#");
+    }
+
+    #[test]
+    fn harmonics_are_in_tune_and_muted_notes_die_quickly() {
+        let mut harmonic = NoteEvent::plain(0.0, 1.0, 64);
+        harmonic.tone = Tone::Harmonic;
+        let samples = render_one(harmonic);
+        let off = cents(measured_frequency(&samples[2_000..12_000], 329.63), 329.63);
+        assert!(off.abs() < 6.0, "harmonic is {off} cents off");
+
+        let energy = |samples: &[f32]| samples[8_000..12_000].iter().map(|s| s * s).sum::<f32>();
+        let open = energy(&render_one(NoteEvent::plain(0.0, 1.0, 45)));
+        let mut muted = NoteEvent::plain(0.0, 1.0, 45);
+        muted.tone = Tone::PalmMute;
+        let palm = energy(&render_one(muted.clone()));
+        muted.tone = Tone::Dead;
+        let dead = energy(&render_one(muted));
+        assert!(palm < open * 0.2, "palm mute {palm} vs open {open}");
+        assert!(dead < palm * 0.01, "dead {dead} vs palm mute {palm}");
+    }
+
+    #[test]
     fn output_is_bounded_and_ends_quietly() {
-        let samples = single_note(40);
+        let mut loud = NoteEvent::plain(0.0, 1.0, 40);
+        loud.velocity = 1.7;
+        loud.vibrato = 0.5;
+        let samples = render_one(loud);
         assert_eq!(samples.len(), (1.3f64 * 44_100.0).ceil() as usize);
         assert!(samples.iter().all(|s| s.abs() <= 1.0));
         assert!(samples.iter().any(|s| s.abs() > 0.02));

@@ -6,10 +6,7 @@ use crate::{
 /// A two-bar riff in E minor, used as the starting document until real scores can be written.
 pub fn demo_score() -> Score {
     let eighth = Duration::new(NoteValue::Eighth);
-    let note = |string, fret| Beat {
-        duration: eighth,
-        notes: vec![Note::new(string, fret)],
-    };
+    let note = |string, fret| Beat::new(eighth, vec![Note::new(string, fret)]);
 
     let bar1 = [
         (5, 0),
@@ -25,10 +22,10 @@ pub fn demo_score() -> Score {
         .into_iter()
         .map(|(s, f)| note(s, f))
         .collect();
-    bar2.push(Beat {
-        duration: Duration::new(NoteValue::Half),
-        notes: vec![Note::new(3, 2), Note::new(4, 2), Note::new(5, 0)],
-    });
+    bar2.push(Beat::new(
+        Duration::new(NoteValue::Half),
+        vec![Note::new(3, 2), Note::new(4, 2), Note::new(5, 0)],
+    ));
 
     Score {
         info: ScoreInfo {

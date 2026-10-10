@@ -1,9 +1,9 @@
 //! JavaScript API over the core crates. Structured data crosses the boundary as JSON.
 
 use gtr_audio::Options;
-use gtr_edit::{Editor, Move};
+use gtr_edit::{Editor, Move, Technique};
 use gtr_io::{guitar_pro, native};
-use gtr_model::{NoteValue, Score, ScoreInfo, TimeSignature, Tuning, demo_score};
+use gtr_model::{NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score};
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
@@ -34,6 +34,13 @@ impl RenderedAudio {
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
     }
+}
+
+fn tuplet(actual: u8, normal: u8) -> Option<Tuplet> {
+    Some(Tuplet {
+        actual: actual.try_into().ok()?,
+        normal: normal.try_into().ok()?,
+    })
 }
 
 /// Parses a snake_case enum name such as `"eighth"` or `"prev_bar"`.
@@ -191,6 +198,43 @@ impl Document {
     #[wasm_bindgen(js_name = toggleTriplet)]
     pub fn toggle_triplet(&mut self) -> Result<(), JsError> {
         Ok(self.editor.toggle_triplet()?)
+    }
+
+    /// Switches a playing technique on or off, e.g. `"palm_mute"`, `"hammer"` or
+    /// `"slide_shift"`. See `gtr_edit::Technique` for the full list.
+    #[wasm_bindgen(js_name = toggleTechnique)]
+    pub fn toggle_technique(&mut self, technique: &str) -> Result<(), JsError> {
+        let technique: Technique = parse_name(technique)?;
+        Ok(self.editor.toggle_technique(technique)?)
+    }
+
+    /// Sets one effect of the note under the cursor, or of every selected note. `field` is
+    /// the effect's name in the saved file, such as `"bend"`, `"trill"` or `"left_finger"`;
+    /// `value_json` is its JSON, with `null` removing it.
+    #[wasm_bindgen(js_name = setNoteEffect)]
+    pub fn set_note_effect(&mut self, field: &str, value_json: &str) -> Result<(), JsError> {
+        let value = serde_json::from_str(value_json)?;
+        Ok(self.editor.set_note_effect(field, &value)?)
+    }
+
+    /// Sets one effect of the beat under the cursor, or of every selected beat, such as
+    /// `"dynamic"` or `"whammy"`. See [`Self::set_note_effect`].
+    #[wasm_bindgen(js_name = setBeatEffect)]
+    pub fn set_beat_effect(&mut self, field: &str, value_json: &str) -> Result<(), JsError> {
+        let value = serde_json::from_str(value_json)?;
+        Ok(self.editor.set_beat_effect(field, &value)?)
+    }
+
+    /// Sets a tuplet of `actual` notes in the time of `normal`; zero removes it.
+    #[wasm_bindgen(js_name = setTuplet)]
+    pub fn set_tuplet(&mut self, actual: u8, normal: u8) -> Result<(), JsError> {
+        Ok(self.editor.set_tuplet(tuplet(actual, normal))?)
+    }
+
+    /// Sets a second tuplet inside the first; zero removes it.
+    #[wasm_bindgen(js_name = setNestedTuplet)]
+    pub fn set_nested_tuplet(&mut self, actual: u8, normal: u8) -> Result<(), JsError> {
+        Ok(self.editor.set_nested_tuplet(tuplet(actual, normal))?)
     }
 
     pub fn delete(&mut self) -> Result<(), JsError> {

@@ -7,7 +7,10 @@ mod gp7;
 
 use std::collections::BTreeSet;
 
-use gtr_model::{Bar, Beat, Duration, ModelError, Note, NoteValue, Score, Tuning, Tuplet, Voice};
+use gtr_model::{
+    Bar, Beat, Bend, CurvePoint, Duration, Dynamic, ModelError, Note, NoteValue, Score, Slide,
+    Staff, Tuning, Tuplet, Voice,
+};
 
 /// A score read from another program's file.
 #[derive(Debug)]
@@ -82,6 +85,7 @@ fn duration(
                 normal: normal.try_into().ok()?,
             })
         }),
+        nested: None,
     }
 }
 
@@ -90,7 +94,7 @@ fn beat(duration: Duration, mut notes: Vec<Note>, string_count: usize) -> Beat {
     notes.retain(|n| usize::from(n.string) < string_count);
     notes.sort_by_key(|n| n.string);
     notes.dedup_by_key(|n| n.string);
-    Beat { duration, notes }
+    Beat::new(duration, notes)
 }
 
 /// Builds a bar from its voices, leaving out trailing voices that have no notes.
@@ -115,4 +119,59 @@ fn tuning(strings: Vec<u8>) -> Tuning {
     } else {
         Tuning::new(strings)
     }
+}
+
+/// Builds a pitch curve from points of `(position, height)`: positions from 0 to 60 across
+/// the note, heights in hundredths of a whole tone. Returns `None` for a curve that never
+/// leaves zero. The caller checks the result against the range its effect allows.
+fn bend_from_points(points: impl Iterator<Item = (i32, i32)>) -> Option<Bend> {
+    let mut curve: Vec<CurvePoint> = Vec::new();
+    for (position, height) in points {
+        let point = CurvePoint {
+            position: position.clamp(0, i32::from(Bend::LENGTH)) as u8,
+            value: (f64::from(height) / 25.0).round().clamp(-100.0, 100.0) as i8,
+        };
+        match curve.last_mut() {
+            // Two points at the same moment: the later one wins.
+            Some(last) if last.position >= point.position => last.value = point.value,
+            _ => curve.push(point),
+        }
+    }
+    curve.truncate(Bend::MAX_POINTS);
+    curve
+        .iter()
+        .any(|p| p.value != 0)
+        .then_some(Bend { points: curve })
+}
+
+/// Guitar Pro gives every beat a dynamic; the model only marks where the level changes,
+/// starting from forte.
+fn keep_dynamic_changes(staff: &mut Staff) {
+    let mut current = Dynamic::F;
+    for bar in &mut staff.bars {
+        for (index, voice) in bar.voices.iter_mut().enumerate() {
+            for beat in &mut voice.beats {
+                let marked = beat.effects.dynamic.take();
+                if index == 0 && !beat.is_rest() && marked.is_some_and(|d| d != current) {
+                    beat.effects.dynamic = marked;
+                    current = marked.unwrap_or(current);
+                }
+            }
+        }
+    }
+}
+
+/// Guitar Pro's slide bit flags, shared by its binary and XML formats.
+fn slide_from_flags(flags: u8) -> Option<Slide> {
+    [
+        (0x01, Slide::Shift),
+        (0x02, Slide::Legato),
+        (0x04, Slide::OutDown),
+        (0x08, Slide::OutUp),
+        (0x10, Slide::InFromBelow),
+        (0x20, Slide::InFromAbove),
+    ]
+    .into_iter()
+    .find(|(bit, _)| flags & bit != 0)
+    .map(|(_, slide)| slide)
 }

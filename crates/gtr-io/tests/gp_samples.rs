@@ -38,6 +38,22 @@ fn music(bar: &gtr_model::Bar) -> &[gtr_model::Beat] {
     &beats[..end]
 }
 
+/// A beat with its pitch curves reduced to their outline: the two formats place the points
+/// of the same bend at slightly different moments.
+fn comparable(beat: &gtr_model::Beat) -> gtr_model::Beat {
+    let mut beat = beat.clone();
+    for note in &mut beat.notes {
+        if let Some(bend) = &mut note.effects.bend {
+            *bend = gtr_model::Bend::preset(bend.kind(), bend.peak());
+        }
+    }
+    if let Some(whammy) = &mut beat.effects.whammy {
+        // Only the older format can hold a free-form whammy curve, so compare presence.
+        *whammy = gtr_model::Bend::new([(0, 1)]);
+    }
+    beat
+}
+
 #[test]
 fn sample_files_import_cleanly() {
     let Some(directory) = std::env::var_os("GTR_GP_SAMPLES") else {
@@ -98,7 +114,19 @@ fn sample_files_import_cleanly() {
                 );
                 let bars = ta.staves[0].bars.iter().zip(&tb.staves[0].bars);
                 for (i, (bar_a, bar_b)) in bars.enumerate() {
-                    assert_eq!(music(bar_a), music(bar_b), "{a_name} vs {b_name}: bar {i}");
+                    let (beats_a, beats_b) = (music(bar_a), music(bar_b));
+                    assert_eq!(
+                        beats_a.len(),
+                        beats_b.len(),
+                        "{a_name} vs {b_name}: bar {i}"
+                    );
+                    for (j, (beat_a, beat_b)) in beats_a.iter().zip(beats_b).enumerate() {
+                        assert_eq!(
+                            comparable(beat_a),
+                            comparable(beat_b),
+                            "{a_name} vs {b_name}: bar {i} beat {j}"
+                        );
+                    }
                 }
             }
         }
