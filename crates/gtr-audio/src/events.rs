@@ -1,4 +1,7 @@
-use gtr_model::{Accent, Beat, BendKind, Harmonic, Note, Rational, Score, Slide, Staff, Vibrato};
+use gtr_model::{
+    Accent, Beat, Bend, Dynamic, Hairpin, Harmonic, Note, Rational, Score, Slap, Slide, Staff,
+    Strum, Vibrato,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Deserialize)]
@@ -101,6 +104,10 @@ pub struct Timeline {
 
 /// Longest a let-ring note is allowed to sustain.
 const MAX_RING: f64 = 4.0;
+/// Longest a grace note lasts, in seconds.
+const GRACE_LENGTH: f64 = 0.07;
+/// Seconds between strings in a quick strum.
+const BRUSH_STEP: f64 = 0.012;
 
 /// Compiles the score to timed events. Every track sounds; `follow` picks the track whose
 /// beats are reported for the playback cursor.
@@ -166,6 +173,47 @@ fn add_clicks(
     }
 }
 
+/// Loudness of each beat of the staff's first voice, per bar, from its dynamic marks and
+/// hairpins. A dynamic lasts until the next one; a hairpin swells or fades across the run of
+/// beats that carry it and leaves the level where it ends.
+fn beat_gains(staff: &Staff) -> Vec<Vec<f32>> {
+    let beats: Vec<&Beat> = (staff.bars.iter())
+        .flat_map(|bar| bar.voices.first().map_or(&[][..], |v| &v.beats))
+        .collect();
+    let mut gains = Vec::with_capacity(beats.len());
+    let mut level = Dynamic::F.gain();
+    let mut i = 0;
+    while i < beats.len() {
+        if let Some(dynamic) = beats[i].effects.dynamic {
+            level = dynamic.gain();
+        }
+        let Some(hairpin) = beats[i].effects.hairpin else {
+            gains.push(level);
+            i += 1;
+            continue;
+        };
+        let run = (beats[i..].iter())
+            .take_while(|b| b.effects.hairpin == Some(hairpin))
+            .count();
+        let target = match hairpin {
+            Hairpin::Crescendo => level * 1.6,
+            Hairpin::Decrescendo => level * 0.55,
+        };
+        for step in 0..run {
+            gains.push(level + (target - level) * step as f32 / run as f32);
+        }
+        level = target;
+        i += run;
+    }
+    let mut gains = gains.into_iter();
+    (staff.bars.iter())
+        .map(|bar| {
+            let count = bar.voices.first().map_or(0, |v| v.beats.len());
+            gains.by_ref().take(count).collect()
+        })
+        .collect()
+}
+
 /// What is known about the note last played on a string.
 #[derive(Clone, Copy, Default)]
 struct StringState {
@@ -186,6 +234,7 @@ fn add_staff(
     seconds: &impl Fn(Rational) -> f64,
 ) {
     let end = starts[starts.len() - 1];
+    let gains = beat_gains(staff);
     let bars = &staff.bars[from_bar..from_bar + starts.len() - 1];
     let mut strings = vec![StringState::default(); staff.tuning.strings.len()];
     for (b, bar) in bars.iter().enumerate() {
@@ -209,8 +258,34 @@ fn add_staff(
                 };
                 let pick_length = duration / picks as f64;
 
+                let gain = match v {
+                    0 => gains[from_bar + b][i],
+                    _ => 1.0,
+                } * match beat.effects.slap {
+                    Some(Slap::Slap) => 1.3,
+                    Some(Slap::Pop) => 1.4,
+                    None => 1.0,
+                };
+                // A strum or arpeggio starts the strings one after another: downwards
+                // means from the lowest string to the highest.
+                let step = match beat.effects.strum {
+                    Some(Strum::BrushDown | Strum::BrushUp) => BRUSH_STEP,
+                    Some(Strum::ArpeggioDown | Strum::ArpeggioUp) => {
+                        (duration / (beat.notes.len() + 1) as f64).min(0.06)
+                    }
+                    Some(Strum::Rasgueado) => 0.03,
+                    None => 0.0,
+                };
+                let upwards =
+                    matches!(beat.effects.strum, Some(Strum::BrushUp | Strum::ArpeggioUp));
+
                 let mut next = vec![StringState::default(); strings.len()];
-                for note in &beat.notes {
+                for (order, note) in beat.notes.iter().enumerate() {
+                    let delay = step
+                        * match upwards {
+                            true => order,
+                            false => beat.notes.len() - 1 - order,
+                        } as f64;
                     let string = usize::from(note.string);
                     let Some(pitch) = staff.tuning.pitch(note.string, note.fret, staff.capo) else {
                         continue;
@@ -236,8 +311,45 @@ fn add_staff(
                     }
 
                     let following = following_note(bars, b, v, i, note.string);
-                    let mut event = note_event(note, staff, pitch, time, pick_length, following);
+                    // Share of this note taken by one note of a trill, if it has one.
+                    let trill_step = note.effects.trill.map_or(1.0, |t| {
+                        let ratio = t.speed.length() / beat.duration.length();
+                        *ratio.numer() as f64 / *ratio.denom() as f64
+                    });
+                    let mut event =
+                        note_event(note, staff, pitch, time, pick_length, following, trill_step);
                     event.soft = previous.legato;
+                    event.velocity *= gain;
+                    if event.pitch_curve.is_empty()
+                        && let Some(whammy) = &beat.effects.whammy
+                    {
+                        event.pitch_curve = curve_points(whammy, pick_length);
+                    }
+                    event.time += delay;
+                    event.duration = (event.duration - delay).max(event.duration * 0.25);
+                    if let Some(grace) = note.effects.grace {
+                        // A grace note before the beat borrows its time from what came
+                        // before; one on the beat pushes the main note back.
+                        let length = GRACE_LENGTH.min(pick_length / 3.0);
+                        let before = !grace.on_beat && event.time >= length;
+                        let grace_pitch = staff.tuning.pitch(note.string, grace.fret, staff.capo);
+                        let mut ornament = NoteEvent::plain(
+                            if before {
+                                event.time - length
+                            } else {
+                                event.time
+                            },
+                            length,
+                            grace_pitch.unwrap_or(pitch),
+                        );
+                        ornament.velocity = event.velocity;
+                        timeline.notes.push(ornament);
+                        if !before {
+                            event.time += length;
+                            event.duration -= length;
+                        }
+                        event.soft |= grace.hammer;
+                    }
                     for pick in 1..picks {
                         let mut repeat = event.clone();
                         repeat.time = time + pick_length * pick as f64;
@@ -301,6 +413,16 @@ fn following_note(
     next?.note_on(string)
 }
 
+/// A bend or whammy curve as `(seconds, semitones)` points over a note `length` seconds long.
+fn curve_points(curve: &Bend, length: f64) -> Vec<(f32, f32)> {
+    (curve.points.iter())
+        .map(|p| {
+            let time = f64::from(p.position) / f64::from(Bend::LENGTH) * length;
+            (time as f32, f32::from(p.value) / 2.0)
+        })
+        .collect()
+}
+
 /// Builds the event for a freshly sounded note from its effects.
 fn note_event(
     note: &Note,
@@ -309,6 +431,7 @@ fn note_event(
     time: f64,
     length: f64,
     following: Option<&Note>,
+    trill_step: f64,
 ) -> NoteEvent {
     let effects = &note.effects;
     let mut event = NoteEvent::plain(time, length, fretted);
@@ -359,26 +482,23 @@ fn note_event(
         None => 0.0,
     };
 
-    if let Some(bend) = effects.bend {
-        let height = f32::from(bend.quarter_tones) / 2.0;
-        // The string is pushed up over the first part of the note, and let down again
-        // over the second half if the bend is released.
-        let rise = (d * 0.3).min(0.25);
-        event.pitch_curve = match bend.kind {
-            BendKind::Bend => vec![(0.0, 0.0), (rise, height)],
-            BendKind::BendRelease => {
-                vec![
-                    (0.0, 0.0),
-                    (rise, height),
-                    (d * 0.5, height),
-                    (d * 0.5 + rise, 0.0),
-                ]
-            }
-            BendKind::Prebend => vec![(0.0, height)],
-            BendKind::PrebendRelease => {
-                vec![(0.0, height), (d * 0.4, height), (d * 0.4 + rise, 0.0)]
-            }
-        };
+    if let Some(bend) = &effects.bend {
+        event.pitch_curve = curve_points(bend, length);
+    } else if let Some(trill) = effects.trill {
+        // Flip between the two frets, each held for the trill's note value.
+        let interval = f32::from(trill.fret) - f32::from(note.fret);
+        let step = (trill_step * length) as f32;
+        let flips = ((d / step.max(0.01)) as usize).min(256);
+        event.pitch_curve = (1..=flips)
+            .flat_map(|flip| {
+                let (from, to) = match flip % 2 {
+                    1 => (0.0, interval),
+                    _ => (interval, 0.0),
+                };
+                let at = step * flip as f32;
+                [(at - 0.004, from), (at, to)]
+            })
+            .collect();
     } else if let Some(slide) = effects.slide {
         let glide = (d * 0.35).min(0.12);
         event.pitch_curve = match (slide, following) {
@@ -398,7 +518,9 @@ fn note_event(
 
 #[cfg(test)]
 mod tests {
-    use gtr_model::{Beat, Bend, Duration, Note, NoteEffects, NoteValue, Score, demo_score};
+    use gtr_model::{
+        Beat, BendKind, Duration, Grace, Note, NoteEffects, NoteValue, Score, Trill, demo_score,
+    };
 
     use super::*;
 
@@ -471,19 +593,19 @@ mod tests {
     fn ties_extend_the_previous_note() {
         let mut score = demo_score();
         let quarter = Duration::new(NoteValue::Quarter);
-        let tied = Note {
+        let tied = || Note {
             tied: true,
             ..Note::new(5, 3)
         };
         score.tracks[0].staves[0].bars[0].voices[0].beats = vec![
             Beat::new(quarter, vec![Note::new(5, 3)]),
-            Beat::new(quarter, vec![tied]),
+            Beat::new(quarter, vec![tied()]),
             // A tie with nothing sounding on the string starts a new note.
             Beat::rest(quarter),
-            Beat::new(quarter, vec![tied]),
+            Beat::new(quarter, vec![tied()]),
         ];
         // And a tie across the bar line.
-        score.tracks[0].staves[0].bars[1].voices[0].beats = vec![Beat::new(quarter, vec![tied])];
+        score.tracks[0].staves[0].bars[1].voices[0].beats = vec![Beat::new(quarter, vec![tied()])];
         let t = compile(&score, 0, &Options::default());
         let notes: Vec<(f64, f64)> = t.notes.iter().map(|n| (n.time, n.duration)).collect();
         assert_eq!(notes, [(0.0, 1.0), (1.5, 1.0)]);
@@ -529,12 +651,7 @@ mod tests {
 
     #[test]
     fn bends_and_harmonics_change_pitch() {
-        let bend = |kind, quarter_tones| {
-            Some(Bend {
-                kind,
-                quarter_tones,
-            })
-        };
+        let bend = |kind, quarter_tones| Some(Bend::preset(kind, quarter_tones));
         let score = quarters(vec![
             with(7, |e| e.bend = bend(BendKind::Bend, 4)),
             with(7, |e| e.bend = bend(BendKind::PrebendRelease, 2)),
@@ -542,7 +659,11 @@ mod tests {
             with(7, |e| e.harmonic = Some(Harmonic::Natural)),
         ]);
         let t = compile(&score, 0, &Options::default());
-        assert_eq!(t.notes[0].pitch_curve, [(0.0, 0.0), (0.15, 2.0)]);
+        // A full bend reaches a whole tone a quarter of the way through the half-second note.
+        assert_eq!(
+            t.notes[0].pitch_curve,
+            [(0.0, 0.0), (0.125, 2.0), (0.5, 2.0)]
+        );
         assert_eq!(t.notes[1].pitch_curve[0], (0.0, 1.0));
         assert_eq!(t.notes[1].pitch_curve.last().unwrap().1, 0.0);
         // Harmonics over the 12th and 7th frets of the low E string: E3 and B3.
@@ -580,5 +701,86 @@ mod tests {
         let times: Vec<f64> = t.notes.iter().map(|n| n.time).collect();
         assert_eq!(times, [0.0, 0.125, 0.25, 0.375]);
         assert!(t.notes.iter().all(|n| n.duration == 0.125));
+    }
+
+    fn first_beat(score: &mut Score) -> &mut Beat {
+        &mut score.tracks[0].staves[0].bars[0].voices[0].beats[0]
+    }
+
+    #[test]
+    fn dynamics_and_hairpins_set_the_loudness() {
+        let mut score = quarters(vec![Note::new(5, 1); 4]);
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[0].effects.dynamic = Some(Dynamic::P);
+        beats[1].effects.hairpin = Some(Hairpin::Crescendo);
+        beats[2].effects.hairpin = Some(Hairpin::Crescendo);
+        let t = compile(&score, 0, &Options::default());
+        let loudness: Vec<f32> = t.notes.iter().map(|n| n.velocity).collect();
+        let piano = Dynamic::P.gain();
+        // Piano, a swell over two beats, then the level the swell reached.
+        assert_eq!(loudness[0], piano);
+        assert_eq!(loudness[1], piano);
+        assert!(loudness[2] > loudness[1] && loudness[3] > loudness[2]);
+        assert!((loudness[3] - piano * 1.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn strums_spread_a_chord_and_the_whammy_bar_bends_it() {
+        let mut score = quarters(vec![Note::new(5, 3)]);
+        let beat = first_beat(&mut score);
+        beat.notes = vec![Note::new(3, 5), Note::new(4, 5), Note::new(5, 3)];
+        beat.effects.strum = Some(Strum::BrushDown);
+        beat.effects.whammy = Some(Bend::dive(4));
+        let t = compile(&score, 0, &Options::default());
+        // A downstroke sounds the lowest string first.
+        let pitches: Vec<u8> = t.notes.iter().map(|n| n.pitch).collect();
+        assert_eq!(pitches, [43, 50, 55]);
+        assert_eq!(t.notes[1].time, BRUSH_STEP);
+        assert!(
+            t.notes
+                .iter()
+                .all(|n| n.pitch_curve == [(0.0, 0.0), (0.5, -2.0)])
+        );
+
+        first_beat(&mut score).effects.strum = Some(Strum::ArpeggioUp);
+        let t = compile(&score, 0, &Options::default());
+        assert_eq!(t.notes[0].pitch, 55);
+        assert_eq!(t.notes[2].time, 0.12);
+    }
+
+    #[test]
+    fn grace_notes_and_trills() {
+        let grace = |on_beat| {
+            Some(Grace {
+                fret: 3,
+                on_beat,
+                hammer: true,
+            })
+        };
+        let score = quarters(vec![
+            Note::new(5, 0),
+            with(5, |e| e.grace = grace(false)),
+            with(5, |e| e.grace = grace(true)),
+            with(5, |e| {
+                e.trill = Some(Trill {
+                    fret: 7,
+                    speed: NoteValue::Sixteenth,
+                })
+            }),
+        ]);
+        let t = compile(&score, 0, &Options::default());
+        let events: Vec<(f64, u8)> = t.notes.iter().map(|n| (n.time, n.pitch)).collect();
+        // Before the beat: the grace note ends as the main note starts on time.
+        assert_eq!(events[1], (0.5 - GRACE_LENGTH, 43));
+        assert_eq!(events[2], (0.5, 45));
+        // On the beat: the grace note takes the main note's place and pushes it back.
+        assert_eq!(events[3], (1.0, 43));
+        assert_eq!(events[4], (1.0 + GRACE_LENGTH, 45));
+        assert!(t.notes[2].soft && t.notes[4].soft);
+        // A sixteenth-note trill flips pitch three times within a quarter note.
+        let trill = &t.notes[5].pitch_curve;
+        assert_eq!(trill.len(), 8);
+        assert_eq!(trill[1], (0.125, 2.0));
+        assert_eq!(trill[3], (0.25, 0.0));
     }
 }

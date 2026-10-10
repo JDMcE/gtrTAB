@@ -44,6 +44,9 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | H | Hammer-on or pull-off to the next note |
 | S | Shift slide to the next note |
 | B | Full bend |
+| Shift+B | Bend editor |
+| W | Whammy bar editor |
+| < / > | Crescendo / decrescendo |
 | V | Vibrato |
 | P | Palm mute |
 | I | Let ring |
@@ -61,7 +64,7 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
 
-Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord. The toolbar has the rest: other slides, bends and harmonics, wide vibrato, staccato, heavy accent, tremolo picking and pick strokes.
+Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord. The toolbar has the rest: other slides, bends and harmonics, wide vibrato, staccato, heavy accent, tremolo picking, pick strokes, trills, grace notes, strums and arpeggios, slap and pop, dynamics, tuplets and fingering.
 
 Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp`, `.gp5`) open through Open or by dropping them on the window.
 

@@ -22,9 +22,9 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
         beat: idx[2] % (beats + 1),
     };
     let duration = Duration {
-        value: NoteValue::ALL[usize::from(a) % NoteValue::ALL.len()],
         dots: b % 4,
         tuplet: (a % 2 == 1).then_some(Tuplet::TRIPLET),
+        ..Duration::new(NoteValue::ALL[usize::from(a) % NoteValue::ALL.len()])
     };
     let note = Note {
         tied: b % 2 == 0,

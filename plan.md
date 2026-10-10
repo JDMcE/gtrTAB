@@ -91,22 +91,24 @@ Still to check by hand: how playback sounds, autosave recovery, recent files, an
 Each item needs notation, input and playback.
 
 - [x] Hammer-on, pull-off, legato slides, shift slides, slide in and out
-- [x] Bends from presets: bend, bend and release, pre-bend, pre-bend and release, from a quarter tone to two tones
-- [ ] Bend editor with custom curves. Imported bend curves are reduced to the nearest preset for now
-- [x] Vibrato (slight, wide)
-- [ ] Whammy bar with a curve editor
+- [x] Bends with a bend editor: presets (bend, release, pre-bend, pre-bend and release) and custom curves
+- [x] Vibrato (slight, wide) and whammy bar with a curve editor
 - [x] Palm mute, let ring, dead notes, ghost notes, staccato
-- [x] Accents, heavy accents
-- [ ] Dynamics, crescendo and decrescendo
-- [x] Natural, artificial, pinch, tapped and semi harmonics. Natural harmonics play at their true pitch; the others are approximated as an octave above the fretted note
-- [x] Tapping, pick strokes
-- [ ] Slapping, popping, strum directions, arpeggios, rasgueado
-- [x] Tremolo picking
-- [ ] Trills, grace notes
-- [x] Tuplets (triplets from the keyboard; other tuplets import and display)
-- [ ] Nested tuplets, and entering tuplets other than triplets
-- [ ] Fingering for both hands
-- [x] Guitar Pro import brings in every technique above that is ticked
+- [x] Accents, heavy accents, dynamics, crescendo and decrescendo
+- [x] Natural, artificial, pinch, tapped and semi harmonics
+- [x] Tapping, slapping, popping, pick strokes, strum directions, arpeggios, rasgueado
+- [x] Tremolo picking, trills, grace notes
+- [x] Tuplets, including nested tuplets
+- [x] Fingering for both hands
+- [x] Guitar Pro import brings in all of the above
+
+Known simplifications, to revisit:
+
+- A custom bend is drawn as the nearest common shape, labelled with its highest point; playback follows the real curve.
+- Only natural harmonics play at their true pitch. The other kinds sound an octave above the fretted note.
+- Tapping, pick strokes and fingering are notation only.
+- A grace note is a single note on the same string as the note it decorates.
+- Rasgueado plays as a slow strum.
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 

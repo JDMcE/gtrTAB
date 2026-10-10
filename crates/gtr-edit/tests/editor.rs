@@ -1,6 +1,6 @@
 use gtr_edit::{Editor, Move, Technique};
 use gtr_model::{
-    Bend, BendKind, Note, NoteValue, Rational, Score, TimeSignature, Tuning, demo_score,
+    Bend, BendKind, Dynamic, Note, NoteValue, Rational, Score, TimeSignature, Tuning, demo_score,
 };
 use proptest::prelude::*;
 
@@ -220,25 +220,76 @@ fn techniques_toggle_on_notes_chords_and_beats() {
     assert!(!beats(&e, 0)[4].notes[0].effects.hammer);
     assert!(e.state().selection.is_some());
 
-    let bend = Bend {
-        kind: BendKind::BendRelease,
-        quarter_tones: 4,
-    };
-    e.set_cursor(0, 2, 4, false);
-    e.set_bend(Some(bend)).unwrap();
-    assert_eq!(e.state().note.unwrap().effects.bend, Some(bend));
-    let too_high = Bend {
-        kind: BendKind::Bend,
-        quarter_tones: 40,
-    };
-    assert!(e.set_bend(Some(too_high)).is_err());
     e.score().validate().unwrap();
+}
+
+#[test]
+fn effects_are_set_field_by_field() {
+    use serde_json::json;
+    let mut e = Editor::new(demo_score());
+    e.set_cursor(0, 2, 4, false);
+
+    let bend = Bend::preset(BendKind::BendRelease, 4);
+    e.set_note_effect("bend", &serde_json::to_value(&bend).unwrap())
+        .unwrap();
+    e.set_note_effect("trill", &json!({ "fret": 4, "speed": "sixteenth" }))
+        .unwrap();
+    e.set_note_effect("left_finger", &json!("ring")).unwrap();
+    let effects = e.state().note.unwrap().effects;
+    assert_eq!(effects.bend, Some(bend));
+    assert_eq!(effects.trill.unwrap().fret, 4);
+    // Retyping the fret keeps the techniques.
+    e.type_digit(5, false).unwrap();
+    assert!(e.state().note.unwrap().effects.bend.is_some());
+    e.set_note_effect("bend", &json!(null)).unwrap();
+    assert_eq!(e.state().note.unwrap().effects.bend, None);
+
+    // Values that make no sense are refused and leave the note alone.
+    let too_high =
+        json!({ "points": [{ "position": 0, "value": 0 }, { "position": 60, "value": 40 }] });
+    assert!(e.set_note_effect("bend", &too_high).is_err());
+    assert!(e.set_note_effect("no_such_effect", &json!(true)).is_err());
+    assert!(e.set_note_effect("slide", &json!("sideways")).is_err());
+    assert!(e.state().note.unwrap().effects.trill.is_some());
+
+    e.set_beat_effect("dynamic", &json!("ff")).unwrap();
+    e.set_beat_effect("whammy", &serde_json::to_value(Bend::dive(8)).unwrap())
+        .unwrap();
+    let beat = e.state().beat_effects.unwrap();
+    assert_eq!(beat.dynamic, Some(Dynamic::Ff));
+    assert_eq!(beat.whammy.unwrap().peak(), -8);
+    // A string cannot be bent downwards, but the bar can go down.
+    assert!(
+        e.set_note_effect("bend", &serde_json::to_value(Bend::dive(8)).unwrap())
+            .is_err()
+    );
+    e.score().validate().unwrap();
+}
+
+#[test]
+fn tuplets_and_nested_tuplets() {
+    use std::num::NonZeroU8;
+    let tuplet = |actual, normal| gtr_model::Tuplet {
+        actual: NonZeroU8::new(actual).unwrap(),
+        normal: NonZeroU8::new(normal).unwrap(),
+    };
+    let mut e = Editor::new(Score::blank());
+    assert!(e.set_nested_tuplet(Some(tuplet(3, 2))).is_err());
+    e.set_note_value(NoteValue::Eighth).unwrap();
+    e.set_tuplet(Some(tuplet(5, 4))).unwrap();
+    e.type_digit(3, false).unwrap();
+    assert_eq!(beats(&e, 0)[0].duration.length(), Rational::new(1, 10));
+    e.set_nested_tuplet(Some(tuplet(3, 2))).unwrap();
+    assert_eq!(beats(&e, 0)[0].duration.length(), Rational::new(1, 15));
+    e.set_tuplet(None).unwrap();
+    assert_eq!(beats(&e, 0)[0].duration.length(), Rational::new(1, 8));
 }
 
 #[derive(Debug, Clone)]
 enum Op {
     Technique(usize),
-    Bend(u8),
+    Bend(i8),
+    Whammy(i8),
     Move(u8, bool),
     Digit(u8, bool),
     Click(usize, usize, u8, bool),
@@ -263,7 +314,8 @@ enum Op {
 fn op() -> impl Strategy<Value = Op> {
     prop_oneof![
         4 => (0usize..Technique::ALL.len()).prop_map(Op::Technique),
-        1 => (0u8..16).prop_map(Op::Bend),
+        1 => (-2i8..16).prop_map(Op::Bend),
+        1 => (-30i8..16).prop_map(Op::Whammy),
         4 => (0u8..8, any::<bool>()).prop_map(|(m, e)| Op::Move(m, e)),
         4 => (0u8..10, any::<bool>()).prop_map(|(d, c)| Op::Digit(d, c)),
         1 => (0usize..6, 0usize..10, 0u8..8, any::<bool>())
@@ -301,10 +353,13 @@ fn apply(e: &mut Editor, op: Op) {
     // Individual operations may be refused; that must leave the editor consistent.
     let _ = match op {
         Op::Technique(t) => e.toggle_technique(Technique::ALL[t]),
-        Op::Bend(quarter_tones) => e.set_bend((quarter_tones > 0).then_some(Bend {
-            kind: BendKind::Bend,
-            quarter_tones,
-        })),
+        Op::Bend(height) => {
+            let bend = Bend::preset(BendKind::Bend, height);
+            e.set_note_effect("bend", &serde_json::to_value(bend).unwrap())
+        }
+        Op::Whammy(depth) => {
+            e.set_beat_effect("whammy", &serde_json::to_value(Bend::dive(depth)).unwrap())
+        }
         Op::Move(m, extend) => e.move_cursor(MOVES[usize::from(m)], extend),
         Op::Digit(d, combine) => e.type_digit(d, combine),
         Op::Click(bar, beat, string, extend) => {

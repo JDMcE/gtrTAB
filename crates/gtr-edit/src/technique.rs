@@ -1,5 +1,6 @@
 use gtr_model::{
-    Accent, BeatEffects, Harmonic, NoteEffects, NoteValue, PickStroke, Slide, Vibrato,
+    Accent, BeatEffects, Hairpin, Harmonic, NoteEffects, NoteValue, PickStroke, Slap, Slide, Strum,
+    Vibrato,
 };
 use serde::Deserialize;
 
@@ -32,6 +33,15 @@ pub enum Technique {
     StrokeDown,
     StrokeUp,
     Tremolo,
+    Slap,
+    Pop,
+    BrushDown,
+    BrushUp,
+    ArpeggioDown,
+    ArpeggioUp,
+    Rasgueado,
+    Crescendo,
+    Decrescendo,
 }
 
 /// What a technique attaches to.
@@ -45,7 +55,7 @@ pub(crate) enum Target {
 }
 
 impl Technique {
-    pub const ALL: [Technique; 25] = [
+    pub const ALL: [Technique; 34] = [
         Technique::Hammer,
         Technique::PalmMute,
         Technique::LetRing,
@@ -71,18 +81,44 @@ impl Technique {
         Technique::StrokeDown,
         Technique::StrokeUp,
         Technique::Tremolo,
+        Technique::Slap,
+        Technique::Pop,
+        Technique::BrushDown,
+        Technique::BrushUp,
+        Technique::ArpeggioDown,
+        Technique::ArpeggioUp,
+        Technique::Rasgueado,
+        Technique::Crescendo,
+        Technique::Decrescendo,
     ];
 
     pub(crate) fn target(self) -> Target {
         match self {
-            Technique::StrokeDown | Technique::StrokeUp | Technique::Tremolo => Target::Beat,
             Technique::PalmMute
             | Technique::LetRing
             | Technique::Staccato
             | Technique::Accent
             | Technique::HeavyAccent => Target::Chord,
-            _ => Target::Note,
+            _ if self.slide().is_some() || self.harmonic().is_some() => Target::Note,
+            Technique::Hammer
+            | Technique::Dead
+            | Technique::Ghost
+            | Technique::Tapped
+            | Technique::Vibrato
+            | Technique::WideVibrato => Target::Note,
+            _ => Target::Beat,
         }
+    }
+
+    fn strum(self) -> Option<Strum> {
+        Some(match self {
+            Technique::BrushDown => Strum::BrushDown,
+            Technique::BrushUp => Strum::BrushUp,
+            Technique::ArpeggioDown => Strum::ArpeggioDown,
+            Technique::ArpeggioUp => Strum::ArpeggioUp,
+            Technique::Rasgueado => Strum::Rasgueado,
+            _ => return None,
+        })
     }
 
     fn slide(self) -> Option<Slide> {
@@ -154,6 +190,11 @@ impl Technique {
             Technique::StrokeDown => effects.stroke == Some(PickStroke::Down),
             Technique::StrokeUp => effects.stroke == Some(PickStroke::Up),
             Technique::Tremolo => effects.tremolo.is_some(),
+            Technique::Slap => effects.slap == Some(Slap::Slap),
+            Technique::Pop => effects.slap == Some(Slap::Pop),
+            Technique::Crescendo => effects.hairpin == Some(Hairpin::Crescendo),
+            Technique::Decrescendo => effects.hairpin == Some(Hairpin::Decrescendo),
+            _ if self.strum().is_some() => effects.strum == self.strum(),
             _ => false,
         }
     }
@@ -163,6 +204,11 @@ impl Technique {
             Technique::StrokeDown => effects.stroke = on.then_some(PickStroke::Down),
             Technique::StrokeUp => effects.stroke = on.then_some(PickStroke::Up),
             Technique::Tremolo => effects.tremolo = on.then_some(NoteValue::ThirtySecond),
+            Technique::Slap => effects.slap = on.then_some(Slap::Slap),
+            Technique::Pop => effects.slap = on.then_some(Slap::Pop),
+            Technique::Crescendo => effects.hairpin = on.then_some(Hairpin::Crescendo),
+            Technique::Decrescendo => effects.hairpin = on.then_some(Hairpin::Decrescendo),
+            _ if self.strum().is_some() => effects.strum = self.strum().filter(|_| on),
             _ => {}
         }
     }

@@ -19,6 +19,8 @@ export interface Duration {
   value: NoteValue;
   dots: number;
   tuplet: Tuplet | null;
+  /** A second tuplet inside the first. */
+  nested?: Tuplet;
 }
 
 export type Slide =
@@ -31,11 +33,21 @@ export type Slide =
 
 export type BendKind = 'bend' | 'bend_release' | 'prebend' | 'prebend_release';
 
-export interface Bend {
-  kind: BendKind;
-  /** Height in quarter tones: 4 is a full step. */
-  quarter_tones: number;
+export interface CurvePoint {
+  /** From 0 at the start of the note to 60 at its end. */
+  position: number;
+  /** Pitch offset in quarter tones: 4 is a full step. */
+  value: number;
 }
+
+/** A pitch curve over a note, for string bends and the whammy bar. */
+export interface Bend {
+  points: CurvePoint[];
+}
+
+export type Finger = 'thumb' | 'index' | 'middle' | 'ring' | 'pinky';
+export type Dynamic = 'ppp' | 'pp' | 'p' | 'mp' | 'mf' | 'f' | 'ff' | 'fff';
+export type Strum = 'brush_down' | 'brush_up' | 'arpeggio_down' | 'arpeggio_up' | 'rasgueado';
 
 export type Harmonic = 'natural' | 'artificial' | 'pinch' | 'tapped' | 'semi';
 
@@ -47,6 +59,10 @@ export interface NoteEffects {
   vibrato?: 'slight' | 'wide';
   harmonic?: Harmonic;
   accent?: 'normal' | 'heavy';
+  trill?: { fret: number; speed: NoteValue };
+  grace?: { fret: number; on_beat: boolean; hammer: boolean };
+  left_finger?: Finger;
+  right_finger?: Finger;
   palm_mute?: boolean;
   let_ring?: boolean;
   dead?: boolean;
@@ -58,6 +74,11 @@ export interface NoteEffects {
 export interface BeatEffects {
   tremolo?: NoteValue;
   stroke?: 'down' | 'up';
+  strum?: Strum;
+  slap?: 'slap' | 'pop';
+  whammy?: Bend;
+  dynamic?: Dynamic;
+  hairpin?: 'crescendo' | 'decrescendo';
 }
 
 export interface Note {

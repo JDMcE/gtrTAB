@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import Dialogs, { type DialogKind } from './lib/Dialogs.svelte';
+  import EffectDialog, { bendPreset, type EffectKind } from './lib/EffectDialog.svelte';
   import {
     EXTENSION,
     addRecentFile,
@@ -15,7 +16,14 @@
     writeAutosave,
     type OpenedFile,
   } from './lib/files';
-  import { NOTE_VALUES, type EditorState, type Layout, type Score, type Timeline } from './lib/model';
+  import {
+    NOTE_VALUES,
+    type BendKind,
+    type EditorState,
+    type Layout,
+    type Score,
+    type Timeline,
+  } from './lib/model';
   import { Player } from './lib/player';
   import ScoreView from './lib/ScoreView.svelte';
   import init, { Document } from './wasm/gtr_wasm.js';
@@ -38,12 +46,33 @@
     ['harmonic_tapped', 'Tapped (T.H.)'],
     ['harmonic_semi', 'Semi (S.H.)'],
   ];
-  const BEND_KINDS = [
+  const STRUMS = [
+    ['brush_down', 'Strum down'],
+    ['brush_up', 'Strum up'],
+    ['arpeggio_down', 'Arpeggio down'],
+    ['arpeggio_up', 'Arpeggio up'],
+    ['rasgueado', 'Rasgueado'],
+  ];
+  const DYNAMICS = ['ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff'];
+  const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  /** Tuplets as notes played in the time of how many. */
+  const TUPLETS = [
+    [3, 2],
+    [5, 4],
+    [6, 4],
+    [7, 4],
+    [9, 8],
+    [10, 8],
+    [11, 8],
+    [12, 8],
+    [13, 8],
+  ];
+  const BEND_KINDS: [BendKind, string][] = [
     ['bend', 'Bend'],
     ['bend_release', 'Bend and release'],
     ['prebend', 'Pre-bend'],
     ['prebend_release', 'Pre-bend and release'],
-  ];
+  ] as [BendKind, string][];
   const BEND_HEIGHTS = [
     [1, '¼'],
     [2, '½'],
@@ -66,6 +95,7 @@
   let failed = $state(false);
   let recent = $state(recentFiles());
   let dialog = $state<DialogKind | null>(null);
+  let effectDialog = $state<EffectKind | null>(null);
   let zoom = $state(1);
 
   let playing = $state(false);
@@ -255,11 +285,41 @@
     effects.slide ? `slide_${effects.slide.replace('_from', '')}` : '',
   );
   const harmonicValue = $derived(effects.harmonic ? `harmonic_${effects.harmonic}` : '');
-  const bendValue = $derived(effects.bend ? `${effects.bend.kind}:${effects.bend.quarter_tones}` : '');
+  const beatEffects = $derived(editor?.beat_effects ?? {});
+  const strumValue = $derived(beatEffects.strum ?? '');
+
+  const setNoteEffect = (field: string, value: unknown) =>
+    edit((d) => d.setNoteEffect(field, JSON.stringify(value)));
+  const setBeatEffect = (field: string, value: unknown) =>
+    edit((d) => d.setBeatEffect(field, JSON.stringify(value)));
+
+  /** The bend dropdown's value: a preset as `kind:height`, or `custom` for any other curve. */
+  const bendValue = $derived.by(() => {
+    if (!effects.bend) return '';
+    const current = JSON.stringify(effects.bend);
+    for (const [kind] of BEND_KINDS) {
+      for (const [height] of BEND_HEIGHTS) {
+        if (JSON.stringify(bendPreset(kind, height)) === current) return `${kind}:${height}`;
+      }
+    }
+    return 'custom';
+  });
 
   function setBend(value: string) {
+    if (value === 'custom') {
+      effectDialog = 'bend';
+      return;
+    }
     const [kind, height] = value.split(':');
-    edit((d) => d.setBend(kind ?? '', Number(height ?? 0)));
+    setNoteEffect('bend', value === '' ? null : bendPreset(kind as BendKind, Number(height)));
+  }
+
+  const tupletValue = (t: { actual: number; normal: number } | null | undefined) =>
+    t ? `${t.actual}:${t.normal}` : '';
+
+  function setTuplet(value: string, nested: boolean) {
+    const [actual, normal] = value === '' ? [0, 0] : value.split(':').map(Number);
+    edit((d) => (nested ? d.setNestedTuplet(actual, normal) : d.setTuplet(actual, normal)));
   }
 
   /** Chooses one of a set of exclusive techniques from a dropdown; '' clears it. */
@@ -271,7 +331,7 @@
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (dialog || !doc) return;
+    if (dialog || effectDialog || !doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea')) return;
 
@@ -338,6 +398,10 @@
       case 'h': return () => technique('hammer');
       case 's': return () => technique('slide_shift');
       case 'b': return () => setBend(effects.bend ? '' : 'bend:4');
+      case 'B': return () => (effectDialog = 'bend');
+      case 'w': return () => (effectDialog = 'whammy');
+      case '<': return () => technique('crescendo');
+      case '>': return () => technique('decrescendo');
       case 'v': return () => technique('vibrato');
       case 'p': return () => technique('palm_mute');
       case 'i': return () => technique('let_ring');
@@ -464,11 +528,7 @@
           <select
             aria-label="Track"
             title="Track"
-            value={editor.cursor.track}
-            onchange={(e) => {
-              const track = Number(e.currentTarget.value);
-              edit((d) => d.setTrack(track));
-            }}
+            bind:value={() => editor!.cursor.track, (track) => edit((d) => d.setTrack(track))}
           >
             {#each score.tracks as track, i}
               <option value={i}>{track.name || `Track ${i + 1}`}</option>
@@ -502,8 +562,7 @@
           aria-label="Slide"
           title="Slide (S for a shift slide)"
           class:active={slideValue !== ''}
-          value={slideValue}
-          onchange={(e) => chooseTechnique(slideValue, e.currentTarget.value)}
+          bind:value={() => slideValue, (v) => chooseTechnique(slideValue, v)}
         >
           <option value="">Slide</option>
           {#each SLIDES as [value, label]}
@@ -514,10 +573,10 @@
           aria-label="Bend"
           title="Bend (B for a full bend)"
           class:active={bendValue !== ''}
-          value={bendValue}
-          onchange={(e) => setBend(e.currentTarget.value)}
+          bind:value={() => bendValue, (v) => setBend(v)}
         >
           <option value="">Bend</option>
+          <option value="custom">Custom curve…</option>
           {#each BEND_KINDS as [kind, kindLabel]}
             <optgroup label={kindLabel}>
               {#each BEND_HEIGHTS as [height, heightLabel]}
@@ -557,8 +616,7 @@
           aria-label="Harmonic"
           title="Harmonic (N for a natural harmonic)"
           class:active={harmonicValue !== ''}
-          value={harmonicValue}
-          onchange={(e) => chooseTechnique(harmonicValue, e.currentTarget.value)}
+          bind:value={() => harmonicValue, (v) => chooseTechnique(harmonicValue, v)}
         >
           <option value="">Harmonic</option>
           {#each HARMONICS as [value, label]}
@@ -577,6 +635,99 @@
         <button class="tight" class:active={editor.beat_effects?.stroke === 'up'} onclick={() => technique('stroke_up')} title="Upstroke">
           ↑
         </button>
+      </div>
+
+      <div class="group techniques">
+        <button class:active={!!beatEffects.whammy} onclick={() => (effectDialog = 'whammy')} title="Whammy bar (W)">
+          Whammy…
+        </button>
+        <button class:active={!!effects.trill} onclick={() => (effectDialog = 'trill')} disabled={!editor.note} title="Trill">
+          Trill…
+        </button>
+        <button class:active={!!effects.grace} onclick={() => (effectDialog = 'grace')} disabled={!editor.note} title="Grace note">
+          Grace…
+        </button>
+        <select
+          aria-label="Strum"
+          title="Strum or arpeggio"
+          class:active={strumValue !== ''}
+          bind:value={() => strumValue, (v) => chooseTechnique(strumValue, v)}
+        >
+          <option value="">Strum</option>
+          {#each STRUMS as [value, label]}
+            <option {value}>{label}</option>
+          {/each}
+        </select>
+        <button class:active={beatEffects.slap === 'slap'} onclick={() => technique('slap')} title="Slap">
+          Slap
+        </button>
+        <button class:active={beatEffects.slap === 'pop'} onclick={() => technique('pop')} title="Pop">
+          Pop
+        </button>
+        <select
+          aria-label="Dynamic"
+          title="Dynamic: loudness from this beat on"
+          class:active={!!beatEffects.dynamic}
+          bind:value={() => beatEffects.dynamic ?? '', (v) => setBeatEffect('dynamic', v || null)}
+        >
+          <option value="">Dynamic</option>
+          {#each DYNAMICS as value}
+            <option {value}>{value}</option>
+          {/each}
+        </select>
+        <button class="tight" class:active={beatEffects.hairpin === 'crescendo'} onclick={() => technique('crescendo')} title="Crescendo (<)">
+          &lt;
+        </button>
+        <button class="tight" class:active={beatEffects.hairpin === 'decrescendo'} onclick={() => technique('decrescendo')} title="Decrescendo (>)">
+          &gt;
+        </button>
+        <select
+          aria-label="Tuplet"
+          title="Tuplet (/ for a triplet)"
+          class:active={editor.duration.tuplet !== null}
+          bind:value={() => tupletValue(editor?.duration.tuplet), (v) => setTuplet(v, false)}
+        >
+          <option value="">Tuplet</option>
+          {#each TUPLETS as [actual, normal]}
+            <option value="{actual}:{normal}">{actual}:{normal}</option>
+          {/each}
+        </select>
+        <select
+          aria-label="Nested tuplet"
+          title="A second tuplet inside the first"
+          class:active={!!editor.duration.nested}
+          disabled={editor.duration.tuplet === null}
+          bind:value={() => tupletValue(editor?.duration.nested), (v) => setTuplet(v, true)}
+        >
+          <option value="">Nested</option>
+          {#each TUPLETS.slice(0, 4) as [actual, normal]}
+            <option value="{actual}:{normal}">{actual}:{normal}</option>
+          {/each}
+        </select>
+        <select
+          aria-label="Fretting-hand finger"
+          title="Fretting-hand finger"
+          class:active={!!effects.left_finger}
+          disabled={!editor.note}
+          bind:value={() => effects.left_finger ?? '', (v) => setNoteEffect('left_finger', v || null)}
+        >
+          <option value="">LH</option>
+          {#each FINGERS as finger, i}
+            <option value={finger}>{'T1234'[i]}</option>
+          {/each}
+        </select>
+        <select
+          aria-label="Picking-hand finger"
+          title="Picking-hand finger"
+          class:active={!!effects.right_finger}
+          disabled={!editor.note}
+          bind:value={() => effects.right_finger ?? '', (v) => setNoteEffect('right_finger', v || null)}
+        >
+          <option value="">RH</option>
+          {#each FINGERS as finger, i}
+            <option value={finger}>{'pimac'[i]}</option>
+          {/each}
+        </select>
       </div>
 
       <div class="group end">
@@ -635,6 +786,22 @@
       edit((d) => d.setTuning(new Uint8Array(strings), capo));
     }}
     onclose={() => (dialog = null)}
+  />
+{/if}
+
+{#if effectDialog && editor}
+  <EffectDialog
+    kind={effectDialog}
+    note={editor.note}
+    beatEffects={editor.beat_effects}
+    onapply={(value) => {
+      // Read which effect this is before closing the dialog clears it.
+      const kind = effectDialog;
+      effectDialog = null;
+      if (kind === 'whammy') setBeatEffect('whammy', value);
+      else if (kind) setNoteEffect(kind, value);
+    }}
+    onclose={() => (effectDialog = null)}
   />
 {/if}
 

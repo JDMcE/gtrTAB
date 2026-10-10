@@ -94,6 +94,8 @@ pub enum EditError {
     InvalidTuning,
     #[error("existing notes use strings the new tuning does not have")]
     NotesOnRemovedStrings,
+    #[error("that is not a valid setting for this effect")]
+    InvalidEffect,
     #[error("fret is out of range")]
     FretOutOfRange,
     #[error("a score needs at least one bar")]
@@ -122,8 +124,8 @@ impl Command {
                 if usize::from(note.string) >= staff(score, &at)?.tuning.strings.len() {
                     return Err(EditError::StringOutOfRange);
                 }
-                if note.effects.bend.is_some_and(|b| !b.is_valid()) {
-                    return Err(EditError::InvalidBeat);
+                if !note.effects.is_valid() {
+                    return Err(EditError::InvalidEffect);
                 }
                 let notes = &mut beat_mut(score, &at)?.notes;
                 Ok(
@@ -133,11 +135,9 @@ impl Command {
                             note: std::mem::replace(&mut notes[i], note),
                         },
                         Err(i) => {
+                            let string = note.string;
                             notes.insert(i, note);
-                            Command::RemoveNote {
-                                at,
-                                string: note.string,
-                            }
+                            Command::RemoveNote { at, string }
                         }
                     },
                 )
@@ -185,7 +185,7 @@ impl Command {
             }
             Command::SetBeatEffects { at, effects } => {
                 if !effects.is_valid() {
-                    return Err(EditError::InvalidBeat);
+                    return Err(EditError::InvalidEffect);
                 }
                 let beat = beat_mut(score, &at)?;
                 Ok(Command::SetBeatEffects {

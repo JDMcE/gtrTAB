@@ -1,8 +1,10 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Bend, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff,
+    Bar, Beat, BeatEffects, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff,
     TimeSignature, Track, Tuning, Tuplet,
 };
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::technique::Target;
 use crate::{BeatRef, Command, EditError, History, Technique};
@@ -141,8 +143,8 @@ impl Editor {
             duration: self.duration,
             note: (self.current_beat())
                 .and_then(|b| b.note_on(self.cursor.string))
-                .copied(),
-            beat_effects: self.current_beat().map(|b| b.effects),
+                .cloned(),
+            beat_effects: self.current_beat().map(|b| b.effects.clone()),
             can_undo: self.history.can_undo(),
             can_redo: self.history.can_redo(),
             can_paste: self.clipboard.is_some(),
@@ -261,10 +263,10 @@ impl Editor {
     /// Types one digit of a fret number. With `combine`, a digit typed straight after
     /// another extends it, so 1 then 2 gives fret 12.
     pub fn type_digit(&mut self, digit: u8, combine: bool) -> Result<(), EditError> {
-        let existing = self
-            .current_beat()
+        let note = (self.current_beat())
             .and_then(|b| b.note_on(self.cursor.string))
-            .map(|n| n.fret);
+            .cloned();
+        let existing = note.as_ref().map(|n| n.fret);
         let fret = match existing {
             Some(tens)
                 if combine
@@ -276,7 +278,12 @@ impl Editor {
             }
             _ => digit,
         };
-        self.put_note(Note::new(self.cursor.string, fret))?;
+        // Retyping the fret of an existing note keeps its techniques.
+        self.put_note(Note {
+            fret,
+            tied: false,
+            ..note.unwrap_or(Note::new(self.cursor.string, 0))
+        })?;
         self.digit_pending = true;
         Ok(())
     }
@@ -325,7 +332,10 @@ impl Editor {
     /// to the previous note on that string.
     pub fn toggle_tie(&mut self) -> Result<(), EditError> {
         let string = self.cursor.string;
-        if let Some(&note) = self.current_beat().and_then(|b| b.note_on(string)) {
+        if let Some(note) = (self.current_beat())
+            .and_then(|b| b.note_on(string))
+            .cloned()
+        {
             return self.run(Command::PutNote {
                 at: self.at(),
                 note: Note {
@@ -339,8 +349,11 @@ impl Editor {
             Some(i) => self.beats(bar).get(i),
             None => bar.checked_sub(1).and_then(|b| self.beats(b).last()),
         };
-        match previous.and_then(|b| b.note_on(string)) {
-            Some(&note) => self.put_note(Note { tied: true, ..note }),
+        match previous.and_then(|b| b.note_on(string)).map(|n| n.fret) {
+            Some(fret) => self.put_note(Note {
+                tied: true,
+                ..Note::new(string, fret)
+            }),
             None => Ok(()),
         }
     }
@@ -361,7 +374,7 @@ impl Editor {
                 let at = self.beat_ref(bar, beat);
                 (self.beats(bar)[beat].notes.iter())
                     .filter(move |n| everything || n.string == self.cursor.string)
-                    .map(move |n| (at, *n))
+                    .map(move |n| (at, n.clone()))
             })
             .collect()
     }
@@ -380,7 +393,7 @@ impl Editor {
                 beats
                     .into_iter()
                     .map(|(bar, beat)| {
-                        let mut effects = self.beats(bar)[beat].effects;
+                        let mut effects = self.beats(bar)[beat].effects.clone();
                         technique.set_on_beat(&mut effects, on);
                         Command::SetBeatEffects {
                             at: self.beat_ref(bar, beat),
@@ -404,16 +417,37 @@ impl Editor {
         self.keep_selection(|e| e.run(Command::Batch(commands)))
     }
 
-    /// Sets or clears the bend on the note under the cursor, or on the selected notes.
-    pub fn set_bend(&mut self, bend: Option<Bend>) -> Result<(), EditError> {
+    /// Sets one field of the effects of the note under the cursor, or of every selected
+    /// note. `field` is the field's name in the saved file, such as `"bend"` or `"trill"`,
+    /// and `value` its JSON; `null` clears it.
+    pub fn set_note_effect(&mut self, field: &str, value: &Value) -> Result<(), EditError> {
         let commands = self
             .target_notes(false)
             .into_iter()
             .map(|(at, mut note)| {
-                note.effects.bend = bend;
-                Command::PutNote { at, note }
+                note.effects = patched(&note.effects, field, value)?;
+                Ok(Command::PutNote { at, note })
             })
-            .collect();
+            .collect::<Result<_, EditError>>()?;
+        self.keep_selection(|e| e.run(Command::Batch(commands)))
+    }
+
+    /// Sets one field of the effects of the beat under the cursor, or of every selected
+    /// beat; see [`Self::set_note_effect`].
+    pub fn set_beat_effect(&mut self, field: &str, value: &Value) -> Result<(), EditError> {
+        let mut beats = self.selected_beats();
+        if beats.is_empty() && self.current_beat().is_some() {
+            beats.push((self.cursor.bar, self.cursor.beat));
+        }
+        let commands = beats
+            .into_iter()
+            .map(|(bar, beat)| {
+                Ok(Command::SetBeatEffects {
+                    at: self.beat_ref(bar, beat),
+                    effects: patched(&self.beats(bar)[beat].effects, field, value)?,
+                })
+            })
+            .collect::<Result<_, EditError>>()?;
         self.keep_selection(|e| e.run(Command::Batch(commands)))
     }
 
@@ -453,6 +487,28 @@ impl Editor {
                 Some(_) => None,
                 None => Some(Tuplet::TRIPLET),
             },
+            nested: None,
+            ..self.duration
+        })
+    }
+
+    /// Sets or clears the tuplet, e.g. 5 notes in the time of 4. Clearing it also clears
+    /// any tuplet nested inside.
+    pub fn set_tuplet(&mut self, tuplet: Option<Tuplet>) -> Result<(), EditError> {
+        self.apply_duration(Duration {
+            tuplet,
+            nested: self.duration.nested.filter(|_| tuplet.is_some()),
+            ..self.duration
+        })
+    }
+
+    /// Sets or clears a second tuplet inside the first.
+    pub fn set_nested_tuplet(&mut self, nested: Option<Tuplet>) -> Result<(), EditError> {
+        if nested.is_some() && self.duration.tuplet.is_none() {
+            return Err(EditError::InvalidDuration);
+        }
+        self.apply_duration(Duration {
+            nested,
             ..self.duration
         })
     }
@@ -626,12 +682,12 @@ impl Editor {
         let string_count = self.string_count();
         let fit = |beat: &Beat| Beat {
             duration: beat.duration,
-            effects: beat.effects,
+            effects: beat.effects.clone(),
             notes: beat
                 .notes
                 .iter()
-                .copied()
                 .filter(|n| usize::from(n.string) < string_count)
+                .cloned()
                 .collect(),
         };
         let Cursor {
@@ -805,4 +861,20 @@ impl Editor {
             beat,
         }
     }
+}
+
+/// Returns a copy of an effects struct with one of its fields replaced from JSON.
+fn patched<T: Serialize + DeserializeOwned>(
+    effects: &T,
+    field: &str,
+    value: &Value,
+) -> Result<T, EditError> {
+    let mut json = serde_json::to_value(effects).map_err(|_| EditError::InvalidEffect)?;
+    let fields = json.as_object_mut().ok_or(EditError::InvalidEffect)?;
+    if value.is_null() {
+        fields.remove(field);
+    } else {
+        fields.insert(field.to_owned(), value.clone());
+    }
+    serde_json::from_value(json).map_err(|_| EditError::InvalidEffect)
 }

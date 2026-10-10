@@ -69,6 +69,9 @@ pub struct Duration {
     pub dots: u8,
     #[serde(default)]
     pub tuplet: Option<Tuplet>,
+    /// A second tuplet inside the first, such as a triplet within a quintuplet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nested: Option<Tuplet>,
 }
 
 impl Duration {
@@ -79,6 +82,7 @@ impl Duration {
             value,
             dots: 0,
             tuplet: None,
+            nested: None,
         }
     }
 
@@ -91,10 +95,12 @@ impl Duration {
         let dots = u32::from(self.dots.min(Self::MAX_DOTS));
         // n dots multiply the length by 2 - 1/2^n.
         let dotted = self.value.length() * Rational::new((2 << dots) - 1, 1 << dots);
-        match self.tuplet {
-            Some(t) => dotted * Rational::new(t.normal.get().into(), t.actual.get().into()),
-            None => dotted,
-        }
+        [self.tuplet, self.nested]
+            .into_iter()
+            .flatten()
+            .fold(dotted, |length, t| {
+                length * Rational::new(t.normal.get().into(), t.actual.get().into())
+            })
     }
 }
 
@@ -116,5 +122,13 @@ mod tests {
         let mut triplet = Duration::new(NoteValue::Eighth);
         triplet.tuplet = Some(Tuplet::TRIPLET);
         assert_eq!(triplet.length() * 3, Rational::new(1, 4));
+        // Three of these fill one note of a quintuplet of eighths.
+        let mut nested = Duration::new(NoteValue::Sixteenth);
+        nested.tuplet = Some(Tuplet {
+            actual: NonZeroU8::new(5).unwrap(),
+            normal: NonZeroU8::new(4).unwrap(),
+        });
+        nested.nested = Some(Tuplet::TRIPLET);
+        assert_eq!(nested.length() * 3, Rational::new(1, 10));
     }
 }

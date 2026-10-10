@@ -2,7 +2,7 @@
 
 use std::io::{Cursor, Read, Write};
 
-use gtr_model::{ModelError, Score};
+use gtr_model::{Bend, BendKind, ModelError, Score};
 use serde::Serialize;
 use serde_json::Value;
 use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 2;
+pub const FORMAT_VERSION: u64 = 3;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -73,9 +73,40 @@ pub fn load(bytes: &[u8]) -> Result<Score, NativeError> {
 }
 
 /// Upgrades score JSON written by an older format version to the current layout.
-fn migrate(_from: u64, _score: &mut Value) {
-    // Version 2 added note and beat effects as optional fields, so version 1 files are
-    // already valid and need no changes.
+fn migrate(from: u64, score: &mut Value) {
+    // Version 2 added note and beat effects as optional fields, so version 1 needs nothing.
+    if from < 3 {
+        // Version 3 stores a bend as a curve instead of a shape and a height.
+        for_each_note(score, |note| {
+            let Some(bend) = note.pointer_mut("/effects/bend") else {
+                return;
+            };
+            let kind = serde_json::from_value::<BendKind>(bend["kind"].take());
+            let height = bend["quarter_tones"].as_i64().unwrap_or(4).clamp(1, 12) as i8;
+            if let Ok(curve) =
+                serde_json::to_value(Bend::preset(kind.unwrap_or(BendKind::Bend), height))
+            {
+                *bend = curve;
+            }
+        });
+    }
+}
+
+fn for_each_note(score: &mut Value, mut visit: impl FnMut(&mut Value)) {
+    let each = |value: &mut Value, key: &str, f: &mut dyn FnMut(&mut Value)| {
+        if let Some(items) = value.get_mut(key).and_then(Value::as_array_mut) {
+            items.iter_mut().for_each(f);
+        }
+    };
+    each(score, "tracks", &mut |track| {
+        each(track, "staves", &mut |staff| {
+            each(staff, "bars", &mut |bar| {
+                each(bar, "voices", &mut |voice| {
+                    each(voice, "beats", &mut |beat| each(beat, "notes", &mut visit));
+                });
+            });
+        });
+    });
 }
 
 #[cfg(test)]
@@ -96,6 +127,20 @@ mod tests {
     fn round_trip() {
         let score = demo_score();
         assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+    }
+
+    #[test]
+    fn version_2_bends_become_curves() {
+        let mut score = serde_json::to_value(demo_score()).unwrap();
+        score["tracks"][0]["staves"][0]["bars"][0]["voices"][0]["beats"][0]["notes"][0]["effects"] =
+            serde_json::json!({ "bend": { "kind": "bend_release", "quarter_tones": 2 } });
+        let json = serde_json::json!({ "format_version": 2, "score": score }).to_string();
+        let loaded = load(&archive(&json)).unwrap();
+        let note = &loaded.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+        assert_eq!(
+            note.effects.bend,
+            Some(Bend::preset(BendKind::BendRelease, 2))
+        );
     }
 
     #[test]

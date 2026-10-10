@@ -125,10 +125,7 @@ impl Beat {
     pub fn is_valid_for(&self, string_count: usize) -> bool {
         self.duration.is_valid()
             && self.effects.is_valid()
-            && self
-                .notes
-                .iter()
-                .all(|n| n.effects.bend.is_none_or(|b| b.is_valid()))
+            && self.notes.iter().all(|n| n.effects.is_valid())
             && self
                 .notes
                 .iter()
@@ -137,7 +134,7 @@ impl Beat {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Note {
     /// Index into the staff tuning; 0 is the highest string.
     pub string: u8,
