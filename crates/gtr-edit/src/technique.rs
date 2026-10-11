@@ -180,7 +180,11 @@ impl Technique {
             Technique::Vibrato => effects.vibrato = on.then_some(Vibrato::Slight),
             Technique::WideVibrato => effects.vibrato = on.then_some(Vibrato::Wide),
             _ if self.slide().is_some() => effects.slide = self.slide().filter(|_| on),
-            _ if self.harmonic().is_some() => effects.harmonic = self.harmonic().filter(|_| on),
+            _ if self.harmonic().is_some() => {
+                effects.harmonic = self.harmonic().filter(|_| on);
+                // Where the string is touched belongs to the harmonic it was set for.
+                effects.harmonic_touch = None;
+            }
             _ => {}
         }
     }

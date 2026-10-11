@@ -53,10 +53,15 @@ pub(crate) fn key_width(key: i8) -> f64 {
 
 /// Space a beat's markings need to the left of its notes: grace notes and strum arrows.
 fn lead(beat: &Beat) -> f64 {
-    let grace = beat.notes.iter().any(|n| n.effects.grace.is_some());
+    let graces = (beat.notes.iter())
+        .filter_map(|n| n.effects.grace.as_ref())
+        .map(|g| g.notes.len())
+        .max();
+    let grace = graces.map_or(0.0, |count| {
+        12.0 + crate::tab::GRACE_STEP * count.saturating_sub(1) as f64
+    });
     let strum = matches!(beat.effects.strum, Some(s) if s != Strum::Rasgueado);
-    let room = |needed: bool, width: f64| if needed { width } else { 0.0 };
-    room(grace, 12.0) + room(strum, 6.0)
+    grace + if strum { 6.0 } else { 0.0 }
 }
 
 /// Markings that sit beside a note need the beat to be at least a little wider.

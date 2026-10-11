@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 4;
+pub const FORMAT_VERSION: u64 = 5;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -91,6 +91,25 @@ fn migrate(from: u64, score: &mut Value) {
             }
         });
     }
+    if from < 5 {
+        // Version 5 lets a grace be several notes, each on a string of its own. It also
+        // added tempo changes inside a bar and where a harmonic is touched, as optional
+        // fields.
+        for_each_note(score, |note| {
+            let string = note["string"].clone();
+            let Some(grace) = note.pointer_mut("/effects/grace") else {
+                return;
+            };
+            if let Some(fields) = grace.as_object_mut()
+                && let Some(fret) = fields.remove("fret")
+            {
+                fields.insert(
+                    "notes".into(),
+                    serde_json::json!([{ "string": string, "fret": fret }]),
+                );
+            }
+        });
+    }
 }
 
 fn for_each_note(score: &mut Value, mut visit: impl FnMut(&mut Value)) {
@@ -142,6 +161,25 @@ mod tests {
             note.effects.bend,
             Some(Bend::preset(BendKind::BendRelease, 2))
         );
+    }
+
+    #[test]
+    fn version_4_grace_notes_become_lists() {
+        let mut score = serde_json::to_value(demo_score()).unwrap();
+        let note =
+            &mut score["tracks"][0]["staves"][0]["bars"][0]["voices"][0]["beats"][0]["notes"][0];
+        let string = note["string"].as_u64().unwrap() as u8;
+        note["effects"] =
+            serde_json::json!({ "grace": { "fret": 3, "on_beat": true, "hammer": true } });
+        let json = serde_json::json!({ "format_version": 4, "score": score }).to_string();
+        let loaded = load(&archive(&json)).unwrap();
+        let note = &loaded.tracks[0].staves[0].bars[0].voices[0].beats[0].notes[0];
+        assert_eq!(
+            note.effects.grace,
+            Some(gtr_model::Grace::single(string, 3, true, true))
+        );
+        // And what is saved now is read back as it is.
+        assert_eq!(load(&save(&loaded).unwrap()).unwrap(), loaded);
     }
 
     #[test]

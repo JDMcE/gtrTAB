@@ -1,7 +1,7 @@
 //! Puts a score on the page: breaks it into lines, stacks the staves of each line and has
 //! each staff drawn.
 
-use gtr_model::{Bar, Clef, MasterBar, Score, Staff, Target};
+use gtr_model::{Bar, Clef, MasterBar, Rational, Score, Staff, Target};
 use serde::Deserialize;
 
 use crate::display::r;
@@ -212,7 +212,33 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         let range = first..end;
 
         // Stack the staves of the line, working down the page.
-        let mut cursor = bar_marks(score, &times, &bars, range.clone(), top, &mut items);
+        // Where a moment inside a bar falls across the page: on the beat that starts
+        // there in some staff shown, or failing that as far along the bar as it is through it.
+        let moment_x = |bar: usize, moment: Rational| -> f64 {
+            for (row, part) in parts.iter().enumerate() {
+                for (v, voice) in part.staff.bars[bar].voices.iter().enumerate() {
+                    let mut time = Rational::from_integer(0);
+                    for (i, beat) in voice.beats.iter().enumerate() {
+                        if time == moment {
+                            return positions[row][v][bar][i];
+                        }
+                        time += beat.duration.length();
+                    }
+                }
+            }
+            let through = moment / masters[bar].time_signature.bar_length();
+            let through = *through.numer() as f64 / *through.denom() as f64;
+            r(bars[bar].x + bars[bar].w * through)
+        };
+        let mut cursor = bar_marks(
+            score,
+            &times,
+            &bars,
+            &moment_x,
+            range.clone(),
+            top,
+            &mut items,
+        );
         // Top line of the first staff of a track that has several, for the bracket.
         let mut bracket_top = None;
         let mut rows = Vec::with_capacity(parts.len());
@@ -559,6 +585,7 @@ fn bar_marks(
     score: &Score,
     times: &[Option<f64>],
     bars: &[BarBox],
+    moment_x: &dyn Fn(usize, Rational) -> f64,
     range: std::ops::Range<usize>,
     top: f64,
     items: &mut Vec<Item>,
@@ -578,6 +605,7 @@ fn bar_marks(
         let m = &masters[bar];
         let changes = bar > 0 && (m.tempo.is_some() || m.feel.is_some());
         m.section.is_some()
+            || !m.tempo_changes.is_empty()
             || m.timer
             || m.target.is_some()
             || m.jump.is_some()
@@ -646,6 +674,12 @@ fn bar_marks(
                     };
                     items.push(text(x, y, name.into(), 11.0, Align::Left));
                 }
+            }
+            // A change of tempo inside the bar stands over the beat it starts on.
+            for change in &m.tempo_changes {
+                let mark = format!("\u{2669} = {}", change.tempo);
+                let at = moment_x(bar, change.position) - 5.0;
+                items.push(text(at, y, mark, 12.0, Align::Left));
             }
             // What happens at the end of the bar is written at its right-hand end.
             let mut ending = Vec::new();
@@ -1022,6 +1056,10 @@ mod tests {
         second.alternate_endings = 0b110;
         second.jump = Some(gtr_model::Jump::DalSegnoAlFine);
         second.tempo = Some(90);
+        second.tempo_changes = vec![gtr_model::TempoChange {
+            position: Rational::new(1, 2),
+            tempo: 132,
+        }];
         second.feel = Some(gtr_model::Feel::SwingEighths);
         let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
         beats[0].effects.chord = Some("Em7".into());
@@ -1040,6 +1078,7 @@ mod tests {
             "2. 3.",
             "D.S. al Fine",
             "\u{2669} = 90",
+            "\u{2669} = 132",
             "Swing 8ths",
             "Em7",
             "with feeling",

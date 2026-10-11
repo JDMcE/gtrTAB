@@ -59,12 +59,14 @@
     /** The note under the cursor. */
     note: Note | null;
     beatEffects: BeatEffects | null;
+    /** How many strings the staff has, for grace notes on other strings. */
+    strings: number;
     /** Called with the effect's new value, or `null` to remove it. */
     onapply: (value: unknown) => void;
     onclose: () => void;
   }
 
-  let { kind, note, beatEffects, onapply, onclose }: Props = $props();
+  let { kind, note, beatEffects, strings, onapply, onclose }: Props = $props();
 
   // The dialog is created for one effect and edits a copy of the values it opened with.
   const mode = untrack(() => kind);
@@ -73,6 +75,7 @@
     trill: note?.effects?.trill,
     grace: note?.effects?.grace,
     fret: note?.fret ?? 0,
+    string: note?.string ?? 0,
   }));
   const isCurve = mode === 'bend' || mode === 'whammy';
   const existed =
@@ -190,25 +193,31 @@
   // --- Trill and grace note ---
   let trillFret = $state(initial.trill?.fret ?? initial.fret + 2);
   let trillSpeed = $state(initial.trill?.speed ?? 'sixteenth');
-  let graceFret = $state(initial.grace?.fret ?? Math.max(0, initial.fret - 2));
+  /** The most notes a grace can have, as `gtr_model::Grace::MAX_NOTES`. */
+  const MAX_GRACE_NOTES = 4;
+  let graceNotes = $state(
+    initial.grace?.notes.map((g) => ({ ...g })) ?? [
+      { string: initial.string, fret: Math.max(0, initial.fret - 2) },
+    ],
+  );
   let graceOnBeat = $state(initial.grace?.on_beat ?? false);
   let graceHammer = $state(initial.grace?.hammer ?? true);
 
   const CURVE_HINT =
     'Pitch over the length of the note. Drag a point to move it, click the grid to add one, ' +
     'and double-click a point to remove it.';
-  const TITLES = { bend: 'Bend', whammy: 'Whammy bar', trill: 'Trill', grace: 'Grace note' };
+  const TITLES = { bend: 'Bend', whammy: 'Whammy bar', trill: 'Trill', grace: 'Grace notes' };
   const HINTS = {
     bend: CURVE_HINT,
     whammy: CURVE_HINT,
     trill: 'Alternates quickly between the note and another fret on the same string.',
-    grace: 'A quick note on the same string just before this one.',
+    grace: 'Quick notes just before this one, played in the order given. They can be on other strings.',
   };
 
   function submit() {
     if (isCurve) onapply({ points: curve });
     else if (kind === 'trill') onapply({ fret: trillFret, speed: trillSpeed });
-    else onapply({ fret: graceFret, on_beat: graceOnBeat, hammer: graceHammer });
+    else onapply({ notes: graceNotes, on_beat: graceOnBeat, hammer: graceHammer });
   }
 </script>
 
@@ -315,13 +324,44 @@
       </select>
     </label>
   {:else}
-    <label>
-      Fret
-      <input type="number" min="0" max="36" required bind:value={graceFret} />
-    </label>
+    {#each graceNotes as graceNote, i (i)}
+      <div class="grace-note">
+        <label>
+          String
+          <select bind:value={graceNote.string}>
+            {#each { length: strings }, string (string)}
+              <option value={string}>{string + 1}</option>
+            {/each}
+          </select>
+        </label>
+        <label>
+          Fret
+          <input type="number" min="0" max="36" required bind:value={graceNote.fret} />
+        </label>
+        {#if graceNotes.length > 1}
+          <button
+            type="button"
+            class="btn"
+            aria-label="Remove grace note {i + 1}"
+            onclick={() => (graceNotes = graceNotes.filter((_, at) => at !== i))}
+          >
+            Remove
+          </button>
+        {/if}
+      </div>
+    {/each}
+    {#if graceNotes.length < MAX_GRACE_NOTES}
+      <button
+        type="button"
+        class="btn add-grace"
+        onclick={() => (graceNotes = [...graceNotes, { ...graceNotes[graceNotes.length - 1] }])}
+      >
+        Add a note
+      </button>
+    {/if}
     <label class="check">
       <input type="checkbox" bind:checked={graceHammer} />
-      Hammer on or pull off into the main note
+      Hammer on or pull off from one note to the next on the same string
     </label>
     <label class="check">
       <input type="checkbox" bind:checked={graceOnBeat} />
@@ -338,6 +378,17 @@
 </Dialog>
 
 <style>
+  .grace-note {
+    display: flex;
+    align-items: end;
+    gap: var(--space-3);
+    margin-bottom: var(--space-2);
+  }
+
+  .add-grace {
+    margin-bottom: var(--space-3);
+  }
+
   .presets,
   .heights {
     display: flex;

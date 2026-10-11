@@ -16,36 +16,22 @@ pub struct Document {
     import_report: String,
 }
 
-/// A passage ready to be played: its tracks are rendered one at a time, each on its own,
-/// so that the player can mix them and change the mix while they sound.
+/// A passage ready to be played.
 #[wasm_bindgen]
-pub struct RenderedAudio {
-    timeline: gtr_audio::Timeline,
-    sample_rate: u32,
+pub struct Passage {
+    events: Vec<u8>,
     timeline_json: String,
 }
 
 #[wasm_bindgen]
-impl RenderedAudio {
-    /// Mono samples of one track, before its volume and pan; empty if it has no notes.
-    #[wasm_bindgen(js_name = renderTrack)]
-    pub fn render_track(&self, track: usize) -> Vec<f32> {
-        gtr_audio::render_channel(&self.timeline, track, self.sample_rate)
+impl Passage {
+    /// The passage as `gtr_audio::Timeline` bytes, for the synth in the AudioWorklet.
+    #[wasm_bindgen(getter)]
+    pub fn events(&self) -> Vec<u8> {
+        self.events.clone()
     }
 
-    /// Mono samples of the metronome and count-in; empty if there are none.
-    #[wasm_bindgen(js_name = renderClicks)]
-    pub fn render_clicks(&self) -> Vec<f32> {
-        gtr_audio::render_clicks(&self.timeline, self.sample_rate)
-    }
-
-    #[wasm_bindgen(getter, js_name = trackCount)]
-    pub fn track_count(&self) -> usize {
-        self.timeline.channels.len()
-    }
-
-    /// JSON `{ beats: [{ bar, beat, time }], automation: [{ channel, time, gain, pan }],
-    /// duration }`, times in seconds.
+    /// JSON `{ beats: [{ bar, beat, time }], duration }`, times in seconds.
     #[wasm_bindgen(getter, js_name = timelineJson)]
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
@@ -145,24 +131,19 @@ impl Document {
         Ok(serde_json::to_string(&layout)?)
     }
 
-    /// Prepares audio for playback. `options_json` holds `gtr_audio::Options` fields.
-    #[wasm_bindgen(js_name = renderAudio)]
-    pub fn render_audio(
-        &self,
-        options_json: &str,
-        sample_rate: u32,
-    ) -> Result<RenderedAudio, JsError> {
+    /// Compiles the score to the events the synth plays. `options_json` holds
+    /// `gtr_audio::Options` fields; `follow` is the track whose beats move the playback
+    /// cursor.
+    #[wasm_bindgen(js_name = compileAudio)]
+    pub fn compile_audio(&self, options_json: &str, follow: usize) -> Result<Passage, JsError> {
         let options: Options = serde_json::from_str(options_json)?;
-        let timeline =
-            gtr_audio::compile(self.editor.score(), self.editor.cursor().track, &options);
-        Ok(RenderedAudio {
+        let timeline = gtr_audio::compile(self.editor.score(), follow, &options);
+        Ok(Passage {
             timeline_json: serde_json::to_string(&serde_json::json!({
                 "beats": timeline.beats,
-                "automation": timeline.automation,
                 "duration": timeline.duration,
             }))?,
-            timeline,
-            sample_rate,
+            events: timeline.to_bytes(),
         })
     }
 
@@ -336,6 +317,12 @@ impl Document {
     #[wasm_bindgen(js_name = setKeySignature)]
     pub fn set_key_signature(&mut self, key: i8) -> Result<(), JsError> {
         Ok(self.editor.set_key_signature(key)?)
+    }
+
+    /// Changes the tempo from the cursor's beat on; zero takes away the change there.
+    #[wasm_bindgen(js_name = setTempoChange)]
+    pub fn set_tempo_change(&mut self, tempo: u32) -> Result<(), JsError> {
+        Ok(self.editor.set_tempo_change((tempo > 0).then_some(tempo))?)
     }
 
     #[wasm_bindgen(js_name = setTempo)]

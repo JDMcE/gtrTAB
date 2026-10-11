@@ -58,12 +58,24 @@ pub struct MasterBar {
     /// A new tempo from this bar on, in quarter notes per minute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tempo: Option<u32>,
+    /// Changes of tempo part-way through the bar, in the order they come.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tempo_changes: Vec<TempoChange>,
     /// Whether pairs of short notes are played unevenly from this bar on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feel: Option<Feel>,
     /// The time elapsed when the piece reaches this bar is written above it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub timer: bool,
+}
+
+/// A new tempo from a beat inside a bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TempoChange {
+    /// Where in the bar it happens, in whole notes from the bar's start.
+    pub position: Rational,
+    /// Quarter notes per minute.
+    pub tempo: u32,
 }
 
 fn is_zero(value: &u8) -> bool {
@@ -135,6 +147,7 @@ impl MasterBar {
             target: None,
             jump: None,
             tempo: None,
+            tempo_changes: Vec::new(),
             feel: None,
             timer: false,
         }
@@ -145,6 +158,12 @@ impl MasterBar {
             && self.key_signature.abs() <= MasterBar::MAX_KEY
             && self.repeat_count != 1
             && self.tempo != Some(0)
+            && (self.tempo_changes.iter()).all(|c| {
+                c.tempo != 0
+                    && c.position > Rational::from_integer(0)
+                    && c.position < self.time_signature.bar_length()
+            })
+            && (self.tempo_changes.windows(2)).all(|w| w[0].position < w[1].position)
             && (self.section.as_ref()).is_none_or(|s| s.chars().count() <= 120)
     }
 }
@@ -281,6 +300,9 @@ impl Beat {
         self.duration.is_valid()
             && self.effects.is_valid()
             && self.notes.iter().all(|n| n.effects.is_valid())
+            && (self.notes.iter())
+                .flat_map(|n| n.effects.grace.iter().flat_map(|g| &g.notes))
+                .all(|g| usize::from(g.string) < string_count)
             && self
                 .notes
                 .iter()

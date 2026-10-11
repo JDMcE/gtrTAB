@@ -37,6 +37,13 @@
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
   import { Player, mixOf } from './lib/player';
+  import {
+    DEFAULT_SOUNDFONT,
+    fetchDefaultSoundFont,
+    pickSoundFont,
+    storeSoundFont,
+    storedSoundFont,
+  } from './lib/soundfont';
   import { THEMES, applyTheme, loadPrefs, savePrefs, type Theme } from './lib/prefs';
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
@@ -85,6 +92,8 @@
   /** Longest pause between two digits that still makes one fret number. */
   const DIGIT_WINDOW_MS = 900;
   const AUTOSAVE_DELAY_MS = 1500;
+  /** How long after an edit the passage being played is handed to the synth again. */
+  const EDIT_PLAYBACK_DELAY_MS = 60;
   /** Below this window width the palette becomes a strip and the inspector floats. */
   const NARROW_WIDTH = 860;
   /** From this width the inspector fits beside a full-width page, so it opens by default. */
@@ -117,6 +126,8 @@
   let viewBar = $state(0);
   let metronome = $state(false);
   let countIn = $state(false);
+  /** Play the repeats again after a D.C. or D.S., instead of passing through them. */
+  let replayRepeats = $state(false);
   let speed = $state(1);
 
   const prefs = $state(loadPrefs());
@@ -270,29 +281,36 @@
 
   // --- Playback ---
 
+  /** What is playing: the options it was compiled with and the track being followed. */
+  let passage: { options: string; track: number } | null = null;
+
+  /** Compiles the passage being played from the score as it now stands. */
+  function compilePassage(doc: Document, { options, track }: { options: string; track: number }) {
+    const compiled = doc.compileAudio(options, track);
+    const timeline: Timeline = JSON.parse(compiled.timelineJson);
+    const events = compiled.events;
+    compiled.free();
+    return { events, timeline };
+  }
+
   const play = () =>
     run(async () => {
       if (!doc || !editor) return;
       const selection = editor.selection;
-      const options = {
+      const options = JSON.stringify({
         from_bar: selection ? selection[0][0] : editor.cursor.bar,
         to_bar: selection ? selection[1][0] + 1 : null,
         metronome,
         count_in: countIn,
+        replay_repeats: replayRepeats,
         speed,
         staff: editor.cursor.staff,
         voice: editor.cursor.voice,
-      };
-      const audio = doc.renderAudio(JSON.stringify(options), player.sampleRate);
-      const timeline: Timeline = JSON.parse(audio.timelineJson);
-      // One buffer per track, mixed as they play, so the mixer works during playback.
-      const stems = Array.from({ length: audio.trackCount }, (_, track) => {
-        const samples = audio.renderTrack(track);
-        return samples.length ? samples : null;
       });
-      const clicks = audio.renderClicks();
-      audio.free();
-      await player.play(stems, clicks.length ? clicks : null, timeline, mixOf(score!.tracks), () => {
+      passage = { options, track: editor.cursor.track };
+      const { events, timeline } = compilePassage(doc, passage);
+      playedRevision = revision;
+      await player.play(events, timeline, () => {
         playing = false;
         playhead = null;
       });
@@ -328,6 +346,72 @@
   $effect(() => {
     if (playing && score) player.setMix(mixOf(score.tracks));
   });
+
+  // So does an edit: the synth is handed the passage again and carries on from the beat it
+  // had reached.
+  let playedRevision = -1;
+  $effect(() => {
+    if (!playing || !score || !doc || !passage || revision === playedRevision) return;
+    const timer = setTimeout(() => {
+      if (!doc || !passage) return;
+      playedRevision = revision;
+      const { events, timeline } = compilePassage(doc, passage);
+      void player.update(events, timeline);
+    }, EDIT_PLAYBACK_DELAY_MS);
+    return () => clearTimeout(timer);
+  });
+
+  // --- Sound ---
+
+  /** Name of the SoundFont the user picked, once it is known. */
+  let customSound = $state('');
+
+  /**
+   * Has the synth play through what the preferences ask for. If that cannot be had, it
+   * plays through the next best thing: the SoundFont that ships with the app, and failing
+   * that its own models, which need no file. Returns what stood in the way, if anything.
+   */
+  async function applySound(): Promise<string | null> {
+    if (prefs.sound === 'custom') {
+      const stored = await storedSoundFont();
+      if (stored && !(await player.setSoundFont(stored.bytes))) {
+        customSound = stored.name;
+        return null;
+      }
+      prefs.sound = 'default';
+      return 'The SoundFont picked before is no longer there.';
+    }
+    if (prefs.sound === 'default') {
+      const bytes = await fetchDefaultSoundFont();
+      if (bytes && !(await player.setSoundFont(bytes))) return null;
+      await player.setSoundFont(null);
+      return `${DEFAULT_SOUNDFONT.name} is not part of this build.`;
+    }
+    await player.setSoundFont(null);
+    return null;
+  }
+
+  const useSound = (sound: 'default' | 'models') =>
+    run(async () => {
+      prefs.sound = sound;
+      const problem = await applySound();
+      if (problem) throw new Error(`${problem} Playing through the built-in models.`);
+      message = sound === 'default' ? `Playing through ${DEFAULT_SOUNDFONT.name}` : 'Playing through the built-in models';
+    });
+
+  const chooseSound = () =>
+    run(async () => {
+      const font = await pickSoundFont();
+      if (!font) return;
+      // The synth takes the bytes for itself, so the copy to keep is made first.
+      const kept = { name: font.name, bytes: font.bytes.slice(0) };
+      const problem = await player.setSoundFont(font.bytes);
+      if (problem) throw new Error(problem);
+      await storeSoundFont(kept);
+      customSound = font.name;
+      prefs.sound = 'custom';
+      message = `Playing through ${font.name}`;
+    });
 
   // --- Techniques ---
 
@@ -413,6 +497,26 @@
       active: () => masterBar?.[field] === value,
       run: () => setBar(field, masterBar?.[field] === value ? null : value),
     }));
+
+  /**
+   * Where above a stopped note its string can be touched for a harmonic, in frets, and what
+   * then sounds. Natural harmonics have no say here: their fret is where they are touched.
+   */
+  const HARMONIC_TOUCHES: [number, string][] = [
+    [12, 'an octave up'],
+    [7, 'an octave and a fifth up'],
+    [5, 'two octaves up'],
+    [4, 'two octaves and a third up'],
+    [3, 'two octaves and a fifth up'],
+  ];
+  const usualTouch = () => (effects.harmonic === 'pinch' ? 5 : 12);
+  const harmonicTouches: Command[] = HARMONIC_TOUCHES.map(([frets, sounds]) => ({
+    label: `Touched ${frets} frets above the note: ${sounds}`,
+    active: () =>
+      !!effects.harmonic && effects.harmonic !== 'natural' && (effects.harmonic_touch ?? usualTouch()) === frets,
+    disabled: () => !effects.harmonic || effects.harmonic === 'natural',
+    run: () => setNoteEffect('harmonic_touch', frets === usualTouch() ? null : frets),
+  }));
 
   // --- Commands ---
 
@@ -584,13 +688,13 @@
     barTempo: {
       label: 'Tempo change…',
       icon: 'tempo',
-      active: () => !!masterBar?.tempo,
+      active: () => !!editor?.tempo_change,
       run: () =>
         (prompt = {
           title: 'Tempo change',
-          hint: `From bar ${barNumber()} on. Leave it empty to carry on at the tempo before.`,
-          field: { kind: 'number', label: 'Tempo (bpm)', value: masterBar?.tempo ?? null, min: 20, max: 400 },
-          apply: (tempo: number | null) => setBar('tempo', tempo || null),
+          hint: `From the cursor's beat in bar ${barNumber()} on. Leave it empty to carry on at the tempo before.`,
+          field: { kind: 'number', label: 'Tempo (bpm)', value: editor?.tempo_change ?? null, min: 20, max: 400 },
+          apply: (tempo: number | null) => edit((d) => d.setTempoChange(tempo || 0)),
         }),
     },
     fermata: {
@@ -619,8 +723,8 @@
       run: () =>
         (prompt = {
           title: 'Volume change',
-          hint: 'The track plays at this volume from this beat on, until the next change. Leave it empty for no change here.',
-          field: { kind: 'number', label: 'Volume (0 to 100; 75 is the usual level)', value: beatEffects.volume ?? null, min: 0, max: 100 },
+          hint: 'The track plays at this volume from this beat on, until the next change. At 75 it is as loud as its slider in the mixer sets it; the slider still turns the whole track up and down. Leave it empty for no change here.',
+          field: { kind: 'number', label: 'Volume (0 to 100; 75 is the level of the mixer)', value: beatEffects.volume ?? null, min: 0, max: 100 },
           apply: (volume: number | null) => setBeatEffect('volume', volume),
         }),
     },
@@ -631,8 +735,8 @@
       run: () =>
         (prompt = {
           title: 'Pan change',
-          hint: 'The track sits here from this beat on, until the next change. Leave it empty for no change here.',
-          field: { kind: 'number', label: 'Pan (-100 left to 100 right)', value: beatEffects.pan ?? null, min: -100, max: 100 },
+          hint: 'The track moves this far from where the mixer puts it, from this beat on until the next change. Leave it empty for no change here.',
+          field: { kind: 'number', label: 'Pan (-100 left to 100 right; 0 is where the mixer puts it)', value: beatEffects.pan ?? null, min: -100, max: 100 },
           apply: (pan: number | null) => setBeatEffect('pan', pan),
         }),
     },
@@ -688,6 +792,27 @@
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
     countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    soundDefault: {
+      label: `${DEFAULT_SOUNDFONT.name} (comes with gtrTab)`,
+      active: () => prefs.sound === 'default',
+      run: () => useSound('default'),
+    },
+    soundCustom: {
+      label: 'SoundFont from a file…',
+      active: () => prefs.sound === 'custom',
+      run: chooseSound,
+    },
+    soundModels: {
+      label: 'Built-in models, without samples',
+      active: () => prefs.sound === 'models',
+      run: () => useSound('models'),
+    },
+    replayRepeats: {
+      label: 'Repeats again after D.C. and D.S.',
+      icon: 'repeatEnd',
+      active: () => replayRepeats,
+      run: () => (replayRepeats = !replayRepeats),
+    },
 
     zoomIn: { label: 'Zoom in', icon: 'zoomIn', disabled: () => zoom >= ZOOMS[ZOOMS.length - 1], run: () => stepZoom(1) },
     zoomOut: { label: 'Zoom out', icon: 'zoomOut', disabled: () => zoom <= ZOOMS[0], run: () => stepZoom(-1) },
@@ -792,7 +917,11 @@
           cmd.wideVibrato,
           {
             label: 'Harmonic',
-            items: [cmd.harmonicNatural, cmd.harmonicArtificial, cmd.harmonicPinch, cmd.harmonicTapped, cmd.harmonicSemi],
+            items: [
+              cmd.harmonicNatural, cmd.harmonicArtificial, cmd.harmonicPinch, cmd.harmonicTapped, cmd.harmonicSemi,
+              '-',
+              ...harmonicTouches,
+            ],
           },
           '-',
           cmd.palmMute, cmd.letRing, cmd.dead, cmd.ghost, cmd.staccato, cmd.accent, cmd.heavyAccent, cmd.tapped,
@@ -839,7 +968,8 @@
           '-',
           cmd.scoreInfo,
           '-',
-          cmd.play, cmd.metronome, cmd.countIn,
+          cmd.play, cmd.metronome, cmd.countIn, cmd.replayRepeats,
+          { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
         ],
       },
       {
@@ -1035,6 +1165,11 @@
         }
       }
       setDocument(new Document(), UNTITLED, null);
+    });
+    // The samples are big, so they are fetched once the app is up; until they arrive,
+    // playback uses the built-in models.
+    void applySound().then((problem) => {
+      if (problem && prefs.sound !== 'default') message = problem;
     });
     return () => {
       player.stop();
@@ -1248,6 +1383,7 @@
     kind={effectDialog}
     note={editor.note}
     beatEffects={editor.beat_effects}
+    strings={score?.tracks[editor.cursor.track]?.staves[editor.cursor.staff]?.tuning.strings.length ?? 6}
     onapply={(value) => {
       // Read which effect this is before closing the dialog clears it.
       const kind = effectDialog;

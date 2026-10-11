@@ -1,4 +1,6 @@
+import synthUrl from '../wasm/gtr_worklet.wasm?url';
 import type { BeatTime, Timeline, Track } from './model';
+import workletUrl from './synth.worklet.js?url&no-inline';
 
 /** Where a track sits in the mix. */
 export interface TrackMix {
@@ -11,10 +13,6 @@ export interface TrackMix {
 
 /** Volume setting at which a track plays at its natural level, as in `gtr_model::Mix`. */
 const UNITY_VOLUME = 75;
-/** Seconds a change to the mix takes, so that it does not click. */
-const MIX_GLIDE = 0.015;
-/** How far above full level the mix may go before the limiter flattens it completely. */
-const HEADROOM = 4;
 
 /** The mix the tracks' settings ask for. */
 export function mixOf(tracks: Track[]): TrackMix[] {
@@ -25,161 +23,148 @@ export function mixOf(tracks: Track[]): TrackMix[] {
   });
 }
 
-interface Strip {
-  /** Open for a track that is heard, shut for one that is muted. */
-  gate: GainNode;
-  /** The track's volume: the mixer's, until the score changes it. */
-  level: GainNode;
-  pan: StereoPannerNode;
-  /** The score sets these itself part-way through, so the mixer leaves them alone. */
-  scored: { level: boolean; pan: boolean };
-}
+/** What the synth reports back from the audio thread (see synth.worklet.js). */
+type Report =
+  | { type: 'position'; id: number; seconds: number; at: number }
+  | { type: 'ended'; id: number }
+  | { type: 'soundfont'; id: number; error: number };
+
+/** Why the synth would not take a SoundFont, by the number it answers with. */
+const SOUNDFONT_ERRORS = [
+  '',
+  'That is not a SoundFont file.',
+  'Compressed SoundFonts (.sf3) are not supported; use an .sf2 file.',
+  'That SoundFont is damaged.',
+];
 
 /**
- * Plays a passage rendered as one buffer per track, mixing the tracks as they play so
- * that volume, pan, mute and solo can change mid-passage, and reports which beat is
- * sounding.
+ * Plays a passage through the synth, which runs on the audio thread and makes the sound as
+ * it goes. The passage can be swapped for a newer version of itself and the tracks mixed
+ * while it plays. Reports which beat is sounding.
  */
 export class Player {
   private context?: AudioContext;
-  private output?: AudioNode;
-  private sources: AudioBufferSourceNode[] = [];
-  /** One per track of the passage; `null` for a track with nothing to play. */
-  private strips: (Strip | null)[] = [];
-  private startedAt = 0;
+  private synth?: Promise<AudioWorkletNode>;
+  /** Numbers each passage sent to the synth, so its reports can be told apart. */
+  private sent = 0;
+  /** The passage playing: the number of its latest version, or 0 when stopped. */
+  private current = 0;
   private beats: BeatTime[] = [];
-
-  /** Sample rate audio should be rendered at. */
-  get sampleRate(): number {
-    this.context ??= new AudioContext();
-    return this.context.sampleRate;
-  }
+  /** Beats of a version the synth has been sent but has not started on yet. */
+  private next?: { id: number; beats: BeatTime[] };
+  /** The last the synth said of how far it had got, and when by the context's clock. */
+  private heard?: { seconds: number; at: number };
+  private onEnd?: () => void;
+  /** SoundFonts sent to the synth that it has yet to answer for. */
+  private fonts = new Map<number, (error: number) => void>();
 
   get playing(): boolean {
-    return this.sources.length > 0;
+    return this.current !== 0;
   }
 
-  /** The end of the chain: a soft limiter, so that loud passages round off instead of clipping. */
-  private master(context: AudioContext): AudioNode {
-    if (this.output) return this.output;
-    const input = context.createGain();
-    input.gain.value = 1 / HEADROOM;
-    const limiter = context.createWaveShaper();
-    const curve = new Float32Array(4097);
-    for (let i = 0; i < curve.length; i++) {
-      curve[i] = Math.tanh(((i / (curve.length - 1)) * 2 - 1) * HEADROOM);
+  /** Starts the synth on the audio thread, the first time it is needed. */
+  private start(context: AudioContext): Promise<AudioWorkletNode> {
+    return (this.synth ??= (async () => {
+      const [wasm] = await Promise.all([
+        fetch(synthUrl).then((response) => response.arrayBuffer()),
+        context.audioWorklet.addModule(workletUrl),
+      ]);
+      const node = new AudioWorkletNode(context, 'gtr-synth', {
+        numberOfInputs: 0,
+        outputChannelCount: [2],
+        processorOptions: { wasm },
+      });
+      node.port.onmessage = (event: MessageEvent<Report>) => this.receive(event.data);
+      node.connect(context.destination);
+      return node;
+    })());
+  }
+
+  private receive(report: Report): void {
+    if (report.type === 'soundfont') {
+      this.fonts.get(report.id)?.(report.error);
+      this.fonts.delete(report.id);
+      return;
     }
-    limiter.curve = curve;
-    input.connect(limiter).connect(context.destination);
-    return (this.output = input);
+    if (report.id === this.next?.id) {
+      this.current = report.id;
+      this.beats = this.next.beats;
+      this.next = undefined;
+    }
+    if (report.id !== this.current) return;
+    if (report.type === 'position') {
+      this.heard = { seconds: report.seconds, at: report.at };
+      return;
+    }
+    const onEnd = this.onEnd;
+    this.halt();
+    onEnd?.();
+  }
+
+  private halt(): void {
+    this.current = 0;
+    this.next = undefined;
+    this.heard = undefined;
+    this.onEnd = undefined;
   }
 
   /**
-   * Starts playback, stopping anything already playing. `stems` holds each track's
-   * samples, or `null` for a track without notes; `clicks` the metronome. `onEnd` fires
-   * when the passage runs out.
+   * Has the synth play from the samples of a SoundFont, given as the bytes of an `.sf2`
+   * file, or with `null` from its built-in models. It takes effect from the next note.
+   * Resolves to what was wrong with the file, or `null` if it was taken.
    */
-  async play(
-    stems: (Float32Array | null)[],
-    clicks: Float32Array | null,
-    timeline: Timeline,
-    mix: TrackMix[],
-    onEnd: () => void,
-  ): Promise<void> {
+  async setSoundFont(bytes: ArrayBuffer | null): Promise<string | null> {
+    const synth = await this.start((this.context ??= new AudioContext()));
+    const id = ++this.sent;
+    const error = await new Promise<number>((resolve) => {
+      this.fonts.set(id, resolve);
+      synth.port.postMessage({ type: 'soundfont', id, bytes }, bytes ? [bytes] : []);
+    });
+    return SOUNDFONT_ERRORS[error] || null;
+  }
+
+  /**
+   * Starts playback, stopping anything already playing. `events` is the passage for the
+   * synth, as `Passage.events` gives it. `onEnd` fires when the passage runs out.
+   */
+  async play(events: Uint8Array, timeline: Timeline, onEnd: () => void): Promise<void> {
     this.stop();
     const context = (this.context ??= new AudioContext());
-    await context.resume();
-    const master = this.master(context);
-
-    const source = (samples: Float32Array) => {
-      const buffer = context.createBuffer(1, samples.length, context.sampleRate);
-      buffer.getChannelData(0).set(samples);
-      const node = context.createBufferSource();
-      node.buffer = buffer;
-      return node;
-    };
-    const sources: AudioBufferSourceNode[] = [];
-    const startAt = context.currentTime + 0.02;
-    this.strips = stems.map((samples, index) => {
-      if (!samples) return null;
-      const node = source(samples);
-      const gate = context.createGain();
-      const level = context.createGain();
-      const pan = context.createStereoPanner();
-      gate.gain.value = (mix[index]?.audible ?? true) ? 1 : 0;
-      // The panner halves the power of a centred track; make up for it.
-      level.gain.value = (mix[index]?.gain ?? 1) * Math.SQRT2;
-      pan.pan.value = mix[index]?.pan ?? 0;
-      // Changes of volume and pan written in the score happen on their beats.
-      const scored = { level: false, pan: false };
-      for (const change of timeline.automation) {
-        if (change.channel !== index) continue;
-        if (change.gain !== null) {
-          level.gain.setValueAtTime(change.gain * Math.SQRT2, startAt + change.time);
-          scored.level = true;
-        }
-        if (change.pan !== null) {
-          pan.pan.setValueAtTime(change.pan, startAt + change.time);
-          scored.pan = true;
-        }
-      }
-      node.connect(gate).connect(level).connect(pan).connect(master);
-      sources.push(node);
-      return { gate, level, pan, scored };
-    });
-    if (clicks) {
-      const node = source(clicks);
-      node.connect(master);
-      sources.push(node);
-    }
-    if (sources.length === 0) {
-      // Nothing to hear, but the passage still takes its time.
-      const length = Math.max(1, Math.ceil(timeline.duration * context.sampleRate));
-      sources.push(source(new Float32Array(length)));
-    }
-
-    // Every buffer is the same length, so the first to finish ends the passage.
-    sources[0].onended = () => {
-      if (this.sources !== sources) return;
-      this.sources = [];
-      this.strips = [];
-      onEnd();
-    };
+    const [synth] = await Promise.all([this.start(context), context.resume()]);
+    this.current = ++this.sent;
     this.beats = timeline.beats;
-    this.sources = sources;
-    this.startedAt = startAt;
-    for (const node of sources) node.start(startAt);
+    this.onEnd = onEnd;
+    const bytes = events.buffer as ArrayBuffer;
+    synth.port.postMessage({ type: 'play', id: this.current, events: bytes }, [bytes]);
   }
 
   /**
-   * Changes the mix of what is playing. Ignored if the tracks are not the ones playing.
-   * Mute and solo always apply; volume and pan do unless the score itself changes them
-   * during the passage, in which case the score has the say.
+   * Swaps what is playing for a newer version of the same passage, as after an edit.
+   * Playback carries on from the beat it had reached.
    */
-  setMix(mix: TrackMix[]): void {
-    if (!this.context || mix.length !== this.strips.length) return;
-    const now = this.context.currentTime;
-    this.strips.forEach((strip, index) => {
-      if (!strip) return;
-      strip.gate.gain.setTargetAtTime(mix[index].audible ? 1 : 0, now, MIX_GLIDE);
-      if (!strip.scored.level) {
-        strip.level.gain.setTargetAtTime(mix[index].gain * Math.SQRT2, now, MIX_GLIDE);
-      }
-      if (!strip.scored.pan) strip.pan.pan.setTargetAtTime(mix[index].pan, now, MIX_GLIDE);
-    });
+  async update(events: Uint8Array, timeline: Timeline): Promise<void> {
+    if (!this.playing || !this.synth) return;
+    const id = ++this.sent;
+    this.next = { id, beats: timeline.beats };
+    const bytes = events.buffer as ArrayBuffer;
+    (await this.synth).port.postMessage({ type: 'replace', id, events: bytes }, [bytes]);
+  }
+
+  /** Changes the mix of what is playing. */
+  async setMix(mix: TrackMix[]): Promise<void> {
+    if (this.playing) (await this.synth)?.port.postMessage({ type: 'mix', mix });
   }
 
   stop(): void {
-    const sources = this.sources;
-    this.sources = [];
-    this.strips = [];
-    for (const node of sources) node.stop();
+    if (!this.playing) return;
+    this.halt();
+    void this.synth?.then((synth) => synth.port.postMessage({ type: 'stop' }));
   }
 
   /** The beat sounding now, or `null` before the first beat or when stopped. */
   position(): BeatTime | null {
-    if (!this.playing || !this.context) return null;
-    const time = this.context.currentTime - this.startedAt;
+    if (!this.playing || !this.context || !this.heard) return null;
+    const time = this.heard.seconds + (this.context.currentTime - this.heard.at);
     let low = 0;
     let high = this.beats.length;
     while (low < high) {

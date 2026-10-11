@@ -2,6 +2,7 @@ use gtr_model::{
     Bar, Beat, BeatEffects, Duration, Instrument, MasterBar, Mix, Note, NoteValue, Score,
     ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
+use gtr_model::{Rational, TempoChange};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -60,6 +61,8 @@ pub struct EditorState {
     pub note: Option<Note>,
     /// Effects of the beat under the cursor, if there is one.
     pub beat_effects: Option<BeatEffects>,
+    /// The tempo that is written to change on the cursor's beat, if one is.
+    pub tempo_change: Option<u32>,
     pub can_undo: bool,
     pub can_redo: bool,
     pub can_paste: bool,
@@ -150,6 +153,7 @@ impl Editor {
                 .and_then(|b| b.note_on(self.cursor.string))
                 .cloned(),
             beat_effects: self.current_beat().map(|b| b.effects.clone()),
+            tempo_change: self.tempo_change(),
             can_undo: self.history.can_undo(),
             can_redo: self.history.can_redo(),
             can_paste: self.clipboard.is_some(),
@@ -686,6 +690,48 @@ impl Editor {
             })
             .collect();
         self.keep_selection(|e| e.run(Command::Batch(commands)))
+    }
+
+    /// Where the cursor's beat starts in its bar, in whole notes.
+    fn cursor_position(&self) -> Rational {
+        let Cursor { bar, beat, .. } = self.cursor;
+        (self.beats(bar).iter().take(beat))
+            .map(|b| b.duration.length())
+            .sum()
+    }
+
+    /// The tempo that is written to change on the cursor's beat, if one is.
+    fn tempo_change(&self) -> Option<u32> {
+        let master = &self.score.master_bars[self.cursor.bar];
+        let position = self.cursor_position();
+        match *position.numer() {
+            0 => master.tempo,
+            _ => (master.tempo_changes.iter())
+                .find(|c| c.position == position)
+                .map(|c| c.tempo),
+        }
+    }
+
+    /// Changes the tempo from the cursor's beat on, or with `None` takes away the change
+    /// written there.
+    pub fn set_tempo_change(&mut self, tempo: Option<u32>) -> Result<(), EditError> {
+        let bar = self.cursor.bar;
+        let position = self.cursor_position();
+        let mut master_bar = self.score.master_bars[bar].clone();
+        if *position.numer() == 0 {
+            master_bar.tempo = tempo;
+        } else {
+            let changes = &mut master_bar.tempo_changes;
+            changes.retain(|c| c.position != position);
+            if let Some(tempo) = tempo {
+                let at = changes.partition_point(|c| c.position < position);
+                changes.insert(at, TempoChange { position, tempo });
+            }
+        }
+        if master_bar == self.score.master_bars[bar] {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetMasterBar { bar, master_bar }))
     }
 
     pub fn set_tempo(&mut self, tempo: u32) -> Result<(), EditError> {

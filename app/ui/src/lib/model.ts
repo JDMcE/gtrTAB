@@ -60,9 +60,11 @@ export interface NoteEffects {
   bend?: Bend;
   vibrato?: 'slight' | 'wide';
   harmonic?: Harmonic;
+  /** Frets above the note at which the string is touched for the harmonic. */
+  harmonic_touch?: number;
   accent?: 'normal' | 'heavy';
   trill?: { fret: number; speed: NoteValue };
-  grace?: { fret: number; on_beat: boolean; hammer: boolean };
+  grace?: { notes: { string: number; fret: number }[]; on_beat: boolean; hammer: boolean };
   left_finger?: Finger;
   right_finger?: Finger;
   palm_mute?: boolean;
@@ -244,6 +246,8 @@ export interface MasterBar {
   jump?: Jump;
   /** A new tempo from this bar on. */
   tempo?: number;
+  /** New tempos from beats inside the bar; `position` is `[numerator, denominator]` of whole notes. */
+  tempo_changes?: { position: [number, number]; tempo: number }[];
   feel?: Feel;
   /** The time elapsed is written above the bar. */
   timer?: boolean;
@@ -372,6 +376,8 @@ export interface EditorState {
   note: Note | null;
   /** Effects of the beat under the cursor. */
   beat_effects: BeatEffects | null;
+  /** The tempo written to change on the cursor's beat. */
+  tempo_change: number | null;
   can_undo: boolean;
   can_redo: boolean;
   can_paste: boolean;
@@ -451,18 +457,8 @@ export interface BeatTime {
   time: number;
 }
 
-/** A change to a track's place in the mix part-way through the passage. */
-export interface Automation {
-  /** Index of the track. */
-  channel: number;
-  time: number;
-  gain: number | null;
-  pan: number | null;
-}
-
 export interface Timeline {
   beats: BeatTime[];
-  automation: Automation[];
   duration: number;
 }
 

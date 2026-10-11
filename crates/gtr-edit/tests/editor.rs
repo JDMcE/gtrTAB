@@ -623,3 +623,46 @@ fn drum_tracks_take_kit_numbers_as_frets() {
     assert_eq!(frets, [38, 42]);
     assert!(e.set_fret(88).is_err());
 }
+
+#[test]
+fn a_tempo_change_goes_on_the_beat_under_the_cursor() {
+    let mut e = Editor::new(Score::blank());
+    for fret in [0, 3, 5, 7] {
+        e.type_digit(fret, false).unwrap();
+        e.move_cursor(Move::Right, false).unwrap();
+    }
+    // On the third quarter of the first bar: half-way through it.
+    e.set_cursor(0, 2, 5, false);
+    assert_eq!(e.state().tempo_change, None);
+    e.set_tempo_change(Some(90)).unwrap();
+    let changes = &e.score().master_bars[0].tempo_changes;
+    assert_eq!(changes.len(), 1);
+    assert_eq!(
+        *changes[0].position.numer() * 2,
+        *changes[0].position.denom()
+    );
+    assert_eq!(e.state().tempo_change, Some(90));
+    // One before it keeps the two in order; a new value replaces the old.
+    e.set_cursor(0, 1, 5, false);
+    e.set_tempo_change(Some(60)).unwrap();
+    e.set_tempo_change(Some(70)).unwrap();
+    let tempos: Vec<u32> = (e.score().master_bars[0].tempo_changes.iter())
+        .map(|c| c.tempo)
+        .collect();
+    assert_eq!(tempos, [70, 90]);
+    e.score().validate().unwrap();
+
+    // On the first beat it is the bar's own tempo, as before.
+    e.set_cursor(0, 0, 5, false);
+    e.set_tempo_change(Some(100)).unwrap();
+    assert_eq!(e.score().master_bars[0].tempo, Some(100));
+    assert_eq!(e.score().master_bars[0].tempo_changes.len(), 2);
+
+    // Taking one away, and undoing that.
+    e.set_cursor(0, 2, 5, false);
+    e.set_tempo_change(None).unwrap();
+    assert_eq!(e.score().master_bars[0].tempo_changes.len(), 1);
+    assert_eq!(e.state().tempo_change, None);
+    e.undo().unwrap();
+    assert_eq!(e.state().tempo_change, Some(90));
+}

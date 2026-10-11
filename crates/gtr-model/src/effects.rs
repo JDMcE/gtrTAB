@@ -20,6 +20,10 @@ pub struct NoteEffects {
     pub vibrato: Option<Vibrato>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub harmonic: Option<Harmonic>,
+    /// For a harmonic made on a stopped string: how many frets above the note the string
+    /// is touched, which decides the overtone that sounds. `None` is the kind's usual place.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harmonic_touch: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub accent: Option<Accent>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -61,6 +65,8 @@ impl NoteEffects {
     pub fn is_valid(&self) -> bool {
         (self.bend.as_ref()).is_none_or(|b| b.is_valid(Bend::BEND_RANGE))
             && self.trill.is_none_or(|t| t.is_valid())
+            && (self.harmonic_touch).is_none_or(|t| (1..=Harmonic::MAX_TOUCH).contains(&t))
+            && self.grace.as_ref().is_none_or(Grace::is_valid)
     }
 }
 
@@ -205,6 +211,40 @@ pub enum Harmonic {
 }
 
 impl Harmonic {
+    /// The furthest above a stopped note that its string can be touched for a harmonic.
+    pub const MAX_TOUCH: u8 = 24;
+
+    /// Semitones above a string's pitch of the harmonic that sounds when the string is
+    /// touched `frets` above where it is stopped, or above the nut if it is open.
+    pub fn overtone(frets: u8) -> u8 {
+        let above = match frets % 12 {
+            0 => 12,
+            7 => 19,
+            5 => 24,
+            4 | 9 => 28,
+            3 => 31,
+            other => 12 + other,
+        };
+        above + if frets >= 24 { 12 } else { 0 }
+    }
+
+    /// Where the string is usually touched for this kind of harmonic, in frets above the
+    /// stopped note: an octave up, or for a pinch harmonic, which is made near the
+    /// pickups, at the place that sounds two octaves up.
+    pub fn usual_touch(self) -> u8 {
+        match self {
+            Harmonic::Pinch => 5,
+            _ => 12,
+        }
+    }
+
+    /// Semitones above the stopped note that a harmonic of this kind sounds, touched at
+    /// `touch` frets above it or at the usual place. Not for natural harmonics, whose
+    /// pitch comes from the open string.
+    pub fn interval(self, touch: Option<u8>) -> u8 {
+        Harmonic::overtone(touch.unwrap_or(self.usual_touch()))
+    }
+
     /// The abbreviation written above the staff.
     pub fn label(self) -> &'static str {
         match self {
@@ -241,16 +281,43 @@ impl Trill {
     }
 }
 
-/// A quick ornamental note played on the same string just before the main note.
+/// One note of a [`Grace`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct Grace {
+pub struct GraceNote {
+    /// Index into the staff tuning, like a note's.
+    pub string: u8,
     pub fret: u8,
+}
+
+/// Quick ornamental notes played one after another just before the main note, on its
+/// string or on others.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Grace {
+    /// In the order they are played.
+    pub notes: Vec<GraceNote>,
     /// Takes its time from the main note instead of from the beat before.
     #[serde(default)]
     pub on_beat: bool,
-    /// Hammered or pulled into the main note rather than picked separately.
+    /// Each note is hammered or pulled into the next rather than picked separately.
     #[serde(default)]
     pub hammer: bool,
+}
+
+impl Grace {
+    pub const MAX_NOTES: usize = 4;
+
+    /// A single grace note.
+    pub fn single(string: u8, fret: u8, on_beat: bool, hammer: bool) -> Self {
+        Grace {
+            notes: vec![GraceNote { string, fret }],
+            on_beat,
+            hammer,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        (1..=Grace::MAX_NOTES).contains(&self.notes.len())
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]

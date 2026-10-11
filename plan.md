@@ -33,6 +33,7 @@ crates/
   gtr-audio/     score -> event stream, SoundFont synth, effects
   gtr-io/        native format, Guitar Pro, MusicXML, MIDI, ASCII
   gtr-wasm/      wasm-bindgen API over the crates above
+  gtr-worklet/   the synth alone, as a plain WASM module for the AudioWorklet
 app/
   ui/            Svelte app (shared by web and desktop)
   desktop/       Tauri shell
@@ -79,7 +80,7 @@ Each phase ends with something usable. Phases 1–3 make a useful riff-writing t
 - [x] Time signature, tempo and tuning dialogs, including capo and 6/7/8-string guitars and 4/5-string bass
 - [x] Bar validation: highlight incomplete and overfull bars
 - [x] Playback with a moving cursor, from the cursor's bar or over the selected bars
-- [ ] SoundFont synth. Playback uses built-in models with no sample files, and renders the passage to buffers up front instead of streaming from an AudioWorklet. This was to be revisited in phase 5 and was not; it is now the first item of phase 6
+- [x] SoundFont synth (done in phase 6, where it had been put off to)
 - [x] Metronome and count-in
 - [x] File open, save, recent files (desktop only), autosave with recovery on start
 - [x] Simple read-only Guitar Pro import (`.gp` and `.gp5`): notes, rests, ties, rhythms, tunings, starting tempo and time signatures for all tracks, with one track shown at a time. Anything else is skipped and listed in the status bar after import
@@ -107,10 +108,7 @@ Each item needs notation, input and playback.
 Known simplifications, all scheduled for phase 6:
 
 - A custom bend is drawn as the nearest common shape, labelled with its highest point; playback follows the real curve.
-- Only natural harmonics play at their true pitch. The other kinds sound an octave above the fretted note.
-- Tapping is notation only. (Pick strokes and fingering are too, and stay that way: they have nothing to add to how a note sounds.)
-- A grace note is a single note on the same string as the note it decorates.
-- Rasgueado plays as a slow strum.
+- Pick strokes and fingering are notation only, and stay that way: they have nothing to add to how a note sounds.
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 
@@ -152,7 +150,7 @@ Customisable shortcuts, the command palette and further themes stay in phase 10.
 - [x] Drum tracks: percussion notation, drum tab and a drum kit map. A note's fret is the General MIDI number of a piece of the kit (36 bass drum, 38 snare, 42 closed hi-hat), typed like a fret or chosen by name from Note > Drum piece; `gtr-model/src/drums.rs` says where each piece goes on the staff and which notehead it gets
 - [x] Bass, keyboard (grand staff), ukulele, banjo and other fretted instruments. A piano has a staff for each hand, bracketed together; Ctrl+Up and Ctrl+Down move between staves as well as tracks
 - [x] Repeats, alternate endings, directions (coda, segno, D.S., D.C., fine), followed in playback
-- [x] Tempo, volume and pan automation; fermatas; swing and triplet feel. Tempo changes at a bar; volume and pan change at a beat (Beat menu) and are played back; swing eighths and sixteenths
+- [x] Tempo, volume and pan automation; fermatas; swing and triplet feel. Tempo changes on the beat under the cursor (Score menu); volume and pan change at a beat (Beat menu) and are played back; swing eighths and sixteenths
 - [x] Sections, rehearsal marks, free text, timers
 - [x] Lyrics with multiple lines (entered beat by beat, up to five lines)
 - [x] Chord diagrams and names with a chord builder: pick a root and a kind of chord and it offers the ways to finger it in the track's tuning, or click the frets yourself, or take the notes on the beat
@@ -165,12 +163,6 @@ Known simplifications, each with the phase that removes it:
 - In the combined view the technique markings, chord names and diagrams sit above the tab staff, so between the two staves. The notation-only view shows the markings above the staff but not the ones written on strings (bends, slides). (Phase 6)
 - A piano's notes are entered as tablature on six made-up strings per hand, since every note in the model is a string and a fret; there is no entry by pitch or from a keyboard. In the combined view each hand's tab sits under its notation, so the two notation staves are only adjacent in the notation-only view. Changing an existing track to a piano does not give it a second staff. (Phase 6)
 - Drum notation uses one voice with stems as the notes fall; it does not split hands and feet into two voices by itself (use voice 2 for the feet). The kit is fixed: 23 General MIDI pieces. (Phase 6)
-- A fermata is drawn but does not hold the note in playback, and a tempo change applies from the start of a bar, not from a beat inside it. (Phase 6)
-- After a D.C. or D.S. the repeats are played again. Playing a selected range of bars ignores repeats and jumps. (Phase 6)
-- A tempo or feel change applies to the bars after it on the page, also when a repeat or jump goes back past it. A timer shows the time at which playback first reaches its bar. (Phase 6)
-- Once a passage has a volume or pan change written in it, the score has the say over that track's volume or pan for the passage, and the mixer's slider only sets where it starts. Mute and solo always work. (Phase 6)
-- Instruments differ in tone only through built-in models: plucked strings (nylon, steel, clean, overdrive, distortion, bass, piano) and synthesised drums. Ukulele, banjo and mandolin borrow the nearest string tone. (Phase 6)
-- Playback renders each track to its own buffer up front and mixes them as they play, which is what lets mute, solo, volume and pan change mid-playback. Memory therefore grows with tracks times length; edits to the notes only take effect on the next play. (Phase 6)
 - The mixer sliders on the track rows are for the mouse; the keyboard reaches the same values through the track settings dialog. Tracks are reordered with the move up and move down buttons, not by dragging. (Phase 6)
 - Clicking another staff in the multitrack view goes to the start of the bar clicked, not the beat. (Phase 6)
 - The chord builder finds one shape per position with the root in the bass; it does not know slash chords or inversions, which can still be clicked in by hand. (Phase 6)
@@ -180,7 +172,7 @@ How things stand, for reference:
 
 - Tuning and capo are part of a track's settings (the settings button in the track pane, or double-click the track's name), alongside its instrument and mix. Changing the kind of instrument there switches to that instrument's usual tuning.
 - Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks (`.gp5`), key signatures, repeats, alternate endings, sections, swing feel, credits and, from `.gp`, jumps and free text.
-- The native format is at version 4. The new fields are all optional, so older files open unchanged.
+- The native format is at version 5. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched.
 
 Still to check by hand, in phase 6: how each instrument and the drum kit sound, and the stereo mix; the track pane and the notation views in the desktop window and in a narrow window (only a wide browser window was tried); and Guitar Pro files with repeats, jumps or drum tracks, since none are in the repository.
 
@@ -192,19 +184,24 @@ Phases 2 to 5 each took shortcuts to get something usable. This phase removes th
 
 Playback engine:
 
-- [ ] Streaming synth: the synth runs in an AudioWorklet as WASM and plays from the event stream, as the architecture section describes, instead of rendering every track to a buffer first. Edits are heard without stopping, memory no longer grows with the length of the score, and looping, speed changes and audio export in later phases get the engine they need
-- [ ] SoundFont playback: sampled instruments from a freely licensed SoundFont for every instrument and the drum kit, with the built-in models kept as the fallback when no SoundFont is loaded. Choosing the SoundFont, and checking its licence against decision 2, is part of this item
-- [ ] Each instrument with its own sound: ukulele, banjo and mandolin stop borrowing a guitar's
+- [x] Streaming synth: the synth runs in an AudioWorklet as WASM and plays from the event stream, as the architecture section describes, instead of rendering every track to a buffer first. Edits are heard without stopping, memory no longer grows with the length of the score, and looping, speed changes and audio export in later phases get the engine they need. `gtr_audio::Engine` makes the sound a block at a time; `crates/gtr-worklet` wraps it as a module the worklet (`app/ui/src/lib/synth.worklet.js`) can load without `wasm-bindgen`. After an edit the passage is compiled again and the engine carries on from the same beat of it; notes already sounding ring out as they were
+- [x] SoundFont playback: sampled instruments from a freely licensed SoundFont for every instrument and the drum kit, with the built-in models kept as the fallback when no SoundFont is loaded. The bank is GeneralUser GS 2.0.3 by S. Christian Collins, fetched by `npm run soundfont` in `app/ui` (32 MB, so it is not in the repository) and loaded in the background once the app is up. Score > Sound switches between it, any `.sf2` file of the user's own, which is kept in the browser's storage for next time, and the models. How things stand:
+  - The licence allows any use, changes and redistribution, which meets decision 2. Its author adds that he cannot vouch for where every sample came from; that is worth reading again before a release, and is why the licence file is fetched to sit beside the bank
+  - `gtr_audio::SoundFont` follows what a plucked or struck instrument needs: key and velocity zones, tuning, loops, level, pan, the volume envelope, the filter's cutoff and exclusive classes (a closed hi-hat stops an open one). It does not follow modulators, the second envelope, the bank's own vibrato or its reverb and chorus, which GeneralUser GS leans on, so the bank sounds plainer here than in a full SoundFont synth. Compressed banks (`.sf3`) are refused
+  - Palm mutes and dead notes are made from the ordinary sample, damped and dulled, and a harmonic is the ordinary sample at the harmonic's pitch
+  - The whole bank goes to the audio thread, about 64 MB of memory there, and reading it stops the sound for a moment if something is playing. Cutting the bank down to the instruments gtrTab has would shrink the download and the memory several times over, and is still to do
+- [x] Each instrument with its own sound: ukulele, banjo and mandolin stop borrowing a guitar's. The banjo is the bank's; General MIDI has no ukulele or mandolin, so those two are always played by models of their own, also when a SoundFont is loaded
 
 Playback behaviour:
 
-- [ ] A tempo map inside the bar: tempo changes on a beat, and fermatas that hold
-- [ ] Tempo and feel follow the order bars are played in, so a repeat or jump back past a change restores what was in force there
-- [ ] Repeats after a D.C. or D.S. are taken once through by default, as convention has it, with a setting to play them again; playing a selected range can follow its repeats
-- [ ] Artificial, pinch, tapped and semi harmonics at their true pitch
-- [ ] Rasgueado as the strokes it is made of; tapped notes sounded by the fretting hand
-- [ ] Grace notes of several notes, and on other strings than the note they decorate
-- [ ] Volume and pan written in the score and the mixer work together: the slider moves the whole passage up or down instead of being overridden
+- [x] Fermatas that hold: the beat under one lasts twice as long, in every track, and timers and the metronome wait with it (`gtr_model::BarTiming`)
+- [x] Tempo changes on a beat inside the bar: Score > Tempo change puts one on the cursor's beat, the mark stands over that beat, and it lasts for the bars played after it. They are kept with the bar (`MasterBar::tempo_changes`), not with a track
+- [x] Tempo and feel follow the order bars are played in, so a repeat or jump back past a change restores what was in force there. A bar is always played at the tempo it had the first time it was reached, so playing from the cursor sounds the same as playing through
+- [x] Repeats after a D.C. or D.S. are taken once through by default, on their last ending, as convention has it, with a setting to play them again (Score menu; it lasts for the session and timers always assume the convention); playing a selected range follows the repeats inside it, but takes no jumps
+- [x] Artificial, pinch, tapped and semi harmonics at their true pitch: the overtone of the stopped note that sounds where the string is touched. That place is the octave unless Note > Harmonic says otherwise (7, 5, 4 or 3 frets up); a pinch harmonic, made near the pickups, sounds two octaves up unless it says otherwise. Read from `.gp` files
+- [x] Rasgueado as the strokes it is made of: four quick downstrokes, the last the hardest. Tapped notes sound hammered on, not picked
+- [x] Grace notes of several notes, and on other strings than the note they decorate: up to four, played in turn, each drawn on its own string
+- [x] Volume and pan written in the score and the mixer work together: the slider moves the whole passage up or down instead of being overridden. A written volume is measured from the slider (75 is the slider's own level) and a written pan from where the slider puts the track, so scores made with the sliders at their defaults sound as before
 
 Notes and entry:
 
@@ -291,7 +288,7 @@ The synth itself and its SoundFonts come in phase 6; this phase is what is built
 - **Model and editing:** unit tests plus property tests that apply random command sequences and check undo returns the original score.
 - **Layout and rendering:** golden-image tests per notation feature; a diff means review, not automatic failure. None exist yet: layout is tested by what it places where. They are a phase 6 item.
 - **File formats:** round-trip tests for the native format; a corpus of real files for each import format. No Guitar Pro files are in the repository yet: `crates/gtr-io/tests/gp_samples.rs` runs against a directory named by `GTR_GP_SAMPLES`. Add files we are free to redistribute to `tests/corpus/`.
-- **Audio:** snapshot tests on the event stream rather than on audio samples.
+- **Audio:** snapshot tests on the event stream rather than on audio samples. The synth is tested by what it measures: pitch, level, and that playing in blocks gives the same samples as rendering at once. The SoundFont reader is tested on a small bank made up in the test; `crates/gtr-audio/tests/soundfont_file.rs` plays every instrument from a real one named by `GTR_SOUNDFONT`.
 - **UI:** end-to-end tests for the core entry workflow. None exist yet; the interface has been checked by hand in a browser. They are a phase 6 item.
 
 ## Risks

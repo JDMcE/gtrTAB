@@ -129,6 +129,7 @@
       rows.push({
         icon: 'harmonic',
         label: `${e.harmonic[0].toUpperCase()}${e.harmonic.slice(1)} harmonic`,
+        value: e.harmonic_touch ? `touched ${e.harmonic_touch} frets up` : undefined,
         remove: clear('harmonic'),
       });
     }
@@ -158,8 +159,8 @@
     if (e.grace) {
       rows.push({
         icon: 'grace',
-        label: 'Grace note',
-        value: `fret ${e.grace.fret}, ${e.grace.on_beat ? 'on' : 'before'} the beat`,
+        label: e.grace.notes.length > 1 ? 'Grace notes' : 'Grace note',
+        value: `${e.grace.notes.length > 1 ? 'frets' : 'fret'} ${e.grace.notes.map((g) => g.fret).join(', ')}, ${e.grace.on_beat ? 'on' : 'before'} the beat`,
         edit: () => openEffect('grace'),
         remove: clear('grace'),
       });

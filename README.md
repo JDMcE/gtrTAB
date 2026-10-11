@@ -26,7 +26,9 @@ cd ../desktop && npm install
 | Desktop app (dev) | `npm run dev` | `app/desktop` |
 | Desktop app (installers) | `npm run build` | `app/desktop` |
 
-The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
+Playback sounds through the GeneralUser GS SoundFont, which is too big for the repository. Fetch it once with `npm run soundfont` in `app/ui`; without it the app plays through its built-in models.
+
+The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the editor through `wasm-pack`, and the synth for the audio thread (`crates/gtr-worklet`) with a plain `cargo build`.
 
 ## Keyboard
 
