@@ -1,13 +1,71 @@
+/* Design tokens. Every colour, size and font in the interface comes from here. */
 :root {
   color-scheme: light dark;
-  --bg: light-dark(#f6f5f2, #1b1c1f);
-  --panel: light-dark(#ffffff, #26272b);
-  --border: light-dark(#d9d6cf, #3a3c42);
+
+  /* Surfaces and text */
+  --bg: light-dark(#f3f2ee, #18191c);
+  --panel: light-dark(#fbfaf8, #222327);
+  --raised: light-dark(#ffffff, #2c2d32);
+  --border: light-dark(#dbd8d1, #37393f);
+  /* Edges of controls that are only recognisable by their outline. */
+  --border-strong: light-dark(#85878d, #7b7e86);
   --text: light-dark(#1f2023, #e8e6e1);
-  --muted: light-dark(#6b6d73, #9a9ca3);
-  --accent: light-dark(#b4532a, #e58a5c);
-  font-family: system-ui, sans-serif;
-  font-size: 14px;
+  --muted: light-dark(#5f6167, #a3a5ac);
+  --accent: light-dark(#a84a22, #ec9569);
+  --on-accent: light-dark(#ffffff, #1b1c1f);
+  --hover: light-dark(rgb(31 32 35 / 8%), rgb(232 230 225 / 10%));
+  --pressed: light-dark(rgb(168 74 34 / 12%), rgb(236 149 105 / 20%));
+  --focus: light-dark(#1c5fd4, #8ab4ff);
+  --error: light-dark(#b92d23, #f47a70);
+  --shadow: 0 6px 24px light-dark(rgb(0 0 0 / 18%), rgb(0 0 0 / 55%));
+  --backdrop: rgb(0 0 0 / 45%);
+
+  /* Score */
+  --paper: light-dark(#fffefb, #1d1e21);
+  --ink: light-dark(#1b1c1f, #e8e6e1);
+  --staff: light-dark(#8e8f95, #6f7178);
+  --select: light-dark(rgb(168 74 34 / 16%), rgb(236 149 105 / 22%));
+
+  /* Spacing */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 24px;
+
+  /* Type */
+  --font-ui: system-ui, 'Segoe UI', sans-serif;
+  --font-music: 'Bravura';
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 16px;
+
+  /* Shape */
+  --radius-s: 4px;
+  --radius-m: 6px;
+  --radius-l: 10px;
+  /* Height of a button, field or menu item. */
+  --control: 30px;
+
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}
+
+/* The manual theme switch; without it the system setting decides. */
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+@font-face {
+  font-family: 'Bravura';
+  src: url('/fonts/Bravura.woff2') format('woff2');
+  font-display: block;
 }
 
 * {
@@ -24,18 +82,131 @@ body,
 body {
   background: var(--bg);
   color: var(--text);
+  overflow: hidden;
 }
 
-@font-face {
-  font-family: 'Bravura';
-  src: url('/fonts/Bravura.woff2') format('woff2');
-  font-display: block;
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
-:root {
-  --paper: light-dark(#fffefb, #202124);
-  --ink: light-dark(#1b1c1f, #e8e6e1);
-  --staff: light-dark(#9a9ba0, #6f7178);
-  --error: light-dark(#c8372d, #f0695f);
-  --select: light-dark(rgb(180 83 42 / 16%), rgb(229 138 92 / 22%));
+/* --- Shared controls --- */
+
+button,
+input,
+select {
+  font: inherit;
+  color: inherit;
+}
+
+.btn,
+input:not([type='checkbox']),
+select {
+  height: var(--control);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  color: var(--text);
+}
+
+.btn {
+  padding: 0 var(--space-4);
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: color-mix(in srgb, var(--raised), var(--text) 8%);
+}
+
+.btn.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 600;
+}
+
+.btn.primary:hover {
+  background: color-mix(in srgb, var(--accent), var(--text) 12%);
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+input[type='checkbox'] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+kbd {
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 1px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--bg);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* An icon-only button, used in the bars, the palette and the inspector. */
+.tool {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-s);
+  background: none;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.tool:hover {
+  background: var(--hover);
+}
+
+.tool[aria-pressed='true'] {
+  background: var(--pressed);
+  color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+.tool[aria-disabled='true'] {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tool[aria-disabled='true']:hover {
+  background: none;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  max-width: 280px;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-s);
+  background: var(--raised);
+  color: var(--text);
+  font-size: var(--text-sm);
+  box-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .tool,
+  .btn {
+    transition: background-color 80ms;
+  }
 }

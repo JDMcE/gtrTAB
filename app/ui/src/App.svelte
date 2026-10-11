@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import type { Command, Menu, MenuEntry, PaletteSection, ShortcutGroup } from './lib/commands';
   import Dialogs, { type DialogKind } from './lib/Dialogs.svelte';
   import EffectDialog, { bendPreset, type EffectKind } from './lib/EffectDialog.svelte';
   import {
@@ -16,45 +17,40 @@
     writeAutosave,
     type OpenedFile,
   } from './lib/files';
+  import Inspector from './lib/Inspector.svelte';
   import {
     NOTE_VALUES,
-    type BendKind,
+    type Dynamic,
     type EditorState,
     type Layout,
     type Score,
     type Timeline,
   } from './lib/model';
+  import Palette from './lib/Palette.svelte';
   import { Player } from './lib/player';
+  import { THEMES, applyTheme, loadPrefs, savePrefs, type Theme } from './lib/prefs';
   import ScoreView from './lib/ScoreView.svelte';
+  import Shortcuts from './lib/Shortcuts.svelte';
+  import Icon from './lib/ui/Icon.svelte';
+  import type { IconName } from './lib/ui/icons';
+  import MenuBar from './lib/ui/MenuBar.svelte';
+  import { roving } from './lib/ui/roving';
+  import ToolButton from './lib/ui/ToolButton.svelte';
+  import { tip } from './lib/ui/tooltip';
   import init, { Document } from './wasm/gtr_wasm.js';
 
   const UNTITLED = `untitled.${EXTENSION}`;
-  const VALUE_LABELS = ['1', '2', '4', '8', '16', '32', '64'];
   const VALUE_NAMES = ['Whole', 'Half', 'Quarter', 'Eighth', '16th', '32nd', '64th'];
-  const SLIDES = [
-    ['slide_shift', 'Shift slide'],
-    ['slide_legato', 'Legato slide'],
-    ['slide_in_below', 'Slide in from below'],
-    ['slide_in_above', 'Slide in from above'],
-    ['slide_out_down', 'Slide out downwards'],
-    ['slide_out_up', 'Slide out upwards'],
+  const DYNAMICS: [Dynamic, string][] = [
+    ['ppp', 'Pianississimo'],
+    ['pp', 'Pianissimo'],
+    ['p', 'Piano'],
+    ['mp', 'Mezzo-piano'],
+    ['mf', 'Mezzo-forte'],
+    ['f', 'Forte'],
+    ['ff', 'Fortissimo'],
+    ['fff', 'Fortississimo'],
   ];
-  const HARMONICS = [
-    ['harmonic_natural', 'Natural (N.H.)'],
-    ['harmonic_artificial', 'Artificial (A.H.)'],
-    ['harmonic_pinch', 'Pinch (P.H.)'],
-    ['harmonic_tapped', 'Tapped (T.H.)'],
-    ['harmonic_semi', 'Semi (S.H.)'],
-  ];
-  const STRUMS = [
-    ['brush_down', 'Strum down'],
-    ['brush_up', 'Strum up'],
-    ['arpeggio_down', 'Arpeggio down'],
-    ['arpeggio_up', 'Arpeggio up'],
-    ['rasgueado', 'Rasgueado'],
-  ];
-  const DYNAMICS = ['ppp', 'pp', 'p', 'mp', 'mf', 'f', 'ff', 'fff'];
-  const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
   /** Tuplets as notes played in the time of how many. */
   const TUPLETS = [
     [3, 2],
@@ -67,22 +63,24 @@
     [12, 8],
     [13, 8],
   ];
-  const BEND_KINDS: [BendKind, string][] = [
-    ['bend', 'Bend'],
-    ['bend_release', 'Bend and release'],
-    ['prebend', 'Pre-bend'],
-    ['prebend_release', 'Pre-bend and release'],
-  ] as [BendKind, string][];
-  const BEND_HEIGHTS = [
-    [1, '¼'],
-    [2, '½'],
-    [4, 'full'],
-    [6, '1½'],
-    [8, '2'],
-  ] as const;
+  const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  const SPEEDS = [1, 0.75, 0.5];
+  const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
+  const THEME_NAMES: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+  const THEME_ICONS: Record<Theme, IconName> = {
+    system: 'themeSystem',
+    light: 'themeLight',
+    dark: 'themeDark',
+  };
   /** Longest pause between two digits that still makes one fret number. */
   const DIGIT_WINDOW_MS = 900;
   const AUTOSAVE_DELAY_MS = 1500;
+  /** Below this window width the palette becomes a strip and the inspector floats. */
+  const NARROW_WIDTH = 860;
+  /** From this width the inspector fits beside a full-width page, so it opens by default. */
+  const ROOMY_WIDTH = 1480;
+  /** Keys that belong to a focused toolbar or palette rather than to the score. */
+  const WIDGET_KEYS = ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' ', 'Enter'];
 
   let doc = $state.raw<Document>();
   const player = new Player();
@@ -96,6 +94,7 @@
   let recent = $state(recentFiles());
   let dialog = $state<DialogKind | null>(null);
   let effectDialog = $state<EffectKind | null>(null);
+  let shortcutsOpen = $state(false);
   let zoom = $state(1);
 
   let playing = $state(false);
@@ -104,8 +103,30 @@
   let countIn = $state(false);
   let speed = $state(1);
 
+  const prefs = $state(loadPrefs());
+  let width = $state(0);
+  const narrow = $derived(width > 0 && width < NARROW_WIDTH);
+  const compact = $derived(prefs.compact ?? narrow);
+  const inspectorOpen = $derived(prefs.inspector ?? width >= ROOMY_WIDTH);
+
   let revision = -1;
   let lastDigitAt = 0;
+
+  $effect(() => savePrefs($state.snapshot(prefs)));
+
+  function setTheme(theme: Theme) {
+    prefs.theme = theme;
+    applyTheme(theme);
+  }
+
+  function toggleSection(id: string) {
+    prefs.collapsed = prefs.collapsed.includes(id)
+      ? prefs.collapsed.filter((s) => s !== id)
+      : [...prefs.collapsed, id];
+  }
+
+  /** Gives the keyboard back to the score. */
+  const focusScore = () => document.querySelector<HTMLElement>('[data-score]')?.focus();
 
   function setDocument(next: Document, name: string, path: string | null) {
     stop();
@@ -281,64 +302,346 @@
 
   const technique = (name: string) => edit((d) => d.toggleTechnique(name));
   const effects = $derived(editor?.note?.effects ?? {});
-  const slideValue = $derived(
-    effects.slide ? `slide_${effects.slide.replace('_from', '')}` : '',
-  );
-  const harmonicValue = $derived(effects.harmonic ? `harmonic_${effects.harmonic}` : '');
   const beatEffects = $derived(editor?.beat_effects ?? {});
-  const strumValue = $derived(beatEffects.strum ?? '');
 
   const setNoteEffect = (field: string, value: unknown) =>
     edit((d) => d.setNoteEffect(field, JSON.stringify(value)));
   const setBeatEffect = (field: string, value: unknown) =>
     edit((d) => d.setBeatEffect(field, JSON.stringify(value)));
 
-  /** The bend dropdown's value: a preset as `kind:height`, or `custom` for any other curve. */
-  const bendValue = $derived.by(() => {
-    if (!effects.bend) return '';
-    const current = JSON.stringify(effects.bend);
-    for (const [kind] of BEND_KINDS) {
-      for (const [height] of BEND_HEIGHTS) {
-        if (JSON.stringify(bendPreset(kind, height)) === current) return `${kind}:${height}`;
-      }
-    }
-    return 'custom';
+  // --- Commands ---
+
+  const noNote = () => !editor?.note;
+  const noScore = () => !score;
+
+  /** A command that switches a technique on and off. */
+  const toggle = (
+    label: string,
+    icon: IconName,
+    name: string,
+    active: () => boolean,
+    keys?: string,
+  ): Command => ({ label, icon, keys, active, run: () => technique(name) });
+
+  const noteValues: Command[] = NOTE_VALUES.map((value, i) => ({
+    label: `${VALUE_NAMES[i]} note`,
+    icon: value,
+    active: () => editor?.duration.value === value,
+    run: () => edit((d) => d.setNoteValue(value)),
+  }));
+
+  const dynamics: Command[] = DYNAMICS.map(([value, name]) => ({
+    label: `${name} (${value})`,
+    icon: value,
+    active: () => beatEffects.dynamic === value,
+    run: () => setBeatEffect('dynamic', beatEffects.dynamic === value ? null : value),
+  }));
+
+  const tuplets = (nested: boolean): Command[] =>
+    TUPLETS.slice(0, nested ? 4 : TUPLETS.length).map(([actual, normal]) => {
+      const current = () => (nested ? editor?.duration.nested : editor?.duration.tuplet);
+      const active = () => current()?.actual === actual && current()?.normal === normal;
+      return {
+        label: `${actual} in the time of ${normal}`,
+        active,
+        disabled: () => nested && !editor?.duration.tuplet,
+        run: () =>
+          edit((d) => {
+            const [a, n] = active() ? [0, 0] : [actual, normal];
+            return nested ? d.setNestedTuplet(a, n) : d.setTuplet(a, n);
+          }),
+      };
+    });
+
+  const fingering = (field: 'left_finger' | 'right_finger', marks: string): Command[] =>
+    FINGERS.map((finger, i) => ({
+      label: `${marks[i]}  ${finger}`,
+      active: () => effects[field] === finger,
+      disabled: noNote,
+      run: () => setNoteEffect(field, effects[field] === finger ? null : finger),
+    }));
+
+  const cmd = {
+    new: { label: 'New', icon: 'new', keys: 'Ctrl+N', run: newScore },
+    open: { label: 'Open or import…', icon: 'open', keys: 'Ctrl+O', run: open },
+    save: { label: 'Save', icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
+    saveAs: { label: 'Save as…', icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
+
+    undo: { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
+    redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
+    cut: { label: 'Cut', icon: 'cut', keys: 'Ctrl+X', run: () => edit((d) => d.cut()) },
+    copy: { label: 'Copy', icon: 'copy', keys: 'Ctrl+C', run: () => edit((d) => d.copy()) },
+    paste: { label: 'Paste', icon: 'paste', keys: 'Ctrl+V', disabled: () => !editor?.can_paste, run: () => edit((d) => d.paste()) },
+    insertBeat: { label: 'Insert a rest before the cursor', keys: 'Insert', run: () => edit((d) => d.insertBeat()) },
+    delete: { label: 'Remove the note, or the beat if it is a rest', keys: 'Delete', run: () => edit((d) => d.delete()) },
+    deleteBeats: { label: 'Remove the beat or the selected beats', keys: 'Ctrl+Delete', run: () => edit((d) => d.deleteBeats()) },
+
+    dot: { label: 'Dotted', icon: 'dot', keys: '.', active: () => (editor?.duration.dots ?? 0) > 0, run: () => edit((d) => d.toggleDot()) },
+    triplet: { label: 'Triplet', icon: 'triplet', keys: '/', active: () => !!editor?.duration.tuplet, run: () => edit((d) => d.toggleTriplet()) },
+    rest: { label: 'Rest', icon: 'rest', keys: 'R', run: () => edit((d) => d.rest()) },
+    tie: { label: 'Tie to the previous note', icon: 'tie', keys: 'L', active: () => !!editor?.note?.tied, run: () => edit((d) => d.toggleTie()) },
+
+    hammer: toggle('Hammer-on or pull-off to the next note', 'hammer', 'hammer', () => !!effects.hammer, 'H'),
+    slideShift: toggle('Shift slide to the next note', 'slideShift', 'slide_shift', () => effects.slide === 'shift', 'S'),
+    slideLegato: toggle('Legato slide to the next note', 'slideLegato', 'slide_legato', () => effects.slide === 'legato'),
+    slideInBelow: toggle('Slide in from below', 'slideInBelow', 'slide_in_below', () => effects.slide === 'in_from_below'),
+    slideInAbove: toggle('Slide in from above', 'slideInAbove', 'slide_in_above', () => effects.slide === 'in_from_above'),
+    slideOutDown: toggle('Slide out downwards', 'slideOutDown', 'slide_out_down', () => effects.slide === 'out_down'),
+    slideOutUp: toggle('Slide out upwards', 'slideOutUp', 'slide_out_up', () => effects.slide === 'out_up'),
+    bend: {
+      label: 'Full bend',
+      icon: 'bend',
+      keys: 'B',
+      active: () => !!effects.bend,
+      run: () => setNoteEffect('bend', effects.bend ? null : bendPreset('bend', 4)),
+    },
+    bendEditor: { label: 'Bend editor…', icon: 'bend', keys: 'Shift+B', disabled: noNote, run: () => (effectDialog = 'bend') },
+    vibrato: toggle('Vibrato', 'vibrato', 'vibrato', () => effects.vibrato === 'slight', 'V'),
+    wideVibrato: toggle('Wide vibrato', 'wideVibrato', 'wide_vibrato', () => effects.vibrato === 'wide'),
+    palmMute: toggle('Palm mute', 'palmMute', 'palm_mute', () => !!effects.palm_mute, 'P'),
+    letRing: toggle('Let ring', 'letRing', 'let_ring', () => !!effects.let_ring, 'I'),
+    dead: toggle('Dead note', 'dead', 'dead', () => !!effects.dead, 'X'),
+    ghost: toggle('Ghost note', 'ghost', 'ghost', () => !!effects.ghost, 'G'),
+    staccato: toggle('Staccato', 'staccato', 'staccato', () => !!effects.staccato),
+    accent: toggle('Accent', 'accent', 'accent', () => effects.accent === 'normal', 'A'),
+    heavyAccent: toggle('Heavy accent', 'heavyAccent', 'heavy_accent', () => effects.accent === 'heavy'),
+    harmonicNatural: toggle('Natural harmonic', 'harmonic', 'harmonic_natural', () => effects.harmonic === 'natural', 'N'),
+    harmonicArtificial: toggle('Artificial harmonic', 'harmonic', 'harmonic_artificial', () => effects.harmonic === 'artificial'),
+    harmonicPinch: toggle('Pinch harmonic', 'harmonic', 'harmonic_pinch', () => effects.harmonic === 'pinch'),
+    harmonicTapped: toggle('Tapped harmonic', 'harmonic', 'harmonic_tapped', () => effects.harmonic === 'tapped'),
+    harmonicSemi: toggle('Semi-harmonic', 'harmonic', 'harmonic_semi', () => effects.harmonic === 'semi'),
+    tapped: toggle('Tapping', 'tapping', 'tapped', () => !!effects.tapped, 'T'),
+    trill: { label: 'Trill…', icon: 'trill', active: () => !!effects.trill, disabled: noNote, run: () => (effectDialog = 'trill') },
+    grace: { label: 'Grace note…', icon: 'grace', active: () => !!effects.grace, disabled: noNote, run: () => (effectDialog = 'grace') },
+
+    crescendo: toggle('Crescendo', 'crescendo', 'crescendo', () => beatEffects.hairpin === 'crescendo', '<'),
+    decrescendo: toggle('Decrescendo', 'decrescendo', 'decrescendo', () => beatEffects.hairpin === 'decrescendo', '>'),
+    strokeDown: toggle('Downstroke', 'strokeDown', 'stroke_down', () => beatEffects.stroke === 'down'),
+    strokeUp: toggle('Upstroke', 'strokeUp', 'stroke_up', () => beatEffects.stroke === 'up'),
+    strumDown: toggle('Strum down', 'strumDown', 'brush_down', () => beatEffects.strum === 'brush_down'),
+    strumUp: toggle('Strum up', 'strumUp', 'brush_up', () => beatEffects.strum === 'brush_up'),
+    arpeggioDown: toggle('Arpeggio down', 'arpeggioDown', 'arpeggio_down', () => beatEffects.strum === 'arpeggio_down'),
+    arpeggioUp: toggle('Arpeggio up', 'arpeggioUp', 'arpeggio_up', () => beatEffects.strum === 'arpeggio_up'),
+    rasgueado: toggle('Rasgueado', 'strumDown', 'rasgueado', () => beatEffects.strum === 'rasgueado'),
+    tremolo: toggle('Tremolo picking', 'tremolo', 'tremolo', () => !!beatEffects.tremolo),
+    slap: toggle('Slap', 'slap', 'slap', () => beatEffects.slap === 'slap'),
+    pop: toggle('Pop', 'pop', 'pop', () => beatEffects.slap === 'pop'),
+    whammy: { label: 'Whammy bar…', icon: 'whammy', keys: 'W', active: () => !!beatEffects.whammy, run: () => (effectDialog = 'whammy') },
+
+    insertBar: { label: 'Insert bar', icon: 'insertBar', keys: 'Ctrl+Insert', run: () => edit((d) => d.insertBar()) },
+    removeBar: { label: 'Remove bar', icon: 'removeBar', run: () => edit((d) => d.removeBar()) },
+    timeSignature: { label: 'Time signature…', icon: 'timeSignature', run: () => (dialog = 'time') },
+    tuning: { label: 'Tuning and capo…', icon: 'tuning', run: () => (dialog = 'tuning') },
+    scoreInfo: { label: 'Title, artist and tempo…', icon: 'scoreInfo', run: () => (dialog = 'score') },
+
+    play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
+    metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
+    countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+
+    zoomIn: { label: 'Zoom in', icon: 'zoomIn', disabled: () => zoom >= ZOOMS[ZOOMS.length - 1], run: () => stepZoom(1) },
+    zoomOut: { label: 'Zoom out', icon: 'zoomOut', disabled: () => zoom <= ZOOMS[0], run: () => stepZoom(-1) },
+    compact: { label: 'Narrow palette', icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
+    inspector: { label: 'Inspector', icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
+    shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
+  } satisfies Record<string, Command>;
+
+  const themes: Command[] = THEMES.map((theme) => ({
+    label: THEME_NAMES[theme],
+    icon: THEME_ICONS[theme],
+    active: () => prefs.theme === theme,
+    run: () => setTheme(theme),
+  }));
+
+  function stepZoom(by: number) {
+    const at = ZOOMS.indexOf(zoom);
+    zoom = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, at + by))];
+  }
+
+  const palette: PaletteSection[] = [
+    { id: 'values', title: 'Note values', commands: [...noteValues, cmd.dot, cmd.triplet, cmd.rest, cmd.tie] },
+    {
+      id: 'note',
+      title: 'On the note',
+      commands: [
+        cmd.hammer, cmd.slideShift, cmd.slideLegato, cmd.bend,
+        cmd.vibrato, cmd.wideVibrato, cmd.palmMute, cmd.letRing,
+        cmd.dead, cmd.ghost, cmd.harmonicNatural, cmd.tapped,
+        cmd.staccato, cmd.accent, cmd.heavyAccent, cmd.trill, cmd.grace,
+      ],
+    },
+    {
+      id: 'beat',
+      title: 'On the beat',
+      commands: [
+        ...dynamics, cmd.crescendo, cmd.decrescendo, cmd.strokeDown, cmd.strokeUp,
+        cmd.strumDown, cmd.strumUp, cmd.tremolo, cmd.whammy,
+      ],
+    },
+    {
+      id: 'bars',
+      title: 'Bars and score',
+      commands: [cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.tuning, cmd.scoreInfo],
+    },
+  ];
+
+  const menus = $derived.by((): Menu[] => {
+    const recentItems: MenuEntry[] = recent.map((path) => ({
+      label: path.split(/[\\/]/).pop() ?? path,
+      run: () => openRecent(path),
+    }));
+    const tracks: MenuEntry[] = (score?.tracks ?? []).map((track, i) => ({
+      label: track.name || `Track ${i + 1}`,
+      active: () => editor?.cursor.track === i,
+      run: () => edit((d) => d.setTrack(i)),
+    }));
+    return [
+      {
+        label: 'File',
+        items: [
+          cmd.new,
+          cmd.open,
+          ...(recentItems.length ? [{ label: 'Open recent', items: recentItems }] : []),
+          '-',
+          cmd.save,
+          cmd.saveAs,
+        ],
+      },
+      {
+        label: 'Edit',
+        items: [
+          cmd.undo, cmd.redo, '-', cmd.cut, cmd.copy, cmd.paste, '-',
+          cmd.insertBeat, cmd.delete, cmd.deleteBeats,
+        ],
+      },
+      {
+        label: 'Note',
+        items: [
+          cmd.rest, cmd.tie, cmd.dot,
+          { label: 'Tuplet', items: tuplets(false) },
+          { label: 'Tuplet inside the tuplet', items: tuplets(true) },
+          '-',
+          cmd.hammer,
+          {
+            label: 'Slide',
+            items: [cmd.slideShift, cmd.slideLegato, '-', cmd.slideInBelow, cmd.slideInAbove, cmd.slideOutDown, cmd.slideOutUp],
+          },
+          cmd.bend,
+          cmd.bendEditor,
+          cmd.vibrato,
+          cmd.wideVibrato,
+          {
+            label: 'Harmonic',
+            items: [cmd.harmonicNatural, cmd.harmonicArtificial, cmd.harmonicPinch, cmd.harmonicTapped, cmd.harmonicSemi],
+          },
+          '-',
+          cmd.palmMute, cmd.letRing, cmd.dead, cmd.ghost, cmd.staccato, cmd.accent, cmd.heavyAccent, cmd.tapped,
+          '-',
+          cmd.trill,
+          cmd.grace,
+          { label: 'Fretting-hand finger', items: fingering('left_finger', 'T1234') },
+          { label: 'Picking-hand finger', items: fingering('right_finger', 'pimac') },
+        ],
+      },
+      {
+        label: 'Beat',
+        items: [
+          { label: 'Dynamic', items: dynamics },
+          cmd.crescendo,
+          cmd.decrescendo,
+          '-',
+          cmd.strokeDown, cmd.strokeUp,
+          {
+            label: 'Strum',
+            items: [cmd.strumDown, cmd.strumUp, cmd.arpeggioDown, cmd.arpeggioUp, cmd.rasgueado],
+          },
+          cmd.tremolo,
+          cmd.slap,
+          cmd.pop,
+          cmd.whammy,
+        ],
+      },
+      {
+        label: 'Score',
+        items: [
+          cmd.insertBar, cmd.removeBar, cmd.timeSignature, '-', cmd.tuning, cmd.scoreInfo,
+          ...(tracks.length > 1 ? ['-' as const, { label: 'Track', items: tracks }] : []),
+          '-',
+          cmd.play, cmd.metronome, cmd.countIn,
+        ],
+      },
+      {
+        label: 'View',
+        items: [cmd.zoomIn, cmd.zoomOut, '-', cmd.inspector, cmd.compact, { label: 'Theme', items: themes }],
+      },
+      { label: 'Help', items: [cmd.shortcuts] },
+    ];
   });
 
-  function setBend(value: string) {
-    if (value === 'custom') {
-      effectDialog = 'bend';
-      return;
-    }
-    const [kind, height] = value.split(':');
-    setNoteEffect('bend', value === '' ? null : bendPreset(kind as BendKind, Number(height)));
-  }
+  const keyRows = (...commands: Command[]) =>
+    commands.filter((c) => c.keys).map((c) => ({ keys: c.keys!, label: c.label.replace(/…$/, '') }));
 
-  const tupletValue = (t: { actual: number; normal: number } | null | undefined) =>
-    t ? `${t.actual}:${t.normal}` : '';
-
-  function setTuplet(value: string, nested: boolean) {
-    const [actual, normal] = value === '' ? [0, 0] : value.split(':').map(Number);
-    edit((d) => (nested ? d.setNestedTuplet(actual, normal) : d.setTuplet(actual, normal)));
-  }
-
-  /** Chooses one of a set of exclusive techniques from a dropdown; '' clears it. */
-  function chooseTechnique(current: string, chosen: string) {
-    if (chosen !== '') technique(chosen);
-    else if (current !== '') technique(current);
-  }
+  const shortcutGroups: ShortcutGroup[] = [
+    {
+      title: 'Moving',
+      rows: [
+        { keys: '← → ↑ ↓', label: 'Move between beats and strings' },
+        { keys: 'Shift+arrows', label: 'Extend the selection' },
+        { keys: 'Ctrl+← / Ctrl+→', label: 'Previous or next bar' },
+        { keys: 'Home / End', label: 'First or last bar' },
+      ],
+    },
+    {
+      title: 'Entering notes',
+      rows: [
+        { keys: '0–9', label: 'Fret; two digits typed quickly make one number' },
+        { keys: '+ / −', label: 'Shorter or longer note value' },
+        ...keyRows(cmd.dot, cmd.triplet, cmd.rest, cmd.tie, cmd.insertBeat, cmd.delete, cmd.deleteBeats, cmd.insertBar),
+      ],
+    },
+    {
+      title: 'On the note',
+      rows: keyRows(
+        cmd.hammer, cmd.slideShift, cmd.bend, cmd.bendEditor, cmd.vibrato, cmd.palmMute, cmd.letRing,
+        cmd.dead, cmd.ghost, cmd.accent, cmd.harmonicNatural, cmd.tapped,
+      ),
+    },
+    { title: 'On the beat', rows: keyRows(cmd.crescendo, cmd.decrescendo, cmd.whammy) },
+    {
+      title: 'File and edit',
+      rows: [
+        ...keyRows(cmd.new, cmd.open, cmd.save, cmd.saveAs, cmd.undo),
+        { keys: 'Ctrl+Y / Ctrl+Shift+Z', label: 'Redo' },
+        ...keyRows(cmd.cut, cmd.copy, cmd.paste),
+      ],
+    },
+    { title: 'Playback', rows: [{ keys: 'Space', label: 'Play from the cursor or the selection; stop' }] },
+    {
+      title: 'Interface',
+      rows: [
+        { keys: '? / F1', label: 'This list' },
+        { keys: 'Tab / Shift+Tab', label: 'Move between the bars, palette and score' },
+        { keys: 'Arrows', label: 'Move within a bar, the palette or a menu' },
+        { keys: 'Esc', label: 'Back to the score' },
+      ],
+    },
+  ];
 
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (dialog || effectDialog || !doc) return;
+    if (event.defaultPrevented || dialog || effectDialog || shortcutsOpen || !doc) return;
     const target = event.target instanceof Element ? event.target : null;
-    if (target?.closest('input, select, textarea')) return;
+    if (target?.closest('input, select, textarea, [role="menubar"]')) return;
+    if (target?.closest('[data-roving]')) {
+      if (event.key === 'Escape') return focusScore();
+      if (WIDGET_KEYS.includes(event.key) && !event.ctrlKey && !event.metaKey) return;
+    } else if (target?.closest('button') && (event.key === ' ' || event.key === 'Enter')) {
+      return;
+    }
 
     const action = keyAction(event);
     if (!action) return;
     event.preventDefault();
-    if (target instanceof HTMLButtonElement) target.blur();
     action();
   }
 
@@ -349,11 +652,11 @@
 
     if (ctrl) {
       switch (key.toLowerCase()) {
-        case 'z': return shift ? () => edit((d) => d.redo()) : () => edit((d) => d.undo());
-        case 'y': return () => edit((d) => d.redo());
-        case 'c': return () => edit((d) => d.copy());
-        case 'x': return () => edit((d) => d.cut());
-        case 'v': return () => edit((d) => d.paste());
+        case 'z': return shift ? cmd.redo.run : cmd.undo.run;
+        case 'y': return cmd.redo.run;
+        case 'c': return cmd.copy.run;
+        case 'x': return cmd.cut.run;
+        case 'v': return cmd.paste.run;
         case 's': return () => save(shift);
         case 'o': return open;
         case 'n': return newScore;
@@ -361,8 +664,8 @@
         case 'arrowright': return move('next_bar');
         case 'home': return move('first');
         case 'end': return move('last');
-        case 'delete': return () => edit((d) => d.deleteBeats());
-        case 'insert': return () => edit((d) => d.insertBar());
+        case 'delete': return cmd.deleteBeats.run;
+        case 'insert': return cmd.insertBar.run;
       }
       return undefined;
     }
@@ -376,7 +679,8 @@
         edit((d) => d.typeDigit(Number(key), combine));
       };
     }
-    switch (key) {
+    // Letters work the same with Caps Lock on.
+    switch (key.length === 1 ? key.toLowerCase() : key) {
       case 'ArrowLeft': return move('left');
       case 'ArrowRight': return move('right');
       case 'ArrowUp': return move('up');
@@ -384,32 +688,31 @@
       case 'Home': return move('first');
       case 'End': return move('last');
       case 'Delete':
-      case 'Backspace': return () => edit((d) => d.delete());
-      case 'Insert': return () => edit((d) => d.insertBeat());
+      case 'Backspace': return cmd.delete.run;
+      case 'Insert': return cmd.insertBeat.run;
       case '+':
       case '=': return () => edit((d) => d.shorter());
       case '-': return () => edit((d) => d.longer());
-      case '.': return () => edit((d) => d.toggleDot());
-      case '/': return () => edit((d) => d.toggleTriplet());
-      case 'r':
-      case 'R': return () => edit((d) => d.rest());
-      case 'l':
-      case 'L': return () => edit((d) => d.toggleTie());
-      case 'h': return () => technique('hammer');
-      case 's': return () => technique('slide_shift');
-      case 'b': return () => setBend(effects.bend ? '' : 'bend:4');
-      case 'B': return () => (effectDialog = 'bend');
-      case 'w': return () => (effectDialog = 'whammy');
-      case '<': return () => technique('crescendo');
-      case '>': return () => technique('decrescendo');
-      case 'v': return () => technique('vibrato');
-      case 'p': return () => technique('palm_mute');
-      case 'i': return () => technique('let_ring');
-      case 'x': return () => technique('dead');
-      case 'g': return () => technique('ghost');
-      case 'a': return () => technique('accent');
-      case 'n': return () => technique('harmonic_natural');
-      case 't': return () => technique('tapped');
+      case '.': return cmd.dot.run;
+      case '/': return cmd.triplet.run;
+      case 'r': return cmd.rest.run;
+      case 'l': return cmd.tie.run;
+      case 'h': return cmd.hammer.run;
+      case 's': return cmd.slideShift.run;
+      case 'b': return shift ? () => noNote() || cmd.bendEditor.run() : cmd.bend.run;
+      case 'w': return cmd.whammy.run;
+      case '<': return cmd.crescendo.run;
+      case '>': return cmd.decrescendo.run;
+      case 'v': return cmd.vibrato.run;
+      case 'p': return cmd.palmMute.run;
+      case 'i': return cmd.letRing.run;
+      case 'x': return cmd.dead.run;
+      case 'g': return cmd.ghost.run;
+      case 'a': return cmd.accent.run;
+      case 'n': return cmd.harmonicNatural.run;
+      case 't': return cmd.tapped.run;
+      case '?':
+      case 'F1': return cmd.shortcuts.run;
       case ' ': return togglePlay;
     }
     return undefined;
@@ -442,92 +745,70 @@
 <svelte:window onkeydown={onKeydown} />
 
 <!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="app" ondragover={(e) => e.preventDefault()} ondrop={onDrop}>
-  <header>
-    <strong>gtrTab</strong>
-    <div class="group">
-      <button onclick={newScore} title="New (Ctrl+N)">New</button>
-      <button onclick={open} title="Open or import (Ctrl+O)">Open…</button>
-      {#if recent.length > 0}
-        <select
-          title="Recent files"
-          aria-label="Recent files"
-          value=""
-          onchange={(e) => {
-            const path = e.currentTarget.value;
-            e.currentTarget.value = '';
-            if (path) openRecent(path);
-          }}
-        >
-          <option value="">Recent</option>
-          {#each recent as path}
-            <option value={path}>{path.split(/[\\/]/).pop()}</option>
-          {/each}
-        </select>
-      {/if}
-      <button onclick={() => save()} disabled={!score} title="Save (Ctrl+S)">Save</button>
-      <button onclick={() => save(true)} disabled={!score} title="Save as (Ctrl+Shift+S)">
-        Save as…
-      </button>
+<div
+  class="app"
+  bind:clientWidth={width}
+  ondragover={(e) => e.preventDefault()}
+  ondrop={onDrop}
+>
+  <!-- The two bars share a row when the window is wide enough and stack when it is not. -->
+  <header class="bars">
+    <div class="topbar">
+      <strong class="brand">gtrTab</strong>
+      <MenuBar {menus} onclose={focusScore} />
+      <span class="rule"></span>
+      <div class="cluster" role="toolbar" aria-label="File and edit" use:roving>
+        <ToolButton command={cmd.new} />
+        <ToolButton command={cmd.open} />
+        <ToolButton command={cmd.save} />
+        <span class="rule"></span>
+        <ToolButton command={cmd.undo} />
+        <ToolButton command={cmd.redo} />
+      </div>
+      <span class="file" class:dirty={editor?.dirty}>{fileName}</span>
     </div>
 
     {#if score && editor}
-      <div class="group">
-        <button onclick={() => edit((d) => d.undo())} disabled={!editor.can_undo} title="Undo (Ctrl+Z)">
-          Undo
-        </button>
-        <button onclick={() => edit((d) => d.redo())} disabled={!editor.can_redo} title="Redo (Ctrl+Y)">
-          Redo
-        </button>
-      </div>
-
-      <div class="group">
-        {#each NOTE_VALUES as value, i}
-          <button
-            class="tight"
-            class:active={editor.duration.value === value}
-            onclick={() => edit((d) => d.setNoteValue(value))}
-            title="{VALUE_NAMES[i]} note (+ and − step through)"
-          >
-            {VALUE_LABELS[i]}
-          </button>
-        {/each}
+      <div class="transport" role="toolbar" aria-label="Playback and view" use:roving>
         <button
-          class="tight"
-          class:active={editor.duration.dots > 0}
-          onclick={() => edit((d) => d.toggleDot())}
-          title="Dotted (.)"
+          type="button"
+          class="tool play"
+          aria-label={playing ? 'Stop' : cmd.play.label}
+          aria-keyshortcuts="Space"
+          use:tip={{ label: playing ? 'Stop' : cmd.play.label, keys: 'Space' }}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={togglePlay}
         >
-          •
+          <Icon name={playing ? 'stop' : 'play'} size={16} />
+        </button>
+        <ToolButton command={cmd.metronome} />
+        <ToolButton command={cmd.countIn} />
+        <button
+          type="button"
+          class="chip"
+          aria-label="Playback speed: {speed * 100}%"
+          use:tip={{ label: 'Playback speed' }}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => (speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+        >
+          <Icon name="speed" size={16} />
+          {speed * 100}%
         </button>
         <button
-          class="tight"
-          class:active={editor.duration.tuplet !== null}
-          onclick={() => edit((d) => d.toggleTriplet())}
-          title="Triplet (/)"
+          type="button"
+          class="chip"
+          aria-label="Tempo: {score.tempo} beats per minute"
+          use:tip={{ label: 'Tempo' }}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={cmd.scoreInfo.run}
         >
-          3
+          <Icon name="tempo" size={16} />
+          = {score.tempo}
         </button>
-        <button onclick={() => edit((d) => d.rest())} title="Rest (R)">Rest</button>
-        <button onclick={() => edit((d) => d.toggleTie())} title="Tie (L)">Tie</button>
-      </div>
-
-      <div class="group">
-        <button onclick={() => edit((d) => d.insertBar())} title="Insert bar (Ctrl+Insert)">
-          + Bar
-        </button>
-        <button onclick={() => edit((d) => d.removeBar())} title="Remove bar">− Bar</button>
-        <button onclick={() => (dialog = 'time')}>
-          {score.master_bars[editor.cursor.bar].time_signature.numerator}/{score.master_bars[
-            editor.cursor.bar
-          ].time_signature.denominator}
-        </button>
-        <button onclick={() => (dialog = 'tuning')}>Tuning…</button>
-        <button onclick={() => (dialog = 'score')}>Score…</button>
         {#if score.tracks.length > 1}
           <select
             aria-label="Track"
-            title="Track"
+            use:tip={{ label: 'Track' }}
             bind:value={() => editor!.cursor.track, (track) => edit((d) => d.setTrack(track))}
           >
             {#each score.tracks as track, i}
@@ -535,228 +816,66 @@
             {/each}
           </select>
         {/if}
-      </div>
-
-      <div class="group">
-        <button class="play" onclick={togglePlay} title="Play or stop (Space)">
-          {playing ? 'Stop' : 'Play'}
-        </button>
-        <button class:active={metronome} onclick={() => (metronome = !metronome)} title="Metronome">
-          Click
-        </button>
-        <button class:active={countIn} onclick={() => (countIn = !countIn)} title="Count-in bar">
-          Count-in
-        </button>
-        <select aria-label="Playback speed" title="Playback speed" bind:value={speed}>
-          {#each [0.5, 0.75, 1] as option}
-            <option value={option}>{option * 100}%</option>
-          {/each}
-        </select>
-      </div>
-
-      <div class="group techniques">
-        <button class:active={effects.hammer} onclick={() => technique('hammer')} title="Hammer-on or pull-off to the next note (H)">
-          H/P
-        </button>
-        <select
-          aria-label="Slide"
-          title="Slide (S for a shift slide)"
-          class:active={slideValue !== ''}
-          bind:value={() => slideValue, (v) => chooseTechnique(slideValue, v)}
+        <span class="rule"></span>
+        <ToolButton command={cmd.zoomOut} />
+        <span class="zoom" aria-label="Zoom {zoom * 100}%">{zoom * 100}%</span>
+        <ToolButton command={cmd.zoomIn} />
+        <span class="rule"></span>
+        <ToolButton command={cmd.compact} />
+        <ToolButton command={cmd.inspector} />
+        <ToolButton command={cmd.shortcuts} />
+        <button
+          type="button"
+          class="tool"
+          aria-label="Theme: {THEME_NAMES[prefs.theme]}"
+          use:tip={{ label: `Theme: ${THEME_NAMES[prefs.theme]}` }}
+          onmousedown={(e) => e.preventDefault()}
+          onclick={() => setTheme(THEMES[(THEMES.indexOf(prefs.theme) + 1) % THEMES.length])}
         >
-          <option value="">Slide</option>
-          {#each SLIDES as [value, label]}
-            <option {value}>{label}</option>
-          {/each}
-        </select>
-        <select
-          aria-label="Bend"
-          title="Bend (B for a full bend)"
-          class:active={bendValue !== ''}
-          bind:value={() => bendValue, (v) => setBend(v)}
-        >
-          <option value="">Bend</option>
-          <option value="custom">Custom curve…</option>
-          {#each BEND_KINDS as [kind, kindLabel]}
-            <optgroup label={kindLabel}>
-              {#each BEND_HEIGHTS as [height, heightLabel]}
-                <option value="{kind}:{height}">{kindLabel} {heightLabel}</option>
-              {/each}
-            </optgroup>
-          {/each}
-        </select>
-        <button class:active={effects.vibrato === 'slight'} onclick={() => technique('vibrato')} title="Vibrato (V)">
-          Vib
+          <Icon name={THEME_ICONS[prefs.theme]} />
         </button>
-        <button class:active={effects.vibrato === 'wide'} onclick={() => technique('wide_vibrato')} title="Wide vibrato">
-          Wide vib
-        </button>
-        <button class:active={effects.palm_mute} onclick={() => technique('palm_mute')} title="Palm mute (P)">
-          P.M.
-        </button>
-        <button class:active={effects.let_ring} onclick={() => technique('let_ring')} title="Let ring (I)">
-          Let ring
-        </button>
-        <button class="tight" class:active={effects.dead} onclick={() => technique('dead')} title="Dead note (X)">
-          X
-        </button>
-        <button class="tight" class:active={effects.ghost} onclick={() => technique('ghost')} title="Ghost note (G)">
-          ( )
-        </button>
-        <button class:active={effects.staccato} onclick={() => technique('staccato')} title="Staccato">
-          Stacc
-        </button>
-        <button class="tight" class:active={effects.accent === 'normal'} onclick={() => technique('accent')} title="Accent (A)">
-          &gt;
-        </button>
-        <button class="tight" class:active={effects.accent === 'heavy'} onclick={() => technique('heavy_accent')} title="Heavy accent">
-          ∧
-        </button>
-        <select
-          aria-label="Harmonic"
-          title="Harmonic (N for a natural harmonic)"
-          class:active={harmonicValue !== ''}
-          bind:value={() => harmonicValue, (v) => chooseTechnique(harmonicValue, v)}
-        >
-          <option value="">Harmonic</option>
-          {#each HARMONICS as [value, label]}
-            <option {value}>{label}</option>
-          {/each}
-        </select>
-        <button class="tight" class:active={effects.tapped} onclick={() => technique('tapped')} title="Tapping (T)">
-          T
-        </button>
-        <button class:active={!!editor.beat_effects?.tremolo} onclick={() => technique('tremolo')} title="Tremolo picking">
-          Trem
-        </button>
-        <button class="tight" class:active={editor.beat_effects?.stroke === 'down'} onclick={() => technique('stroke_down')} title="Downstroke">
-          ↓
-        </button>
-        <button class="tight" class:active={editor.beat_effects?.stroke === 'up'} onclick={() => technique('stroke_up')} title="Upstroke">
-          ↑
-        </button>
-      </div>
-
-      <div class="group techniques">
-        <button class:active={!!beatEffects.whammy} onclick={() => (effectDialog = 'whammy')} title="Whammy bar (W)">
-          Whammy…
-        </button>
-        <button class:active={!!effects.trill} onclick={() => (effectDialog = 'trill')} disabled={!editor.note} title="Trill">
-          Trill…
-        </button>
-        <button class:active={!!effects.grace} onclick={() => (effectDialog = 'grace')} disabled={!editor.note} title="Grace note">
-          Grace…
-        </button>
-        <select
-          aria-label="Strum"
-          title="Strum or arpeggio"
-          class:active={strumValue !== ''}
-          bind:value={() => strumValue, (v) => chooseTechnique(strumValue, v)}
-        >
-          <option value="">Strum</option>
-          {#each STRUMS as [value, label]}
-            <option {value}>{label}</option>
-          {/each}
-        </select>
-        <button class:active={beatEffects.slap === 'slap'} onclick={() => technique('slap')} title="Slap">
-          Slap
-        </button>
-        <button class:active={beatEffects.slap === 'pop'} onclick={() => technique('pop')} title="Pop">
-          Pop
-        </button>
-        <select
-          aria-label="Dynamic"
-          title="Dynamic: loudness from this beat on"
-          class:active={!!beatEffects.dynamic}
-          bind:value={() => beatEffects.dynamic ?? '', (v) => setBeatEffect('dynamic', v || null)}
-        >
-          <option value="">Dynamic</option>
-          {#each DYNAMICS as value}
-            <option {value}>{value}</option>
-          {/each}
-        </select>
-        <button class="tight" class:active={beatEffects.hairpin === 'crescendo'} onclick={() => technique('crescendo')} title="Crescendo (<)">
-          &lt;
-        </button>
-        <button class="tight" class:active={beatEffects.hairpin === 'decrescendo'} onclick={() => technique('decrescendo')} title="Decrescendo (>)">
-          &gt;
-        </button>
-        <select
-          aria-label="Tuplet"
-          title="Tuplet (/ for a triplet)"
-          class:active={editor.duration.tuplet !== null}
-          bind:value={() => tupletValue(editor?.duration.tuplet), (v) => setTuplet(v, false)}
-        >
-          <option value="">Tuplet</option>
-          {#each TUPLETS as [actual, normal]}
-            <option value="{actual}:{normal}">{actual}:{normal}</option>
-          {/each}
-        </select>
-        <select
-          aria-label="Nested tuplet"
-          title="A second tuplet inside the first"
-          class:active={!!editor.duration.nested}
-          disabled={editor.duration.tuplet === null}
-          bind:value={() => tupletValue(editor?.duration.nested), (v) => setTuplet(v, true)}
-        >
-          <option value="">Nested</option>
-          {#each TUPLETS.slice(0, 4) as [actual, normal]}
-            <option value="{actual}:{normal}">{actual}:{normal}</option>
-          {/each}
-        </select>
-        <select
-          aria-label="Fretting-hand finger"
-          title="Fretting-hand finger"
-          class:active={!!effects.left_finger}
-          disabled={!editor.note}
-          bind:value={() => effects.left_finger ?? '', (v) => setNoteEffect('left_finger', v || null)}
-        >
-          <option value="">LH</option>
-          {#each FINGERS as finger, i}
-            <option value={finger}>{'T1234'[i]}</option>
-          {/each}
-        </select>
-        <select
-          aria-label="Picking-hand finger"
-          title="Picking-hand finger"
-          class:active={!!effects.right_finger}
-          disabled={!editor.note}
-          bind:value={() => effects.right_finger ?? '', (v) => setNoteEffect('right_finger', v || null)}
-        >
-          <option value="">RH</option>
-          {#each FINGERS as finger, i}
-            <option value={finger}>{'pimac'[i]}</option>
-          {/each}
-        </select>
-      </div>
-
-      <div class="group end">
-        <select aria-label="Zoom" title="Zoom" bind:value={zoom}>
-          {#each [0.75, 1, 1.25, 1.5, 2] as option}
-            <option value={option}>{option * 100}%</option>
-          {/each}
-        </select>
       </div>
     {/if}
   </header>
 
   {#if score && editor && doc}
-    <ScoreView
-      getLayout={(width) => JSON.parse(doc!.layoutJson(width)) as Layout}
-      revision={`${editor.revision}:${editor.cursor.track}:${fileName}`}
-      {editor}
-      {playhead}
-      {zoom}
-      onpick={(bar, beat, string, extend) => edit((d) => d.setCursor(bar, beat, string, extend))}
-    />
+    <div class="work">
+      <Palette sections={palette} {compact} collapsed={prefs.collapsed} ontoggle={toggleSection} />
+      <div class="stage">
+        <ScoreView
+          getLayout={(pageWidth) => JSON.parse(doc!.layoutJson(pageWidth)) as Layout}
+          revision={`${editor.revision}:${editor.cursor.track}:${fileName}`}
+          {editor}
+          {playhead}
+          {zoom}
+          theme={prefs.theme}
+          onpick={(bar, beat, string, extend) => edit((d) => d.setCursor(bar, beat, string, extend))}
+        />
+        <!-- Room for the track list and mixer. Empty, and so collapsed, until phase 5. -->
+        <div class="dock"></div>
+      </div>
+      {#if inspectorOpen}
+        <div class="side" class:floating={narrow}>
+          <Inspector
+            {score}
+            {editor}
+            {technique}
+            {setNoteEffect}
+            {setBeatEffect}
+            openEffect={(kind) => (effectDialog = kind)}
+            openDialog={(kind) => (dialog = kind)}
+          />
+        </div>
+      {/if}
+    </div>
   {:else}
     <main>{failed ? '' : 'Loading…'}</main>
   {/if}
 
   <footer class:failed>
-    <span>{message || fileName}</span>
-    {#if editor}
-      <span>Bar {editor.cursor.bar + 1} · Beat {editor.cursor.beat + 1}</span>
+    <span role="status">{message || 'Press ? for the keyboard shortcuts'}</span>
+    {#if editor && score}
+      <span>Bar {editor.cursor.bar + 1} of {score.master_bars.length} · Beat {editor.cursor.beat + 1}</span>
     {/if}
   </footer>
 </div>
@@ -805,6 +924,10 @@
   />
 {/if}
 
+{#if shortcutsOpen}
+  <Shortcuts groups={shortcutGroups} onclose={() => (shortcutsOpen = false)} />
+{/if}
+
 <style>
   .app {
     display: flex;
@@ -812,86 +935,157 @@
     height: 100%;
   }
 
-  header,
-  footer {
-    background: var(--panel);
-    border: 0 solid var(--border);
-    padding: 6px 12px;
-  }
-
-  header {
+  .bars {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px 14px;
-    border-bottom-width: 1px;
+    gap: 0 var(--space-4);
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
   }
 
-  header strong {
+  .topbar,
+  .transport,
+  .cluster {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+  }
+
+  /* Sharing a row, the top bar takes the spare width; alone, each bar fills its row. */
+  .topbar {
+    flex: 1000 1 auto;
+    min-width: 0;
+  }
+
+  .transport {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+  }
+
+  .brand {
+    padding: 0 var(--space-3) 0 var(--space-2);
     color: var(--accent);
   }
 
-  .group {
-    display: flex;
+  .rule {
+    flex: none;
+    width: 1px;
+    height: 18px;
+    margin: 0 var(--space-2);
+    background: var(--border);
+  }
+
+  .file {
+    flex: 1;
+    min-width: 0;
+    padding: 0 var(--space-3);
+    overflow: hidden;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .file.dirty::before {
+    content: '• ';
+    color: var(--accent);
+  }
+
+  .tool.play {
+    margin-right: var(--space-2);
+    background: var(--accent);
+    color: var(--on-accent);
+  }
+
+  .tool.play:hover {
+    background: color-mix(in srgb, var(--accent), var(--text) 12%);
+  }
+
+  .chip {
+    display: inline-flex;
     align-items: center;
-    gap: 4px;
-  }
-
-  .group.end {
-    margin-left: auto;
-  }
-
-  button,
-  select {
-    font: inherit;
-    padding: 4px 9px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
+    gap: var(--space-2);
+    height: var(--control);
+    padding: 0 var(--space-3) 0 var(--space-2);
+    border: 0;
+    border-radius: var(--radius-s);
+    background: none;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     cursor: pointer;
   }
 
-  select {
+  .chip:hover {
+    background: var(--hover);
+  }
+
+  .transport select {
     max-width: 150px;
   }
 
-  button.tight {
-    min-width: 28px;
-    padding: 4px 6px;
+  .zoom {
+    min-width: 40px;
+    color: var(--muted);
+    font-size: var(--text-sm);
+    font-variant-numeric: tabular-nums;
+    text-align: center;
   }
 
-  button.active,
-  select.active {
-    border-color: var(--accent);
-    color: var(--accent);
+  .work {
+    position: relative;
+    display: flex;
+    flex: 1;
+    min-height: 0;
   }
 
-  button.play {
-    min-width: 54px;
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--paper);
+  .stage {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
   }
 
-  button:disabled {
-    opacity: 0.45;
-    cursor: default;
+  .dock:empty {
+    display: none;
+  }
+
+  .side {
+    display: flex;
+  }
+
+  /* In a narrow window the inspector lies over the score instead of squeezing it. */
+  .side.floating {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    box-shadow: var(--shadow);
   }
 
   main {
     flex: 1;
-    padding: 24px;
+    padding: var(--space-6);
     color: var(--muted);
   }
 
   footer {
     display: flex;
     justify-content: space-between;
-    gap: 16px;
-    border-top-width: 1px;
+    gap: var(--space-5);
+    padding: var(--space-2) var(--space-4);
+    border-top: 1px solid var(--border);
+    background: var(--panel);
     color: var(--muted);
-    font-size: 12px;
+    font-size: var(--text-sm);
+    white-space: nowrap;
+  }
+
+  footer span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   footer.failed span:first-child {

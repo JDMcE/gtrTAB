@@ -10,10 +10,12 @@
     editor: EditorState;
     playhead: { bar: number; beat: number } | null;
     zoom: number;
+    /** Changes with the colour theme, so that the canvas is repainted in the new colours. */
+    theme: string;
     onpick: (bar: number, beat: number, string: number, extend: boolean) => void;
   }
 
-  let { getLayout, revision, editor, playhead, zoom, onpick }: Props = $props();
+  let { getLayout, revision, editor, playhead, zoom, theme, onpick }: Props = $props();
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
@@ -167,7 +169,7 @@
   }
 
   $effect(() => {
-    void [layout, editor, playhead, zoom, viewWidth, viewHeight, scrollTop, fontsReady];
+    void [layout, editor, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, fontsReady];
     draw();
   });
 
@@ -228,9 +230,14 @@
 <div class="score">
   <canvas bind:this={canvas}></canvas>
   <span bind:this={probe} hidden></span>
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- The score takes the keyboard whenever no other control has it. -->
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
   <div
     class="scroller"
+    role="application"
+    aria-label="Score"
+    tabindex="0"
+    data-score
     bind:this={scroller}
     onscroll={() => (scrollTop = scroller.scrollTop)}
     onpointerdown={onPointerDown}
@@ -243,6 +250,7 @@
   .score {
     position: relative;
     flex: 1;
+    min-width: 0;
     min-height: 0;
     background: var(--paper);
   }
@@ -258,5 +266,12 @@
   .scroller {
     overflow-y: auto;
     cursor: text;
+  }
+
+  /* The score has the keyboard most of the time, so its focus mark is a line along the top
+     edge rather than a ring around the whole view. */
+  .scroller:focus-visible {
+    outline: none;
+    box-shadow: inset 0 2px 0 var(--focus);
   }
 </style>
