@@ -3,9 +3,9 @@
 //! ones the importer has no use for.
 
 use gtr_model::{
-    Accent, Beat, BeatEffects, Bend, Dynamic, Finger, Grace, Harmonic, MasterBar, Note,
-    NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap, Staff, Strum, TimeSignature, Track,
-    Trill, Vibrato, Voice,
+    Accent, Beat, BeatEffects, Bend, Dynamic, Feel, Finger, Grace, Harmonic, Instrument, MasterBar,
+    Mix, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap, Staff, Strum,
+    TimeSignature, Track, Trill, Tuning, Vibrato, Voice,
 };
 
 use super::{ImportError, Skipped, bar, beat, duration, keep_dynamic_changes, tuning};
@@ -110,12 +110,14 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     let newer = number != "5.00";
 
     let title = r.string()?;
-    r.string()?; // subtitle
+    let subtitle = r.string()?;
     let artist = r.string()?;
     let album = r.string()?;
-    for _ in 0..5 {
-        r.string()?; // words, music, copyright, tab author, instructions
-    }
+    let words = r.string()?;
+    let music = r.string()?;
+    let copyright = r.string()?;
+    let transcriber = r.string()?;
+    r.string()?; // instructions
     for _ in 0..r.count("notice count", 10_000)? {
         r.string()?;
     }
@@ -142,7 +144,15 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     }
     r.skip(4)?; // key signature
     r.skip(1)?; // octave
-    r.skip(64 * 12)?; // MIDI channel settings
+    // MIDI channel settings: program, volume and balance, then effect levels.
+    let mut channels = Vec::with_capacity(64);
+    for _ in 0..64 {
+        let program = r.int()?.clamp(0, 127) as u8;
+        let volume = r.byte()?;
+        let balance = r.byte()?;
+        r.skip(6)?;
+        channels.push((program, volume, balance));
+    }
     r.skip(42)?; // bar numbers of codas, segnos and similar directions
 
     let bar_count = r.count("bar count", 100_000)?;
@@ -163,22 +173,26 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         if flags & 0x02 != 0 {
             time_signature.denominator = r.byte()?;
         }
-        skipped.add_if(flags & 0x04 != 0, "repeats");
+        let mut master = MasterBar::new(TimeSignature::COMMON);
+        // The key carries on from the bar before unless this bar changes it.
+        master.key_signature = master_bars.last().map_or(0, |m| m.key_signature);
+        master.repeat_start = flags & 0x04 != 0;
         if flags & 0x08 != 0 {
-            r.skip(1)?; // repeat count
-            skipped.add("repeats");
+            // Guitar Pro counts the repeats after the first time through.
+            master.repeat_count = r.byte()?.saturating_add(1).max(2);
         }
         if flags & 0x20 != 0 {
-            r.string()?; // marker name
+            let name = r.string()?;
             r.skip(4)?; // marker colour
-            skipped.add("section markers");
+            master.section =
+                Some(name.chars().take(120).collect()).filter(|n: &String| !n.is_empty());
         }
         if flags & 0x10 != 0 {
-            r.skip(1)?;
-            skipped.add("alternate endings");
+            master.alternate_endings = r.byte()?;
         }
         if flags & 0x40 != 0 {
-            r.skip(2)?; // key signature
+            master.key_signature = r.signed()?.clamp(-MasterBar::MAX_KEY, MasterBar::MAX_KEY);
+            r.skip(1)?; // major or minor
         }
         if flags & 0x03 != 0 {
             r.skip(4)?; // beaming
@@ -186,13 +200,15 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         if flags & 0x10 == 0 {
             r.skip(1)?;
         }
-        skipped.add_if(r.byte()? != 0, "triplet feel");
-        master_bars.push(MasterBar {
-            time_signature: match time_signature.is_valid() {
-                true => time_signature,
-                false => TimeSignature::COMMON,
-            },
-        });
+        master.feel = match r.byte()? {
+            1 => Some(Feel::SwingEighths),
+            2 => Some(Feel::SwingSixteenths),
+            _ => None,
+        };
+        if time_signature.is_valid() {
+            master.time_signature = time_signature;
+        }
+        master_bars.push(master);
     }
 
     let mut tracks = Vec::with_capacity(track_count);
@@ -211,7 +227,9 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
                 strings.push(pitch.clamp(0, 127) as u8);
             }
         }
-        r.skip(12)?; // MIDI port and channels
+        let port = r.int()?;
+        let channel = r.int()?;
+        r.skip(4)?; // effects channel
         r.skip(4)?; // fret count
         let capo = r.int()?.clamp(0, 24) as u8;
         r.skip(4)?; // colour
@@ -221,21 +239,43 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
             r.string()?;
         }
         let percussion = flags & 0x01 != 0;
-        skipped.add_if(percussion, "percussion and untuned tracks");
-        let staff_tuning = tuning(strings);
+        // A drum track's lines have no pitch: its notes say which piece of the kit they are.
+        let staff_tuning = match percussion {
+            true => Tuning::new(vec![0; strings.len().clamp(1, Tuning::MAX_STRINGS)]),
+            false => tuning(strings),
+        };
+        let capo = if percussion { 0 } else { capo };
         infos.push(TrackInfo {
             percussion,
             string_count: staff_tuning.strings.len(),
             last_fret: [0; 7],
         });
-        tracks.push(Track {
+        let mut track = Track::new(
             name,
-            staves: vec![Staff {
+            Instrument::default(),
+            vec![Staff {
                 tuning: staff_tuning,
                 capo,
                 bars: Vec::with_capacity(bar_count),
             }],
-        });
+        );
+        let index = (port.saturating_sub(1).saturating_mul(16))
+            .saturating_add(channel)
+            .saturating_sub(1);
+        let settings = usize::try_from(index)
+            .ok()
+            .and_then(|index| channels.get(index));
+        if let Some(&(program, volume, balance)) = settings {
+            track.instrument = Instrument::from_midi_program(program);
+            // Guitar Pro counts both in sixteenths, with 13 its usual volume and 8 the centre.
+            track.mix.volume = (u32::from(volume) * u32::from(Mix::UNITY) / 13)
+                .min(u32::from(Mix::MAX_VOLUME)) as u8;
+            track.mix.pan = ((i32::from(balance) - 8) * 25 / 2).clamp(-100, 100) as i8;
+        }
+        if percussion {
+            track.instrument = Instrument::Drums;
+        }
+        tracks.push(track);
     }
     r.skip(if newer { 1 } else { 2 })?;
 
@@ -272,8 +312,13 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     Ok(Score {
         info: ScoreInfo {
             title,
+            subtitle,
             artist,
             album,
+            words,
+            music,
+            transcriber,
+            copyright,
         },
         tempo,
         master_bars,
@@ -456,7 +501,7 @@ fn read_mix_change(r: &mut Reader, newer: bool, skipped: &mut Skipped) -> Result
 }
 
 struct ReadNote {
-    /// `None` on percussion tracks, whose notes are not imported.
+    /// `None` for a note on a fret that does not exist.
     note: Option<Note>,
     tremolo: Option<NoteValue>,
     dynamic: Dynamic,
@@ -526,8 +571,12 @@ fn read_note(
     } else {
         *memory = fret;
     }
-    // Percussion tracks store drum numbers as frets, which mean nothing as tablature.
-    let note = (!track.percussion).then_some(Note {
+    // On a percussion track the fret is the number of a piece of the drum kit.
+    let highest = match track.percussion {
+        true => Instrument::Drums.max_fret(),
+        false => Instrument::default().max_fret(),
+    };
+    let note = (fret <= highest).then_some(Note {
         string,
         fret,
         tied,

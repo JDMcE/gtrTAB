@@ -1,6 +1,7 @@
 // Interface preferences, kept in localStorage: theme and which panels are open.
 
 import { isTauri } from './files';
+import type { Notation } from './model';
 
 export type Theme = 'system' | 'light' | 'dark';
 export const THEMES: Theme[] = ['system', 'light', 'dark'];
@@ -13,10 +14,27 @@ export interface Prefs {
   inspector: boolean | null;
   /** Ids of the palette sections that are folded away. */
   collapsed: string[];
+  /** Staves each track is shown on. */
+  notation: Notation;
+  /** Every track shown in the score, not just the one being edited. */
+  multitrack: boolean;
+  /** Track pane shown under the score. */
+  tracks: boolean;
+  /** Height of the track pane in pixels; `null` fits the tracks. */
+  tracksHeight: number | null;
 }
 
 const KEY = 'gtrtab.ui';
-const DEFAULTS: Prefs = { theme: 'system', compact: null, inspector: null, collapsed: [] };
+const DEFAULTS: Prefs = {
+  theme: 'system',
+  compact: null,
+  inspector: null,
+  collapsed: [],
+  notation: 'both',
+  multitrack: false,
+  tracks: true,
+  tracksHeight: null,
+};
 
 export function loadPrefs(): Prefs {
   try {

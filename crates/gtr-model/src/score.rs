@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BeatEffects, Duration, NoteEffects, Rational, Tuning};
+use crate::{BeatEffects, Duration, Instrument, Mix, NoteEffects, Rational, Tuning};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Score {
@@ -17,13 +17,136 @@ pub struct Score {
 #[serde(default)]
 pub struct ScoreInfo {
     pub title: String,
+    pub subtitle: String,
     pub artist: String,
     pub album: String,
+    /// Who wrote the words.
+    pub words: String,
+    /// Who wrote the music.
+    pub music: String,
+    /// Who wrote the score down.
+    pub transcriber: String,
+    pub copyright: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MasterBar {
     pub time_signature: TimeSignature,
+    /// Sharps in the key signature if positive, flats if negative.
+    #[serde(default)]
+    pub key_signature: i8,
+    /// A repeated passage starts with this bar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub repeat_start: bool,
+    /// A repeated passage ends with this bar and is played this many times in all; zero
+    /// if none ends here.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub repeat_count: u8,
+    /// The passes of a repeat on which this bar is played, as a bit per pass starting with
+    /// the first; zero for a bar played every time.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub alternate_endings: u8,
+    /// A section name or rehearsal mark, such as `Chorus` or `A`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub section: Option<String>,
+    /// A place that a jump leads to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<Target>,
+    /// An instruction, at the end of this bar, to carry on from somewhere else.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jump: Option<Jump>,
+    /// A new tempo from this bar on, in quarter notes per minute.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tempo: Option<u32>,
+    /// Whether pairs of short notes are played unevenly from this bar on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feel: Option<Feel>,
+    /// The time elapsed when the piece reaches this bar is written above it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub timer: bool,
+}
+
+fn is_zero(value: &u8) -> bool {
+    *value == 0
+}
+
+/// A marked place in the score.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Target {
+    Segno,
+    Coda,
+    /// The end of the piece, once a jump "al fine" has been taken.
+    Fine,
+}
+
+/// Where to carry on from at the end of a bar.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Jump {
+    /// Back to the beginning.
+    DaCapo,
+    DaCapoAlFine,
+    DaCapoAlCoda,
+    /// Back to the segno.
+    DalSegno,
+    DalSegnoAlFine,
+    DalSegnoAlCoda,
+    /// On to the coda, once a jump "al coda" has been taken.
+    ToCoda,
+}
+
+impl Jump {
+    pub fn label(self) -> &'static str {
+        match self {
+            Jump::DaCapo => "D.C.",
+            Jump::DaCapoAlFine => "D.C. al Fine",
+            Jump::DaCapoAlCoda => "D.C. al Coda",
+            Jump::DalSegno => "D.S.",
+            Jump::DalSegnoAlFine => "D.S. al Fine",
+            Jump::DalSegnoAlCoda => "D.S. al Coda",
+            Jump::ToCoda => "To Coda",
+        }
+    }
+}
+
+/// How evenly pairs of short notes are played.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Feel {
+    Straight,
+    /// Pairs of eighth notes are played long-short, as two thirds and one third.
+    SwingEighths,
+    SwingSixteenths,
+}
+
+impl MasterBar {
+    pub const MAX_KEY: i8 = 7;
+
+    /// A bar in the given time, in a key without sharps or flats.
+    pub fn new(time_signature: TimeSignature) -> Self {
+        MasterBar {
+            time_signature,
+            key_signature: 0,
+            repeat_start: false,
+            repeat_count: 0,
+            alternate_endings: 0,
+            section: None,
+            target: None,
+            jump: None,
+            tempo: None,
+            feel: None,
+            timer: false,
+        }
+    }
+
+    pub fn is_valid(&self) -> bool {
+        self.time_signature.is_valid()
+            && self.key_signature.abs() <= MasterBar::MAX_KEY
+            && self.repeat_count != 1
+            && self.tempo != Some(0)
+            && (self.section.as_ref()).is_none_or(|s| s.chars().count() <= 120)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -51,7 +174,36 @@ impl TimeSignature {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Track {
     pub name: String,
+    #[serde(default)]
+    pub instrument: Instrument,
+    #[serde(default)]
+    pub mix: Mix,
     pub staves: Vec<Staff>,
+}
+
+impl Track {
+    /// A track with default mixer settings.
+    pub fn new(name: impl Into<String>, instrument: Instrument, staves: Vec<Staff>) -> Self {
+        Track {
+            name: name.into(),
+            instrument,
+            mix: Mix::default(),
+            staves,
+        }
+    }
+
+    /// A track for `instrument` with the staves it usually has, in their usual tunings,
+    /// and `bar_count` empty bars.
+    pub fn empty(name: impl Into<String>, instrument: Instrument, bar_count: usize) -> Self {
+        let staves = (instrument.default_tunings().into_iter())
+            .map(|tuning| Staff {
+                tuning,
+                capo: 0,
+                bars: vec![Bar::empty(); bar_count],
+            })
+            .collect();
+        Track::new(name, instrument, staves)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,6 +220,9 @@ pub struct Bar {
 }
 
 impl Bar {
+    /// The most voices a bar can hold.
+    pub const MAX_VOICES: usize = 4;
+
     /// A bar with a single voice and no beats.
     pub fn empty() -> Self {
         Bar {
@@ -160,8 +315,10 @@ impl Note {
 pub enum ModelError {
     #[error("tempo must be greater than zero")]
     InvalidTempo,
-    #[error("bar {bar} has an invalid time signature")]
+    #[error("bar {bar} has an invalid time or key signature")]
     InvalidTimeSignature { bar: usize },
+    #[error("track {track} has no staff, or mixer settings that are out of range")]
+    InvalidTrack { track: usize },
     #[error("track {track} staff {staff} has no strings")]
     EmptyTuning { track: usize, staff: usize },
     #[error("track {track} staff {staff} has {found} bars, expected {expected}")]
@@ -185,17 +342,8 @@ impl Score {
         Score {
             info: ScoreInfo::default(),
             tempo: 120,
-            master_bars: vec![MasterBar {
-                time_signature: TimeSignature::COMMON,
-            }],
-            tracks: vec![Track {
-                name: "Guitar".into(),
-                staves: vec![Staff {
-                    tuning: Tuning::guitar_standard(),
-                    capo: 0,
-                    bars: vec![Bar::empty()],
-                }],
-            }],
+            master_bars: vec![MasterBar::new(TimeSignature::COMMON)],
+            tracks: vec![Track::empty("Guitar", Instrument::default(), 1)],
         }
     }
 
@@ -205,14 +353,13 @@ impl Score {
         if self.tempo == 0 {
             return Err(ModelError::InvalidTempo);
         }
-        if let Some(bar) = self
-            .master_bars
-            .iter()
-            .position(|m| !m.time_signature.is_valid())
-        {
+        if let Some(bar) = self.master_bars.iter().position(|m| !m.is_valid()) {
             return Err(ModelError::InvalidTimeSignature { bar });
         }
         for (track, t) in self.tracks.iter().enumerate() {
+            if t.staves.is_empty() || !t.mix.is_valid() {
+                return Err(ModelError::InvalidTrack { track });
+            }
             for (staff, s) in t.staves.iter().enumerate() {
                 let string_count = s.tuning.strings.len();
                 if string_count == 0 {

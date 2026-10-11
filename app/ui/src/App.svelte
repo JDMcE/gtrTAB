@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Command, Menu, MenuEntry, PaletteSection, ShortcutGroup } from './lib/commands';
+  import ChordDialog from './lib/ChordDialog.svelte';
   import Dialogs, { type DialogKind } from './lib/Dialogs.svelte';
   import EffectDialog, { bendPreset, type EffectKind } from './lib/EffectDialog.svelte';
   import {
@@ -19,18 +20,27 @@
   } from './lib/files';
   import Inspector from './lib/Inspector.svelte';
   import {
+    FEELS,
+    JUMPS,
+    MAX_VOICES,
+    NOTATIONS,
+    TARGETS,
     NOTE_VALUES,
+    type DrumPiece,
     type Dynamic,
     type EditorState,
     type Layout,
+    type Mix,
     type Score,
     type Timeline,
   } from './lib/model';
   import Palette from './lib/Palette.svelte';
-  import { Player } from './lib/player';
+  import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
+  import { Player, mixOf } from './lib/player';
   import { THEMES, applyTheme, loadPrefs, savePrefs, type Theme } from './lib/prefs';
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
+  import TrackPane from './lib/TrackPane.svelte';
   import Icon from './lib/ui/Icon.svelte';
   import type { IconName } from './lib/ui/icons';
   import MenuBar from './lib/ui/MenuBar.svelte';
@@ -94,11 +104,17 @@
   let recent = $state(recentFiles());
   let dialog = $state<DialogKind | null>(null);
   let effectDialog = $state<EffectKind | null>(null);
+  let prompt = $state.raw<Prompt | null>(null);
+  let chordOpen = $state(false);
+  /** The pieces of the drum kit, read from the core once it has loaded. */
+  let drumKit = $state.raw<DrumPiece[]>([]);
   let shortcutsOpen = $state(false);
   let zoom = $state(1);
 
   let playing = $state(false);
   let playhead = $state.raw<{ bar: number; beat: number } | null>(null);
+  /** First bar visible in the score, which the track pane follows. */
+  let viewBar = $state(0);
   let metronome = $state(false);
   let countIn = $state(false);
   let speed = $state(1);
@@ -233,7 +249,10 @@
 
   // Keep a copy of unsaved work so that a crash or closed window does not lose it.
   $effect(() => {
-    if (!editor?.dirty) {
+    // Before a document is open there is nothing to save, and a copy left by the last
+    // session is still waiting to be recovered.
+    if (!editor) return;
+    if (!editor.dirty) {
       writeAutosave(null);
       return;
     }
@@ -261,12 +280,19 @@
         metronome,
         count_in: countIn,
         speed,
+        staff: editor.cursor.staff,
+        voice: editor.cursor.voice,
       };
       const audio = doc.renderAudio(JSON.stringify(options), player.sampleRate);
       const timeline: Timeline = JSON.parse(audio.timelineJson);
-      const samples = audio.takeSamples();
+      // One buffer per track, mixed as they play, so the mixer works during playback.
+      const stems = Array.from({ length: audio.trackCount }, (_, track) => {
+        const samples = audio.renderTrack(track);
+        return samples.length ? samples : null;
+      });
+      const clicks = audio.renderClicks();
       audio.free();
-      await player.play(samples, timeline, () => {
+      await player.play(stems, clicks.length ? clicks : null, timeline, mixOf(score!.tracks), () => {
         playing = false;
         playhead = null;
       });
@@ -298,6 +324,11 @@
 
   const togglePlay = () => (playing ? stop() : play());
 
+  // Volume, pan, mute and solo take effect on what is already playing.
+  $effect(() => {
+    if (playing && score) player.setMix(mixOf(score.tracks));
+  });
+
   // --- Techniques ---
 
   const technique = (name: string) => edit((d) => d.toggleTechnique(name));
@@ -308,6 +339,80 @@
     edit((d) => d.setNoteEffect(field, JSON.stringify(value)));
   const setBeatEffect = (field: string, value: unknown) =>
     edit((d) => d.setBeatEffect(field, JSON.stringify(value)));
+
+  // --- Tracks ---
+
+  const trackIndex = () => editor?.cursor.track ?? 0;
+  const trackCount = () => score?.tracks.length ?? 0;
+  const currentMix = () => score?.tracks[trackIndex()]?.mix;
+
+  /** Switches to a track, and to one of its bars if one is given. */
+  /** How the score is laid out, as the fields of `gtr_layout::View` the interface chooses. */
+  const viewJson = $derived(JSON.stringify({ notation: prefs.notation, multitrack: prefs.multitrack }));
+
+  const voices: Command[] = Array.from({ length: MAX_VOICES }, (_, i) => ({
+    label: `Voice ${i + 1}`,
+    icon: `voice${i + 1}` as IconName,
+    keys: `Alt+${i + 1}`,
+    active: () => editor?.cursor.voice === i,
+    run: () => edit((d) => d.setVoice(i)),
+  }));
+
+  const notations: Command[] = NOTATIONS.map(([value, label]) => ({
+    label,
+    active: () => prefs.notation === value,
+    run: () => (prefs.notation = value),
+  }));
+
+  const pickTrack = (track: number, bar: number | null) =>
+    edit((d) => {
+      d.setTrack(track);
+      if (bar !== null && editor) d.setCursor(bar, 0, editor.cursor.string, false);
+    });
+  const setMix = (track: number, mix: Mix) => edit((d) => d.setMix(track, JSON.stringify(mix)));
+  const moveTrack = (by: number) => edit((d) => d.moveTrack(trackIndex(), trackIndex() + by));
+  /** Goes to the staff above or below: the track's other staff if it has one, or the next track. */
+  const stepTrack = (by: number) =>
+    edit((d) => {
+      if (!editor || !score) return;
+      const { track, staff } = editor.cursor;
+      const within = staff + by;
+      if (within >= 0 && within < score.tracks[track].staves.length) return d.setStaff(within);
+      const next = track + by;
+      if (next < 0 || next >= score.tracks.length) return;
+      d.setTrack(next);
+      if (by < 0) d.setStaff(score.tracks[next].staves.length - 1);
+    });
+  const onFirstStaff = () => trackIndex() === 0 && (editor?.cursor.staff ?? 0) === 0;
+  const onLastStaff = () =>
+    trackIndex() >= trackCount() - 1 &&
+    (editor?.cursor.staff ?? 0) >= (score?.tracks[trackIndex()]?.staves.length ?? 1) - 1;
+  const onDrums = () => score?.tracks[trackIndex()]?.instrument === 'drums';
+
+  /** Entering a piece of the drum kit by name, for those who do not know its number. */
+  const drumPieces = $derived(
+    drumKit.map((piece): Command => ({
+      label: `${piece.number}  ${piece.name}`,
+      active: () => onDrums() && editor?.note?.fret === piece.number,
+      disabled: () => !onDrums(),
+      run: () => edit((d) => d.setFret(piece.number)),
+    })),
+  );
+
+  // --- Bar marks and beat text ---
+
+  const masterBar = $derived(score?.master_bars[editor?.cursor.bar ?? 0]);
+  const setBar = (field: string, value: unknown) =>
+    edit((d) => d.setBarProperty(field, JSON.stringify(value)));
+  const barNumber = () => (editor?.cursor.bar ?? 0) + 1;
+
+  /** A command that sets a property of the bar to one of a list of choices, or clears it. */
+  const barChoices = <T extends string>(field: 'target' | 'jump' | 'feel', choices: [T, string][]): Command[] =>
+    choices.map(([value, label]) => ({
+      label,
+      active: () => masterBar?.[field] === value,
+      run: () => setBar(field, masterBar?.[field] === value ? null : value),
+    }));
 
   // --- Commands ---
 
@@ -431,8 +536,154 @@
     insertBar: { label: 'Insert bar', icon: 'insertBar', keys: 'Ctrl+Insert', run: () => edit((d) => d.insertBar()) },
     removeBar: { label: 'Remove bar', icon: 'removeBar', run: () => edit((d) => d.removeBar()) },
     timeSignature: { label: 'Time signature…', icon: 'timeSignature', run: () => (dialog = 'time') },
-    tuning: { label: 'Tuning and capo…', icon: 'tuning', run: () => (dialog = 'tuning') },
-    scoreInfo: { label: 'Title, artist and tempo…', icon: 'scoreInfo', run: () => (dialog = 'score') },
+    keySignature: { label: 'Key signature…', icon: 'keySignature', run: () => (dialog = 'key') },
+    scoreInfo: { label: 'Title, credits and tempo…', icon: 'scoreInfo', run: () => (dialog = 'score') },
+
+    repeatStart: {
+      label: 'Start of a repeat',
+      icon: 'repeatStart',
+      active: () => !!masterBar?.repeat_start,
+      run: () => setBar('repeat_start', masterBar?.repeat_start ? null : true),
+    },
+    repeatEnd: {
+      label: 'End of a repeat…',
+      icon: 'repeatEnd',
+      active: () => !!masterBar?.repeat_count,
+      run: () =>
+        (prompt = {
+          title: 'End of a repeat',
+          hint: `The repeat ends with bar ${barNumber()}. Leave the field empty for no repeat.`,
+          field: { kind: 'number', label: 'Times played in all', value: masterBar?.repeat_count || 2, min: 2, max: 99 },
+          apply: (count: number | null) => setBar('repeat_count', count && count >= 2 ? count : null),
+        }),
+    },
+    endings: {
+      label: 'Alternate ending…',
+      icon: 'ending',
+      active: () => !!masterBar?.alternate_endings,
+      run: () =>
+        (prompt = {
+          title: 'Alternate ending',
+          hint: `Bar ${barNumber()} is played only on the passes ticked; with none ticked it is played every time.`,
+          field: { kind: 'bits', label: 'Times through the repeat', value: masterBar?.alternate_endings ?? 0, count: 8 },
+          apply: (passes: number) => setBar('alternate_endings', passes || null),
+        }),
+    },
+    section: {
+      label: 'Section or rehearsal mark…',
+      icon: 'section',
+      active: () => !!masterBar?.section,
+      run: () =>
+        (prompt = {
+          title: 'Section',
+          hint: `Named from bar ${barNumber()}, for example Verse, Chorus or A. Leave it empty for none.`,
+          field: { kind: 'text', label: 'Name', value: masterBar?.section ?? '' },
+          apply: (name: string) => setBar('section', name || null),
+        }),
+    },
+    barTempo: {
+      label: 'Tempo change…',
+      icon: 'tempo',
+      active: () => !!masterBar?.tempo,
+      run: () =>
+        (prompt = {
+          title: 'Tempo change',
+          hint: `From bar ${barNumber()} on. Leave it empty to carry on at the tempo before.`,
+          field: { kind: 'number', label: 'Tempo (bpm)', value: masterBar?.tempo ?? null, min: 20, max: 400 },
+          apply: (tempo: number | null) => setBar('tempo', tempo || null),
+        }),
+    },
+    fermata: {
+      label: 'Fermata',
+      icon: 'fermata',
+      active: () => !!beatEffects.fermata,
+      run: () => setBeatEffect('fermata', beatEffects.fermata ? null : true),
+    },
+    chordName: {
+      label: 'Chord name and diagram…',
+      icon: 'chordDiagram',
+      active: () => !!beatEffects.chord || !!beatEffects.diagram,
+      disabled: () => !editor?.beat_effects,
+      run: () => (chordOpen = true),
+    },
+    timer: {
+      label: 'Timer: show the time elapsed',
+      icon: 'timer',
+      active: () => !!masterBar?.timer,
+      run: () => setBar('timer', masterBar?.timer ? null : true),
+    },
+    volumeChange: {
+      label: 'Volume change…',
+      icon: 'volumeChange',
+      active: () => beatEffects.volume !== undefined,
+      run: () =>
+        (prompt = {
+          title: 'Volume change',
+          hint: 'The track plays at this volume from this beat on, until the next change. Leave it empty for no change here.',
+          field: { kind: 'number', label: 'Volume (0 to 100; 75 is the usual level)', value: beatEffects.volume ?? null, min: 0, max: 100 },
+          apply: (volume: number | null) => setBeatEffect('volume', volume),
+        }),
+    },
+    panChange: {
+      label: 'Pan change…',
+      icon: 'panChange',
+      active: () => beatEffects.pan !== undefined,
+      run: () =>
+        (prompt = {
+          title: 'Pan change',
+          hint: 'The track sits here from this beat on, until the next change. Leave it empty for no change here.',
+          field: { kind: 'number', label: 'Pan (-100 left to 100 right)', value: beatEffects.pan ?? null, min: -100, max: 100 },
+          apply: (pan: number | null) => setBeatEffect('pan', pan),
+        }),
+    },
+    beatText: {
+      label: 'Text…',
+      icon: 'beatText',
+      active: () => !!beatEffects.text,
+      run: () =>
+        (prompt = {
+          title: 'Text',
+          hint: 'Written above the beat. Leave it empty for none.',
+          field: { kind: 'text', label: 'Text', value: beatEffects.text ?? '' },
+          apply: (text: string) => setBeatEffect('text', text || null),
+        }),
+    },
+    lyrics: {
+      label: 'Lyrics…',
+      icon: 'lyrics',
+      active: () => !!beatEffects.lyrics?.length,
+      run: () =>
+        (prompt = {
+          title: 'Lyrics',
+          hint: 'What is sung on this beat: one line here for each line of the lyrics, up to five.',
+          field: { kind: 'lines', label: 'Syllables', value: beatEffects.lyrics ?? [] },
+          apply: (lines: string[]) => setBeatEffect('lyrics', lines.length ? lines.slice(0, 5) : null),
+        }),
+    },
+
+    addTrack: { label: 'Add a track…', icon: 'addTrack', run: () => (dialog = 'addTrack') },
+    trackSettings: { label: 'Instrument, tuning, capo and mix…', icon: 'trackSettings', run: () => (dialog = 'track') },
+    removeTrack: { label: 'Remove the track', icon: 'removeTrack', disabled: () => trackCount() < 2, run: () => edit((d) => d.removeTrack(trackIndex())) },
+    trackUp: { label: 'Move the track up', icon: 'moveUp', disabled: () => trackIndex() === 0, run: () => moveTrack(-1) },
+    trackDown: { label: 'Move the track down', icon: 'moveDown', disabled: () => trackIndex() >= trackCount() - 1, run: () => moveTrack(1) },
+    previousTrack: { label: 'Previous track or staff', keys: 'Ctrl+↑', disabled: onFirstStaff, run: () => stepTrack(-1) },
+    nextTrack: { label: 'Next track or staff', keys: 'Ctrl+↓', disabled: onLastStaff, run: () => stepTrack(1) },
+    mute: {
+      label: 'Mute the track',
+      active: () => !!currentMix()?.mute,
+      run: () => {
+        const mix = currentMix();
+        if (mix) setMix(trackIndex(), { ...mix, mute: !mix.mute });
+      },
+    },
+    solo: {
+      label: 'Solo the track',
+      active: () => !!currentMix()?.solo,
+      run: () => {
+        const mix = currentMix();
+        if (mix) setMix(trackIndex(), { ...mix, solo: !mix.solo });
+      },
+    },
 
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
@@ -442,6 +693,8 @@
     zoomOut: { label: 'Zoom out', icon: 'zoomOut', disabled: () => zoom <= ZOOMS[0], run: () => stepZoom(-1) },
     compact: { label: 'Narrow palette', icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
     inspector: { label: 'Inspector', icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
+    multitrack: { label: 'Show every track', icon: 'multitrack', active: () => prefs.multitrack, run: () => (prefs.multitrack = !prefs.multitrack) },
+    trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
   } satisfies Record<string, Command>;
 
@@ -475,13 +728,18 @@
       commands: [
         ...dynamics, cmd.crescendo, cmd.decrescendo, cmd.strokeDown, cmd.strokeUp,
         cmd.strumDown, cmd.strumUp, cmd.tremolo, cmd.whammy,
+        cmd.chordName, cmd.beatText, cmd.lyrics, cmd.fermata,
       ],
     },
     {
       id: 'bars',
       title: 'Bars and score',
-      commands: [cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.tuning, cmd.scoreInfo],
+      commands: [
+        cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.keySignature, cmd.scoreInfo,
+        cmd.repeatStart, cmd.repeatEnd, cmd.endings, cmd.section,
+      ],
     },
+    { id: 'voice', title: 'Voice', commands: voices },
   ];
 
   const menus = $derived.by((): Menu[] => {
@@ -492,7 +750,7 @@
     const tracks: MenuEntry[] = (score?.tracks ?? []).map((track, i) => ({
       label: track.name || `Track ${i + 1}`,
       active: () => editor?.cursor.track === i,
-      run: () => edit((d) => d.setTrack(i)),
+      run: () => pickTrack(i, null),
     }));
     return [
       {
@@ -516,6 +774,9 @@
       {
         label: 'Note',
         items: [
+          { label: 'Voice', items: voices },
+          { label: 'Drum piece', items: drumPieces },
+          '-',
           cmd.rest, cmd.tie, cmd.dot,
           { label: 'Tuplet', items: tuplets(false) },
           { label: 'Tuplet inside the tuplet', items: tuplets(true) },
@@ -558,20 +819,51 @@
           cmd.slap,
           cmd.pop,
           cmd.whammy,
+          '-',
+          cmd.chordName, cmd.beatText, cmd.lyrics, cmd.fermata,
+          '-',
+          cmd.volumeChange, cmd.panChange,
         ],
       },
       {
         label: 'Score',
         items: [
-          cmd.insertBar, cmd.removeBar, cmd.timeSignature, '-', cmd.tuning, cmd.scoreInfo,
-          ...(tracks.length > 1 ? ['-' as const, { label: 'Track', items: tracks }] : []),
+          cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.keySignature,
+          '-',
+          cmd.repeatStart, cmd.repeatEnd, cmd.endings,
+          { label: 'Segno, coda and fine', items: barChoices('target', TARGETS) },
+          { label: 'Jump at the end of the bar', items: barChoices('jump', JUMPS) },
+          '-',
+          cmd.section, cmd.barTempo, cmd.timer,
+          { label: 'Feel', items: barChoices('feel', FEELS) },
+          '-',
+          cmd.scoreInfo,
           '-',
           cmd.play, cmd.metronome, cmd.countIn,
         ],
       },
       {
+        label: 'Track',
+        items: [
+          ...tracks,
+          '-',
+          cmd.previousTrack, cmd.nextTrack,
+          '-',
+          cmd.addTrack, cmd.trackSettings, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
+          '-',
+          cmd.mute, cmd.solo,
+        ],
+      },
+      {
         label: 'View',
-        items: [cmd.zoomIn, cmd.zoomOut, '-', cmd.inspector, cmd.compact, { label: 'Theme', items: themes }],
+        items: [
+          cmd.zoomIn, cmd.zoomOut, '-',
+          ...notations,
+          cmd.multitrack,
+          '-',
+          cmd.trackPane, cmd.inspector, cmd.compact,
+          { label: 'Theme', items: themes },
+        ],
       },
       { label: 'Help', items: [cmd.shortcuts] },
     ];
@@ -588,6 +880,8 @@
         { keys: 'Shift+arrows', label: 'Extend the selection' },
         { keys: 'Ctrl+← / Ctrl+→', label: 'Previous or next bar' },
         { keys: 'Home / End', label: 'First or last bar' },
+        { keys: 'Ctrl+↑ / Ctrl+↓', label: 'Previous or next track or staff' },
+        { keys: 'Alt+1 – Alt+4', label: 'Voice 1 to 4' },
       ],
     },
     {
@@ -629,7 +923,8 @@
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || dialog || effectDialog || shortcutsOpen || !doc) return;
+    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen) return;
+    if (!doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menubar"]')) return;
     if (target?.closest('[data-roving]')) {
@@ -662,6 +957,8 @@
         case 'n': return newScore;
         case 'arrowleft': return move('prev_bar');
         case 'arrowright': return move('next_bar');
+        case 'arrowup': return cmd.previousTrack.run;
+        case 'arrowdown': return cmd.nextTrack.run;
         case 'home': return move('first');
         case 'end': return move('last');
         case 'delete': return cmd.deleteBeats.run;
@@ -669,7 +966,10 @@
       }
       return undefined;
     }
-    if (event.altKey) return undefined;
+    if (event.altKey) {
+      const voice = /^Digit([1-4])$/.exec(event.code);
+      return voice ? voices[Number(voice[1]) - 1].run : undefined;
+    }
 
     if (/^[0-9]$/.test(key)) {
       return () => {
@@ -721,6 +1021,7 @@
   onMount(() => {
     run(async () => {
       await init();
+      drumKit = JSON.parse(Document.drumKitJson());
       const autosave = readAutosave();
       if (autosave) {
         try {
@@ -738,6 +1039,8 @@
     return () => {
       player.stop();
       doc?.free();
+      // Nothing still pending, such as the autosave timer, may touch the freed document.
+      doc = undefined;
     };
   });
 </script>
@@ -805,23 +1108,13 @@
           <Icon name="tempo" size={16} />
           = {score.tempo}
         </button>
-        {#if score.tracks.length > 1}
-          <select
-            aria-label="Track"
-            use:tip={{ label: 'Track' }}
-            bind:value={() => editor!.cursor.track, (track) => edit((d) => d.setTrack(track))}
-          >
-            {#each score.tracks as track, i}
-              <option value={i}>{track.name || `Track ${i + 1}`}</option>
-            {/each}
-          </select>
-        {/if}
         <span class="rule"></span>
         <ToolButton command={cmd.zoomOut} />
         <span class="zoom" aria-label="Zoom {zoom * 100}%">{zoom * 100}%</span>
         <ToolButton command={cmd.zoomIn} />
         <span class="rule"></span>
         <ToolButton command={cmd.compact} />
+        <ToolButton command={cmd.trackPane} />
         <ToolButton command={cmd.inspector} />
         <ToolButton command={cmd.shortcuts} />
         <button
@@ -843,16 +1136,37 @@
       <Palette sections={palette} {compact} collapsed={prefs.collapsed} ontoggle={toggleSection} />
       <div class="stage">
         <ScoreView
-          getLayout={(pageWidth) => JSON.parse(doc!.layoutJson(pageWidth)) as Layout}
-          revision={`${editor.revision}:${editor.cursor.track}:${fileName}`}
+          getLayout={(pageWidth) => JSON.parse(doc!.layoutJson(pageWidth, viewJson)) as Layout}
+          revision={`${editor.revision}:${editor.cursor.track}:${editor.cursor.staff}:${editor.cursor.voice}:${viewJson}:${fileName}`}
           {editor}
           {playhead}
           {zoom}
           theme={prefs.theme}
-          onpick={(bar, beat, string, extend) => edit((d) => d.setCursor(bar, beat, string, extend))}
+          onpick={(bar, beat, string, extend, staff) =>
+            edit((d) => {
+              if (staff) {
+                d.setTrack(staff.track);
+                d.setStaff(staff.staff);
+              }
+              d.setCursor(bar, beat, string, extend);
+            })}
+          onview={(bar) => (viewBar = bar)}
         />
-        <!-- Room for the track list and mixer. Empty, and so collapsed, until phase 5. -->
-        <div class="dock"></div>
+        {#if prefs.tracks}
+          <TrackPane
+            {score}
+            track={editor.cursor.track}
+            bar={editor.cursor.bar}
+            playBar={playhead?.bar ?? null}
+            {viewBar}
+            height={prefs.tracksHeight}
+            commands={[cmd.addTrack, cmd.trackSettings, cmd.trackUp, cmd.trackDown, cmd.removeTrack]}
+            onpick={pickTrack}
+            onmix={setMix}
+            onproperties={(track) => pickTrack(track, null).then(() => (dialog = 'track'))}
+            onresize={(height) => (prefs.tracksHeight = height)}
+          />
+        {/if}
       </div>
       {#if inspectorOpen}
         <div class="side" class:floating={narrow}>
@@ -864,6 +1178,7 @@
             {setBeatEffect}
             openEffect={(kind) => (effectDialog = kind)}
             openDialog={(kind) => (dialog = kind)}
+            {drumKit}
           />
         </div>
       {/if}
@@ -875,7 +1190,11 @@
   <footer class:failed>
     <span role="status">{message || 'Press ? for the keyboard shortcuts'}</span>
     {#if editor && score}
-      <span>Bar {editor.cursor.bar + 1} of {score.master_bars.length} · Beat {editor.cursor.beat + 1}</span>
+      <span>
+        {score.tracks[editor.cursor.track]?.name}{#if (score.tracks[editor.cursor.track]?.staves.length ?? 1) > 1}, staff {editor.cursor.staff + 1}{/if}
+        · Voice {editor.cursor.voice + 1} · Bar {editor.cursor.bar + 1} of {score.master_bars.length}
+        · Beat {editor.cursor.beat + 1}
+      </span>
     {/if}
   </footer>
 </div>
@@ -885,14 +1204,13 @@
     kind={dialog}
     {score}
     track={editor.cursor.track}
+    staff={editor.cursor.staff}
     bar={editor.cursor.bar}
     onscore={(info, tempo) => {
       dialog = null;
       edit((d) => {
         const old = score!;
-        const changed =
-          info.title !== old.info.title || info.artist !== old.info.artist || info.album !== old.info.album;
-        if (changed) d.setInfo(info.title, info.artist, info.album);
+        if (JSON.stringify(info) !== JSON.stringify(old.info)) d.setInfo(JSON.stringify(info));
         if (tempo !== old.tempo) d.setTempo(tempo);
       });
     }}
@@ -900,9 +1218,26 @@
       dialog = null;
       edit((d) => d.setTimeSignature(numerator, denominator));
     }}
-    ontuning={(strings, capo) => {
+    onkey={(key) => {
       dialog = null;
-      edit((d) => d.setTuning(new Uint8Array(strings), capo));
+      edit((d) => d.setKeySignature(key));
+    }}
+    ontrack={(name, instrument, strings, capo, mix) => {
+      dialog = null;
+      edit((d) => {
+        if (!mix) return d.addTrack(name, instrument, new Uint8Array(strings), capo);
+        const index = trackIndex();
+        const old = score!.tracks[index];
+        const staff = old.staves[editor!.cursor.staff] ?? old.staves[0];
+        // The tuning goes first: if notes rule it out, nothing else has changed yet. A piano
+        // and a drum kit have none to set.
+        const retuned = capo !== staff.capo || strings.join() !== staff.tuning.strings.join();
+        if (strings.length && retuned) {
+          d.setTuning(new Uint8Array(strings), capo);
+        }
+        if (name !== old.name || instrument !== old.instrument) d.setTrackInfo(index, name, instrument);
+        d.setMix(index, JSON.stringify(mix));
+      });
     }}
     onclose={() => (dialog = null)}
   />
@@ -922,6 +1257,28 @@
     }}
     onclose={() => (effectDialog = null)}
   />
+{/if}
+
+{#if chordOpen && score && editor}
+  {@const staff = score.tracks[editor.cursor.track].staves[editor.cursor.staff]}
+  <ChordDialog
+    tuning={staff.tuning.strings.map((pitch) => pitch + staff.capo)}
+    name={beatEffects.chord ?? ''}
+    diagram={beatEffects.diagram ?? null}
+    notes={staff.bars[editor.cursor.bar]?.voices[editor.cursor.voice]?.beats[editor.cursor.beat]?.notes ?? []}
+    onapply={(name, diagram) =>
+      edit((d) => {
+        if (name !== (beatEffects.chord ?? null)) d.setBeatEffect('chord', JSON.stringify(name));
+        if (JSON.stringify(diagram) !== JSON.stringify(beatEffects.diagram ?? null)) {
+          d.setBeatEffect('diagram', JSON.stringify(diagram));
+        }
+      })}
+    onclose={() => (chordOpen = false)}
+  />
+{/if}
+
+{#if prompt}
+  <PromptDialog {prompt} onclose={() => (prompt = null)} />
 {/if}
 
 {#if shortcutsOpen}
@@ -1022,10 +1379,6 @@
     background: var(--hover);
   }
 
-  .transport select {
-    max-width: 150px;
-  }
-
   .zoom {
     min-width: 40px;
     color: var(--muted);
@@ -1046,10 +1399,6 @@
     flex: 1;
     flex-direction: column;
     min-width: 0;
-  }
-
-  .dock:empty {
-    display: none;
   }
 
   .side {

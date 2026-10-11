@@ -20,17 +20,26 @@
   $effect(() => {
     dialog.showModal();
     // Start on the first field, not on the close button in the title bar.
-    dialog.querySelector<HTMLElement>('.body :is(input, select, button), footer .primary')?.focus();
+    dialog.querySelector<HTMLElement>('.body :is(input, select, textarea, button), footer .primary')?.focus();
   });
 
   function submit(event: SubmitEvent) {
     event.preventDefault();
     onsubmit?.();
   }
+
+  /** Enter confirms from a list as it does from a text field. */
+  function onKeydown(event: KeyboardEvent) {
+    if (event.key === 'Enter' && event.target instanceof HTMLSelectElement) {
+      event.preventDefault();
+      event.target.form?.requestSubmit();
+    }
+  }
 </script>
 
 <dialog bind:this={dialog} style:width="min({width}, 94vw)" aria-label={title} {onclose}>
-  <form onsubmit={submit}>
+  <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+  <form onsubmit={submit} onkeydown={onKeydown}>
     <header>
       <h2>{title}</h2>
       <button type="button" class="tool" aria-label="Close" onclick={onclose}>

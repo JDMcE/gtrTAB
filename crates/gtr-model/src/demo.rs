@@ -1,6 +1,6 @@
 use crate::{
-    Bar, Beat, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track,
-    Tuning, Voice,
+    Bar, Beat, Duration, Instrument, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff,
+    TimeSignature, Track, Tuning, Voice,
 };
 
 /// A two-bar riff in E minor, used as the starting document until real scores can be written.
@@ -33,15 +33,11 @@ pub fn demo_score() -> Score {
             ..ScoreInfo::default()
         },
         tempo: 120,
-        master_bars: vec![
-            MasterBar {
-                time_signature: TimeSignature::COMMON,
-            };
-            2
-        ],
-        tracks: vec![Track {
-            name: "Guitar".into(),
-            staves: vec![Staff {
+        master_bars: vec![MasterBar::new(TimeSignature::COMMON); 2],
+        tracks: vec![Track::new(
+            "Guitar",
+            Instrument::default(),
+            vec![Staff {
                 tuning: Tuning::guitar_standard(),
                 capo: 0,
                 bars: vec![
@@ -55,7 +51,7 @@ pub fn demo_score() -> Score {
                     },
                 ],
             }],
-        }],
+        )],
     }
 }
 

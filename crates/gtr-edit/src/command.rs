@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, MasterBar, Note, Score, ScoreInfo, Staff, TimeSignature,
-    Tuning, Voice,
+    Bar, Beat, BeatEffects, Duration, Instrument, MasterBar, Mix, Note, Score, ScoreInfo, Staff,
+    TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -54,8 +54,25 @@ pub enum Command {
         bar: usize,
         time_signature: TimeSignature,
     },
+    /// Replaces a bar's shared properties: repeats, endings, section and so on.
+    SetMasterBar {
+        bar: usize,
+        master_bar: MasterBar,
+    },
+    SetKeySignature {
+        bar: usize,
+        /// Sharps if positive, flats if negative.
+        key: i8,
+    },
     SetTempo {
         tempo: u32,
+    },
+    /// Sets how many voices a bar has. Only empty voices can be taken away.
+    SetVoiceCount {
+        track: usize,
+        staff: usize,
+        bar: usize,
+        count: usize,
     },
     /// Changes a staff's tuning and capo. Fails if existing notes use a string that would
     /// no longer exist.
@@ -67,6 +84,29 @@ pub enum Command {
     },
     SetInfo {
         info: ScoreInfo,
+    },
+    /// Adds a track, which must have a bar for every bar of the score.
+    InsertTrack {
+        index: usize,
+        track: Track,
+    },
+    /// Removes a track. The last remaining track cannot be removed.
+    RemoveTrack {
+        index: usize,
+    },
+    /// Moves a track to position `to` among the others.
+    MoveTrack {
+        from: usize,
+        to: usize,
+    },
+    SetTrackInfo {
+        track: usize,
+        name: String,
+        instrument: Instrument,
+    },
+    SetMix {
+        track: usize,
+        mix: Mix,
     },
     /// Applies several commands as one undo step. If one fails, none are applied.
     Batch(Vec<Command>),
@@ -88,6 +128,15 @@ pub enum EditError {
     BarShapeMismatch,
     #[error("time signature is not valid")]
     InvalidTimeSignature,
+    #[error("that is not a valid setting for a bar")]
+    InvalidBarProperty,
+    #[error("a key signature has at most seven sharps or flats")]
+    InvalidKeySignature,
+    #[error(
+        "a bar has between 1 and {} voices, and only empty ones can be removed",
+        Bar::MAX_VOICES
+    )]
+    InvalidVoiceCount,
     #[error("tempo must be greater than zero")]
     InvalidTempo,
     #[error("a tuning needs between 1 and {} strings", Tuning::MAX_STRINGS)]
@@ -100,6 +149,12 @@ pub enum EditError {
     FretOutOfRange,
     #[error("a score needs at least one bar")]
     LastBar,
+    #[error("a score needs at least one track")]
+    LastTrack,
+    #[error("the track does not fit the score")]
+    InvalidTrack,
+    #[error("volume or pan is out of range")]
+    InvalidMix,
 }
 
 impl Command {
@@ -107,7 +162,7 @@ impl Command {
     pub fn insert_empty_bar(score: &Score, index: usize, time_signature: TimeSignature) -> Self {
         Command::InsertBar {
             index,
-            master_bar: MasterBar { time_signature },
+            master_bar: MasterBar::new(time_signature),
             bars: score
                 .tracks
                 .iter()
@@ -201,7 +256,7 @@ impl Command {
                 if index > score.master_bars.len() {
                     return Err(EditError::InvalidLocation);
                 }
-                if !master_bar.time_signature.is_valid() {
+                if !master_bar.is_valid() {
                     return Err(EditError::InvalidTimeSignature);
                 }
                 check_bars(score, &bars)?;
@@ -243,6 +298,52 @@ impl Command {
                 Ok(Command::SetTimeSignature {
                     bar,
                     time_signature: std::mem::replace(&mut master.time_signature, time_signature),
+                })
+            }
+            Command::SetMasterBar { bar, master_bar } => {
+                if !master_bar.is_valid() {
+                    return Err(EditError::InvalidBarProperty);
+                }
+                let master = (score.master_bars.get_mut(bar)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::SetMasterBar {
+                    bar,
+                    master_bar: std::mem::replace(master, master_bar),
+                })
+            }
+            Command::SetKeySignature { bar, key } => {
+                if key.abs() > MasterBar::MAX_KEY {
+                    return Err(EditError::InvalidKeySignature);
+                }
+                let master = (score.master_bars.get_mut(bar)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::SetKeySignature {
+                    bar,
+                    key: std::mem::replace(&mut master.key_signature, key),
+                })
+            }
+            Command::SetVoiceCount {
+                track,
+                staff,
+                bar,
+                count,
+            } => {
+                let voices = score
+                    .tracks
+                    .get_mut(track)
+                    .and_then(|t| t.staves.get_mut(staff))
+                    .and_then(|s| s.bars.get_mut(bar))
+                    .map(|b| &mut b.voices)
+                    .ok_or(EditError::InvalidLocation)?;
+                let old = voices.len();
+                let removable = voices.iter().skip(count).all(|v| v.beats.is_empty());
+                if count == 0 || count > Bar::MAX_VOICES || !removable {
+                    return Err(EditError::InvalidVoiceCount);
+                }
+                voices.resize_with(count, Voice::default);
+                Ok(Command::SetVoiceCount {
+                    track,
+                    staff,
+                    bar,
+                    count: old,
                 })
             }
             Command::SetTempo { tempo } => {
@@ -287,6 +388,71 @@ impl Command {
             Command::SetInfo { info } => Ok(Command::SetInfo {
                 info: std::mem::replace(&mut score.info, info),
             }),
+            Command::InsertTrack { index, track } => {
+                if index > score.tracks.len() {
+                    return Err(EditError::InvalidLocation);
+                }
+                let bar_count = score.master_bars.len();
+                let fits = !track.staves.is_empty()
+                    && track.mix.is_valid()
+                    && track.staves.iter().all(|s| {
+                        let string_count = s.tuning.strings.len();
+                        (1..=Tuning::MAX_STRINGS).contains(&string_count)
+                            && s.bars.len() == bar_count
+                            && s.bars.iter().all(|b| {
+                                !b.voices.is_empty()
+                                    && (b.voices.iter().flat_map(|v| &v.beats))
+                                        .all(|beat| beat.is_valid_for(string_count))
+                            })
+                    });
+                if !fits {
+                    return Err(EditError::InvalidTrack);
+                }
+                score.tracks.insert(index, track);
+                Ok(Command::RemoveTrack { index })
+            }
+            Command::RemoveTrack { index } => {
+                if index >= score.tracks.len() {
+                    return Err(EditError::InvalidLocation);
+                }
+                if score.tracks.len() == 1 {
+                    return Err(EditError::LastTrack);
+                }
+                Ok(Command::InsertTrack {
+                    index,
+                    track: score.tracks.remove(index),
+                })
+            }
+            Command::MoveTrack { from, to } => {
+                if from >= score.tracks.len() || to >= score.tracks.len() {
+                    return Err(EditError::InvalidLocation);
+                }
+                let track = score.tracks.remove(from);
+                score.tracks.insert(to, track);
+                Ok(Command::MoveTrack { from: to, to: from })
+            }
+            Command::SetTrackInfo {
+                track,
+                name,
+                instrument,
+            } => {
+                let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::SetTrackInfo {
+                    track,
+                    name: std::mem::replace(&mut target.name, name),
+                    instrument: std::mem::replace(&mut target.instrument, instrument),
+                })
+            }
+            Command::SetMix { track, mix } => {
+                if !mix.is_valid() {
+                    return Err(EditError::InvalidMix);
+                }
+                let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::SetMix {
+                    track,
+                    mix: std::mem::replace(&mut target.mix, mix),
+                })
+            }
             Command::Batch(commands) => {
                 let mut inverses = Vec::with_capacity(commands.len());
                 for command in commands {
@@ -319,11 +485,9 @@ fn check_bars(score: &Score, bars: &[Vec<Bar>]) -> Result<(), EditError> {
         }
         for (staff, bar) in track.staves.iter().zip(track_bars) {
             let string_count = staff.tuning.strings.len();
-            let valid = bar
-                .voices
-                .iter()
-                .flat_map(|v| &v.beats)
-                .all(|b| b.is_valid_for(string_count));
+            let valid = !bar.voices.is_empty()
+                && bar.voices.len() <= Bar::MAX_VOICES
+                && (bar.voices.iter().flat_map(|v| &v.beats)).all(|b| b.is_valid_for(string_count));
             if !valid {
                 return Err(EditError::InvalidBeat);
             }

@@ -12,10 +12,20 @@
     zoom: number;
     /** Changes with the colour theme, so that the canvas is repainted in the new colours. */
     theme: string;
-    onpick: (bar: number, beat: number, string: number, extend: boolean) => void;
+    /** A click on the score. `staff` is set when it landed on another staff than the one
+     *  being edited, of this track or another. */
+    onpick: (
+      bar: number,
+      beat: number,
+      string: number,
+      extend: boolean,
+      staff: { track: number; staff: number } | null,
+    ) => void;
+    /** Reports the first bar in view whenever it changes. */
+    onview?: (bar: number) => void;
   }
 
-  let { getLayout, revision, editor, playhead, zoom, theme, onpick }: Props = $props();
+  let { getLayout, revision, editor, playhead, zoom, theme, onpick, onview }: Props = $props();
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
@@ -122,7 +132,10 @@
           context.textBaseline = item.font === 'music' ? 'alphabetic' : 'middle';
           if (item.knockout) {
             const m = context.measureText(item.s);
-            const left = item.align === 'center' ? item.x - m.width / 2 : item.x;
+            const left =
+              item.align === 'center' ? item.x - m.width / 2
+              : item.align === 'right' ? item.x - m.width
+              : item.x;
             context.fillStyle = paper;
             context.fillRect(
               left - 1.5,
@@ -138,12 +151,13 @@
       }
     }
 
-    const staffHeight = (layout.string_count - 1) * layout.string_spacing;
+    // Selections and the playhead cover every staff of the track being edited.
     const column = (at: { bar: number; beat: number }, fill: string) => {
       const p = locate(layout, at);
       if (!p) return;
+      const { cursor_top: top, cursor_bottom: bottom } = p.system;
       context.fillStyle = fill;
-      context.fillRect(p.x - CURSOR_WIDTH / 2, p.system.y - 8, CURSOR_WIDTH, staffHeight + 16);
+      context.fillRect(p.x - CURSOR_WIDTH / 2, top - 8, CURSOR_WIDTH, bottom - top + 16);
     };
 
     if (editor.selection) {
@@ -163,7 +177,13 @@
       context.strokeStyle = accent;
       context.lineWidth = 1.6;
       context.beginPath();
-      context.roundRect(at.x - CURSOR_WIDTH / 2, at.y - 8, CURSOR_WIDTH, 16, 3);
+      if (layout.tab) {
+        context.roundRect(at.x - CURSOR_WIDTH / 2, at.y - 8, CURSOR_WIDTH, 16, 3);
+      } else {
+        // Without string lines the cursor marks the beat on the whole staff.
+        const { cursor_top: top, cursor_bottom: bottom } = at.system;
+        context.roundRect(at.x - CURSOR_WIDTH / 2, top - 6, CURSOR_WIDTH, bottom - top + 12, 3);
+      }
       context.stroke();
     }
   }
@@ -188,6 +208,14 @@
 
   $effect(() => reveal(playhead ?? editor.cursor));
 
+  /** The first bar of the first line that is at least partly in view. */
+  const firstVisible = $derived.by(() => {
+    if (!layout) return 0;
+    const system = layout.systems.findIndex((s) => s.bottom * zoom > scrollTop);
+    return Math.max(0, layout.bars.findIndex((b) => b.system === Math.max(0, system)));
+  });
+  $effect(() => onview?.(firstVisible));
+
   function onPointerDown(event: PointerEvent) {
     if (!layout || event.button !== 0) return;
     const bounds = scroller.getBoundingClientRect();
@@ -206,9 +234,21 @@
     stops.forEach((stop, i) => {
       if (Math.abs(stop - x) < Math.abs(stops[beat] - x)) beat = i;
     });
-    const string = Math.round((y - layout.systems[system].y) / layout.string_spacing);
+    const rows = layout.systems[system].rows;
+    const row = rows.find((r) => y >= r.top && y <= r.bottom);
+    if (row && (row.track !== editor.cursor.track || row.staff !== editor.cursor.staff)) {
+      // Another staff: its beats are not the ones laid out for the cursor, so go to the
+      // start of the bar.
+      const string = row.strings ? Math.round((y - row.y) / layout.string_spacing) : 0;
+      const clamped = Math.max(0, Math.min(row.strings - 1, string));
+      onpick(hit.i, 0, clamped, false, { track: row.track, staff: row.staff });
+      return;
+    }
+    const string = layout.tab
+      ? Math.round((y - layout.systems[system].y) / layout.string_spacing)
+      : editor.cursor.string;
     const clamped = Math.max(0, Math.min(layout.string_count - 1, string));
-    onpick(hit.i, beat, clamped, event.shiftKey);
+    onpick(hit.i, beat, clamped, event.shiftKey, null);
   }
 
   onMount(() => {

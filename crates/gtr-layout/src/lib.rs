@@ -1,8 +1,10 @@
-//! Engraving engine: turns one track of a score into a display list of positioned lines,
-//! shapes and text that any backend can draw.
+//! Engraving: turns a score into a display list of positioned glyphs, lines and paths.
 
 mod display;
+mod notation;
+mod score;
+mod spacing;
 mod tab;
 
-pub use display::{Align, BarBox, BarStatus, Color, Font, Item, Layout, SystemBox};
-pub use tab::layout_track;
+pub use display::{Align, BarBox, BarStatus, Color, Font, Item, Layout, RowBox, SystemBox};
+pub use score::{Notation, View, layout, layout_track};

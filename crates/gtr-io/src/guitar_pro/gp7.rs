@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use gtr_model::{
-    Accent, Beat, BeatEffects, Bend, Duration, Dynamic, Finger, Grace, Hairpin, Harmonic,
-    MasterBar, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap, Staff, Strum,
-    TimeSignature, Track, Trill, Tuplet, Vibrato, Voice,
+    Accent, Beat, BeatEffects, Bend, Duration, Dynamic, Feel, Finger, Grace, Hairpin, Harmonic,
+    Instrument, Jump, MasterBar, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap,
+    Staff, Strum, Target, TimeSignature, Track, Trill, Tuplet, Vibrato, Voice,
 };
 use roxmltree::{Document, Node};
 use zip::ZipArchive;
@@ -72,8 +72,13 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
 
     let info = child(root, "Score").map_or_else(ScoreInfo::default, |score| ScoreInfo {
         title: text(score, "Title").into(),
+        subtitle: text(score, "SubTitle").into(),
         artist: text(score, "Artist").into(),
         album: text(score, "Album").into(),
+        words: text(score, "Words").into(),
+        music: text(score, "Music").into(),
+        transcriber: text(score, "Tabber").into(),
+        copyright: text(score, "Copyright").into(),
     });
 
     // Tempo automations hold "<bpm> <unit>"; the first one is the starting tempo.
@@ -129,10 +134,15 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
                 }
             })
             .collect::<Vec<Staff>>();
-        tracks.push(Track {
-            name: text(node, "Name").into(),
+        // The sound's General MIDI program, wherever this version of the format keeps it.
+        let program = (node.descendants())
+            .find(|n| n.has_tag_name("Program"))
+            .and_then(|n| n.text()?.trim().parse::<u8>().ok());
+        tracks.push(Track::new(
+            text(node, "Name"),
+            program.map_or_else(Instrument::default, Instrument::from_midi_program),
             staves,
-        });
+        ));
     }
 
     let mut master_bars = Vec::new();
@@ -143,23 +153,71 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         if !node.has_tag_name("MasterBar") {
             continue;
         }
-        skipped.add_if(child(node, "Repeat").is_some(), "repeats");
-        skipped.add_if(
-            child(node, "AlternateEndings").is_some(),
-            "alternate endings",
-        );
-        skipped.add_if(child(node, "Section").is_some(), "section markers");
         let (numerator, denominator) = text(node, "Time").split_once('/').unwrap_or(("4", "4"));
         let time_signature = TimeSignature {
             numerator: numerator.trim().parse().unwrap_or(4),
             denominator: denominator.trim().parse().unwrap_or(4),
         };
-        master_bars.push(MasterBar {
-            time_signature: match time_signature.is_valid() {
-                true => time_signature,
-                false => TimeSignature::COMMON,
-            },
+        let mut master = MasterBar::new(match time_signature.is_valid() {
+            true => time_signature,
+            false => TimeSignature::COMMON,
         });
+        master.key_signature = child(node, "Key")
+            .and_then(|key| text(key, "AccidentalCount").parse::<i8>().ok())
+            .map_or(0, |count| {
+                count.clamp(-MasterBar::MAX_KEY, MasterBar::MAX_KEY)
+            });
+        if let Some(repeat) = child(node, "Repeat") {
+            master.repeat_start = repeat.attribute("start") == Some("true");
+            if repeat.attribute("end") == Some("true") {
+                let count = repeat.attribute("count").and_then(|c| c.parse::<u8>().ok());
+                master.repeat_count = count.unwrap_or(2).max(2);
+            }
+        }
+        // The passes an ending is played on are listed by number.
+        master.alternate_endings = text(node, "AlternateEndings")
+            .split_whitespace()
+            .filter_map(|pass| pass.parse::<u32>().ok())
+            .filter(|pass| (1..=8).contains(pass))
+            .fold(0, |mask, pass| mask | 1 << (pass - 1));
+        master.section = child(node, "Section")
+            .map(|section| match text(section, "Text") {
+                "" => text(section, "Letter"),
+                name => name,
+            })
+            .filter(|name| !name.is_empty())
+            .map(|name| name.chars().take(120).collect());
+        if let Some(directions) = child(node, "Directions") {
+            master.target = match text(directions, "Target") {
+                "Segno" | "SegnoSegno" => Some(Target::Segno),
+                "Coda" | "DoubleCoda" => Some(Target::Coda),
+                "Fine" => Some(Target::Fine),
+                _ => None,
+            };
+            master.jump = match text(directions, "Jump") {
+                "DaCapo" => Some(Jump::DaCapo),
+                "DaCapoAlFine" => Some(Jump::DaCapoAlFine),
+                "DaCapoAlCoda" | "DaCapoAlDoubleCoda" => Some(Jump::DaCapoAlCoda),
+                "DaSegno" | "DaSegnoSegno" => Some(Jump::DalSegno),
+                "DaSegnoAlFine" | "DaSegnoSegnoAlFine" => Some(Jump::DalSegnoAlFine),
+                "DaSegnoAlCoda"
+                | "DaSegnoAlDoubleCoda"
+                | "DaSegnoSegnoAlCoda"
+                | "DaSegnoSegnoAlDoubleCoda" => Some(Jump::DalSegnoAlCoda),
+                "DaCoda" | "DaDoubleCoda" => Some(Jump::ToCoda),
+                _ => None,
+            };
+        }
+        master.feel = match text(node, "TripletFeel") {
+            "Triplet8th" => Some(Feel::SwingEighths),
+            "Triplet16th" => Some(Feel::SwingSixteenths),
+            "" | "NoTripletFeel" => None,
+            _ => {
+                skipped.add("dotted and scottish feels");
+                None
+            }
+        };
+        master_bars.push(master);
 
         // One bar id per staff, in track order.
         let mut ids = text(node, "Bars").split_whitespace();
@@ -400,6 +458,11 @@ fn read_beat(
                 _ => None,
             },
             dynamic: read.effects.dynamic,
+            // Free text on a beat; chord names and lyrics are not read yet.
+            text: Some(text(node, "FreeText"))
+                .filter(|t| !t.is_empty())
+                .map(|t| t.chars().take(BeatEffects::MAX_TEXT).collect()),
+            ..BeatEffects::default()
         };
     }
     read

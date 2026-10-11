@@ -35,6 +35,8 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | Arrow keys | Move between beats and strings; Shift extends the selection |
 | Ctrl+Left / Ctrl+Right | Previous / next bar |
 | Ctrl+Home / Ctrl+End | First / last bar |
+| Ctrl+Up / Ctrl+Down | Previous / next track, or staff of a piano |
+| Alt+1 to Alt+4 | Voice 1 to 4 |
 | 0-9 | Enter a fret; two digits typed quickly make one number |
 | + / - | Shorter / longer note value |
 | . | Dotted |
@@ -75,14 +77,20 @@ Technique keys act on the note under the cursor, or on every selected note; palm
 - **Bars** along the top: menus, file and edit buttons, then playback, zoom, panel switches and the theme switch. They share one row in a wide window and stack in a narrow one.
 - **Palette** on the left: what is used while writing, grouped into note values, techniques on the note, techniques on the beat, and bars and score. Each group folds away, and the palette narrows to two columns in a small window or from the View menu.
 - **Menus** hold everything, including the less common techniques: other slides and harmonics, tuplets, arpeggios, rasgueado, slap and pop, and fingering.
+- **Track pane** under the score: a row per track with its name, mute, solo, volume and pan, and a grid with a cell for every bar, filled where the track has notes. Click a name to edit that track, a cell to go to that bar, and double-click a name for the track's settings: instrument, tuning, capo and mix. The mixer works while the score is playing. The buttons above the names add, set up, move and remove tracks. Drag the pane's top edge to resize it; the View menu hides it.
+- **Views** (View menu): each track as notation and tab together, tab only, notation only, or rhythm slashes; and every track at once or only the one being edited. Notes are entered on the tab and the notation follows.
 - **Inspector** on the right: everything set on the beat and note under the cursor, each with a button to remove it and, for bends, the whammy bar, trills and grace notes, one to edit it. Fingering is set here too. It opens by default when the window is wide enough to show it beside a full page.
 - Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark.
+
+Repeats, alternate endings, segno, coda and fine, section names, tempo changes, timers and swing are set on the cursor's bar from the Score menu, and playback follows them. Chord names and diagrams, text, lyrics, fermatas and changes of volume or pan are set on the cursor's beat from the Beat menu. The chord dialog finds ways to finger a chord in the track's tuning.
+
+On a drum track a note's fret is the number of a piece of the kit, such as 36 for the bass drum, 38 for the snare and 42 for the closed hi-hat; Note > Drum piece lists them by name. A piano track has a staff for each hand, and its notes are entered on tab lines like any other track's.
 
 Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp`, `.gp5`) open through Open or by dropping them on the window.
 
 ## Layout
 
-- `crates/` — Rust core: score model, editor, tab layout, playback, file formats and the WASM API.
+- `crates/` — Rust core: score model, editor, notation and tab layout, playback, file formats and the WASM API.
 - `app/ui/` — Svelte UI shared by the web and desktop apps.
 - `app/desktop/` — Tauri shell.
 

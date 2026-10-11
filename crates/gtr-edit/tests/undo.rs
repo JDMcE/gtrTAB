@@ -1,6 +1,7 @@
 use gtr_edit::{BeatRef, Command, History};
 use gtr_model::{
-    Beat, Duration, Note, NoteValue, Score, TimeSignature, Tuning, Tuplet, demo_score,
+    Beat, Duration, Instrument, Mix, Note, NoteValue, Score, TimeSignature, Track, Tuning, Tuplet,
+    demo_score,
 };
 use proptest::prelude::*;
 
@@ -46,6 +47,42 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
                 tempo: u32::from(b % 3),
             },
         ]);
+    }
+    if (170..190).contains(&kind) {
+        let count = score.tracks.len();
+        let instrument = Instrument::ALL[usize::from(b) % Instrument::ALL.len()];
+        return match a % 5 {
+            0 => Command::InsertTrack {
+                index: idx[0] % (count + 2),
+                // Now and then a track with the wrong number of bars, which must be refused.
+                track: Track::empty(
+                    "New",
+                    instrument,
+                    score.master_bars.len() + usize::from(b % 7 == 0),
+                ),
+            },
+            1 => Command::RemoveTrack {
+                index: idx[0] % (count + 1),
+            },
+            2 => Command::MoveTrack {
+                from: idx[0] % (count + 1),
+                to: idx[1] % (count + 1),
+            },
+            3 => Command::SetTrackInfo {
+                track: idx[0] % (count + 1),
+                name: format!("Track {b}"),
+                instrument,
+            },
+            _ => Command::SetMix {
+                track: idx[0] % (count + 1),
+                mix: Mix {
+                    volume: b % 120,
+                    pan: a as i8,
+                    mute: b % 2 == 0,
+                    solo: b % 3 == 0,
+                },
+            },
+        };
     }
     if kind >= 190 {
         return Command::SetTuning {
