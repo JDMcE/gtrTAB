@@ -1,7 +1,7 @@
 <script lang="ts">
   import { noteName } from './Dialogs.svelte';
   import { bendPreset, intervalLabel, type EffectKind } from './EffectDialog.svelte';
-  import type { BendKind, CurvePoint, EditorState, Finger, Score } from './model';
+  import type { BendKind, CurvePoint, DrumPiece, EditorState, Finger, Score } from './model';
   import Icon from './ui/Icon.svelte';
   import type { IconName } from './ui/icons';
   import { tip } from './ui/tooltip';
@@ -14,10 +14,20 @@
     setBeatEffect: (field: string, value: unknown) => void;
     openEffect: (kind: EffectKind) => void;
     openDialog: (kind: 'time') => void;
+    /** The pieces of the drum kit, for naming the notes of a drum track. */
+    drumKit: DrumPiece[];
   }
 
-  let { score, editor, technique, setNoteEffect, setBeatEffect, openEffect, openDialog }: Props =
-    $props();
+  let {
+    score,
+    editor,
+    technique,
+    setNoteEffect,
+    setBeatEffect,
+    openEffect,
+    openDialog,
+    drumKit,
+  }: Props = $props();
 
   /** One thing set on the note or beat, with how to change and remove it. */
   interface Row {
@@ -76,7 +86,8 @@
   }
 
   const cursor = $derived(editor.cursor);
-  const staff = $derived(score.tracks[cursor.track]?.staves[0]);
+  const staff = $derived(score.tracks[cursor.track]?.staves[cursor.staff]);
+  const drums = $derived(score.tracks[cursor.track]?.instrument === 'drums');
   const beat = $derived(staff?.bars[cursor.bar]?.voices[0]?.beats[cursor.beat]);
   const time = $derived(score.master_bars[cursor.bar]?.time_signature);
   const note = $derived(editor.note);
@@ -90,9 +101,12 @@
     return parts.join(', ');
   });
 
-  const pitch = $derived(
-    note && staff ? noteName(staff.tuning.strings[note.string] + staff.capo + note.fret) : '',
-  );
+  /** What the note is: its pitch, or on a drum track the piece of the kit. */
+  const pitch = $derived.by(() => {
+    if (!note || !staff) return '';
+    if (drums) return drumKit.find((p) => p.number === note.fret)?.name ?? 'not in the kit';
+    return noteName(staff.tuning.strings[note.string] + staff.capo + note.fret);
+  });
 
   const noteRows = $derived.by(() => {
     const e = note?.effects ?? {};
@@ -157,6 +171,23 @@
     const e = editor.beat_effects ?? {};
     const rows: Row[] = [];
     const clear = (field: string) => () => setBeatEffect(field, null);
+    if (e.chord) rows.push({ icon: 'chordName', label: 'Chord', value: e.chord, remove: clear('chord') });
+    if (e.diagram) {
+      const shape = [...e.diagram.frets].reverse().map((f) => (f < 0 ? 'x' : f)).join(' ');
+      rows.push({ icon: 'chordDiagram', label: 'Chord diagram', value: shape, remove: clear('diagram') });
+    }
+    if (e.volume !== undefined) {
+      rows.push({ icon: 'volumeChange', label: 'Volume from here', value: `${e.volume}`, remove: clear('volume') });
+    }
+    if (e.pan !== undefined) {
+      const side = e.pan === 0 ? 'centre' : `${Math.abs(e.pan)} ${e.pan < 0 ? 'left' : 'right'}`;
+      rows.push({ icon: 'panChange', label: 'Pan from here', value: side, remove: clear('pan') });
+    }
+    if (e.text) rows.push({ icon: 'beatText', label: 'Text', value: e.text, remove: clear('text') });
+    if (e.lyrics?.length) {
+      rows.push({ icon: 'lyrics', label: 'Lyrics', value: e.lyrics.join(' / '), remove: clear('lyrics') });
+    }
+    if (e.fermata) rows.push({ icon: 'fermata', label: 'Fermata', remove: clear('fermata') });
     if (e.dynamic) rows.push({ icon: e.dynamic, label: 'Dynamic', value: e.dynamic, remove: clear('dynamic') });
     if (e.hairpin) {
       rows.push({
@@ -236,7 +267,7 @@
       <dt>Beat</dt>
       <dd>{cursor.beat + 1}</dd>
       <dt>String</dt>
-      <dd>{cursor.string + 1}{#if staff}&ensp;({noteName(staff.tuning.strings[cursor.string] + staff.capo)}){/if}</dd>
+      <dd>{cursor.string + 1}{#if staff && !drums}&ensp;({noteName(staff.tuning.strings[cursor.string] + staff.capo)}){/if}</dd>
       <dt>Time</dt>
       <dd>
         {#if time}

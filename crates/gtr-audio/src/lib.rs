@@ -5,5 +5,8 @@
 mod events;
 mod synth;
 
-pub use events::{BeatTime, Click, NoteEvent, Options, Timeline, Tone, compile};
-pub use synth::render;
+pub use events::{
+    Automation, BeatTime, Channel, Click, NoteEvent, Options, Timbre, Timeline, Tone, compile,
+};
+pub use gtr_model::play_order;
+pub use synth::{Stereo, render, render_channel, render_clicks};

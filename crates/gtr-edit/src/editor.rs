@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, MasterBar, Note, NoteValue, Score, ScoreInfo, Staff,
-    TimeSignature, Track, Tuning, Tuplet,
+    Bar, Beat, BeatEffects, Duration, Instrument, MasterBar, Mix, Note, NoteValue, Score,
+    ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,7 @@ use serde_json::Value;
 use crate::technique::Target;
 use crate::{BeatRef, Command, EditError, History, Technique};
 
+/// The highest fret on a stringed instrument; see `Instrument::max_fret` for the others.
 pub const MAX_FRET: u8 = 36;
 
 /// Where typing goes. `beat` may equal the number of beats in the bar: that is the empty slot
@@ -19,6 +20,10 @@ pub struct Cursor {
     pub bar: usize,
     pub beat: usize,
     pub string: u8,
+    /// The voice being edited. A bar may not have it yet; it is added on the first entry.
+    pub voice: usize,
+    /// The staff of the track being edited: a piano has one for each hand.
+    pub staff: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -64,8 +69,8 @@ pub struct EditorState {
 }
 
 /// A score plus everything needed to edit it from the keyboard: cursor, selection, input
-/// duration, clipboard and undo history. Edits go to the first staff and voice of the
-/// cursor's track.
+/// duration, clipboard and undo history. Edits go to the first staff of the cursor's track,
+/// in the cursor's voice.
 pub struct Editor {
     score: Score,
     history: History<Cursor>,
@@ -84,21 +89,19 @@ impl Editor {
     /// that the cursor always has somewhere to be.
     pub fn new(mut score: Score) -> Self {
         if score.tracks.is_empty() {
-            score.tracks.push(Track {
-                name: "Guitar".into(),
-                staves: Vec::new(),
-            });
+            let track = Track::new("Guitar", Instrument::default(), Vec::new());
+            score.tracks.push(track);
         }
         if score.master_bars.is_empty() {
-            score.master_bars.push(MasterBar {
-                time_signature: TimeSignature::COMMON,
-            });
+            score
+                .master_bars
+                .push(MasterBar::new(TimeSignature::COMMON));
         }
         let bar_count = score.master_bars.len();
         for track in &mut score.tracks {
             if track.staves.is_empty() {
                 track.staves.push(Staff {
-                    tuning: Tuning::guitar_standard(),
+                    tuning: track.instrument.default_tuning(),
                     capo: 0,
                     bars: Vec::new(),
                 });
@@ -115,6 +118,8 @@ impl Editor {
                 bar: 0,
                 beat: 0,
                 string: 0,
+                voice: 0,
+                staff: 0,
             },
             anchor: None,
             duration: Duration::new(NoteValue::Quarter),
@@ -238,6 +243,21 @@ impl Editor {
     pub fn set_track(&mut self, track: usize) {
         self.anchor = None;
         self.cursor.track = track;
+        self.cursor.staff = 0;
+        self.settle();
+    }
+
+    /// Switches to another staff of the cursor's track, counted from the top.
+    pub fn set_staff(&mut self, staff: usize) {
+        self.anchor = None;
+        self.cursor.staff = staff;
+        self.settle();
+    }
+
+    /// Switches to another voice of the staff, counted from zero.
+    pub fn set_voice(&mut self, voice: usize) {
+        self.anchor = None;
+        self.cursor.voice = voice.min(Bar::MAX_VOICES - 1);
         self.settle();
     }
 
@@ -272,7 +292,7 @@ impl Editor {
                 if combine
                     && self.digit_pending
                     && tens > 0
-                    && u16::from(tens) * 10 + u16::from(digit) <= u16::from(MAX_FRET) =>
+                    && u16::from(tens) * 10 + u16::from(digit) <= u16::from(self.max_fret()) =>
             {
                 tens * 10 + digit
             }
@@ -288,15 +308,33 @@ impl Editor {
         Ok(())
     }
 
+    /// Puts a note on a given fret under the cursor, keeping the techniques of a note
+    /// already there. On a drum track the fret is the number of a piece of the kit.
+    pub fn set_fret(&mut self, fret: u8) -> Result<(), EditError> {
+        let note = (self.current_beat())
+            .and_then(|b| b.note_on(self.cursor.string))
+            .cloned();
+        self.put_note(Note {
+            fret,
+            tied: false,
+            ..note.unwrap_or(Note::new(self.cursor.string, 0))
+        })
+    }
+
+    /// The highest fret the cursor's track has.
+    fn max_fret(&self) -> u8 {
+        self.score.tracks[self.cursor.track].instrument.max_fret()
+    }
+
     fn put_note(&mut self, note: Note) -> Result<(), EditError> {
-        if note.fret > MAX_FRET {
+        if note.fret > self.max_fret() {
             return Err(EditError::FretOutOfRange);
         }
         let at = self.at();
         let command = if self.current_beat().is_some() {
             Command::PutNote { at, note }
         } else {
-            Command::Batch(vec![
+            self.in_voice(vec![
                 Command::InsertBeat {
                     at,
                     beat: Beat::rest(self.duration),
@@ -320,10 +358,10 @@ impl Editor {
                     })
                     .collect(),
             ),
-            None => Command::InsertBeat {
+            None => self.in_voice(vec![Command::InsertBeat {
                 at,
                 beat: Beat::rest(self.duration),
-            },
+            }]),
         };
         self.run(command)
     }
@@ -577,10 +615,11 @@ impl Editor {
 
     /// Inserts a rest before the beat under the cursor.
     pub fn insert_beat(&mut self) -> Result<(), EditError> {
-        self.run(Command::InsertBeat {
+        let command = self.in_voice(vec![Command::InsertBeat {
             at: self.at(),
             beat: Beat::rest(self.duration),
-        })
+        }]);
+        self.run(command)
     }
 
     /// Inserts an empty bar before the cursor's bar.
@@ -619,6 +658,36 @@ impl Editor {
         self.run(Command::Batch(commands))
     }
 
+    /// Sets one property of the cursor's bar that every track shares. `field` is its name
+    /// in the saved file, such as `"repeat_count"` or `"section"`, and `value` its JSON;
+    /// `null` clears it.
+    pub fn set_bar_property(&mut self, field: &str, value: &Value) -> Result<(), EditError> {
+        let bar = self.cursor.bar;
+        let master_bar = patched(&self.score.master_bars[bar], field, value)
+            .map_err(|_| EditError::InvalidBarProperty)?;
+        if master_bar == self.score.master_bars[bar] {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetMasterBar { bar, master_bar }))
+    }
+
+    /// Changes the key signature from the cursor's bar up to the next existing change.
+    /// `key` counts sharps, or flats if negative.
+    pub fn set_key_signature(&mut self, key: i8) -> Result<(), EditError> {
+        let start = self.cursor.bar;
+        let old = self.score.master_bars[start].key_signature;
+        let commands = self.score.master_bars[start..]
+            .iter()
+            .take_while(|m| m.key_signature == old)
+            .enumerate()
+            .map(|(i, _)| Command::SetKeySignature {
+                bar: start + i,
+                key,
+            })
+            .collect();
+        self.keep_selection(|e| e.run(Command::Batch(commands)))
+    }
+
     pub fn set_tempo(&mut self, tempo: u32) -> Result<(), EditError> {
         self.run(Command::SetTempo { tempo })
     }
@@ -626,7 +695,7 @@ impl Editor {
     pub fn set_tuning(&mut self, tuning: Tuning, capo: u8) -> Result<(), EditError> {
         self.run(Command::SetTuning {
             track: self.cursor.track,
-            staff: 0,
+            staff: self.cursor.staff,
             tuning,
             capo,
         })
@@ -634,6 +703,82 @@ impl Editor {
 
     pub fn set_info(&mut self, info: ScoreInfo) -> Result<(), EditError> {
         self.run(Command::SetInfo { info })
+    }
+
+    // --- Tracks ---
+
+    /// Adds an empty track below the cursor's track and moves the cursor to it. Without a
+    /// tuning the track starts in its instrument's usual one, with no capo.
+    pub fn add_track(
+        &mut self,
+        name: &str,
+        instrument: Instrument,
+        tuning: Option<(Tuning, u8)>,
+    ) -> Result<(), EditError> {
+        let index = self.cursor.track + 1;
+        let mut track = Track::empty(name, instrument, self.score.master_bars.len());
+        if let Some((tuning, capo)) = tuning {
+            track.staves[0].tuning = tuning;
+            track.staves[0].capo = capo;
+        }
+        self.run(Command::InsertTrack { index, track })?;
+        self.set_track(index);
+        Ok(())
+    }
+
+    /// Removes a track. The cursor stays on the track it was on, or takes the next one if
+    /// that is the track removed.
+    pub fn remove_track(&mut self, index: usize) -> Result<(), EditError> {
+        self.exec(Command::RemoveTrack { index })?;
+        self.anchor = None;
+        if index < self.cursor.track {
+            self.cursor.track -= 1;
+        }
+        self.settle();
+        Ok(())
+    }
+
+    /// Moves a track to position `to`. The cursor stays on the track it was on.
+    pub fn move_track(&mut self, from: usize, to: usize) -> Result<(), EditError> {
+        if from == to {
+            return Ok(());
+        }
+        self.exec(Command::MoveTrack { from, to })?;
+        let current = self.cursor.track;
+        self.cursor.track = if current == from {
+            to
+        } else if from < current && current <= to {
+            current - 1
+        } else if to <= current && current < from {
+            current + 1
+        } else {
+            current
+        };
+        self.settle();
+        Ok(())
+    }
+
+    pub fn set_track_info(
+        &mut self,
+        track: usize,
+        name: &str,
+        instrument: Instrument,
+    ) -> Result<(), EditError> {
+        let name = name.to_owned();
+        self.keep_selection(|e| {
+            e.run(Command::SetTrackInfo {
+                track,
+                name,
+                instrument,
+            })
+        })
+    }
+
+    pub fn set_mix(&mut self, track: usize, mix: Mix) -> Result<(), EditError> {
+        if self.score.tracks.get(track).is_some_and(|t| t.mix == mix) {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetMix { track, mix }))
     }
 
     // --- Clipboard ---
@@ -691,7 +836,11 @@ impl Editor {
                 .collect(),
         };
         let Cursor {
-            track, bar, beat, ..
+            track,
+            staff,
+            bar,
+            beat,
+            ..
         } = self.cursor;
         match self.clipboard.clone() {
             None => Ok(()),
@@ -705,7 +854,8 @@ impl Editor {
                         beat: fit(b),
                     })
                     .collect();
-                self.run(Command::Batch(commands))?;
+                let command = self.in_voice(commands);
+                self.run(command)?;
                 self.cursor.beat = beat + count;
                 self.settle();
                 Ok(())
@@ -717,11 +867,13 @@ impl Editor {
                     .enumerate()
                     .map(|(i, (master_bar, source))| {
                         let mut pasted = Bar::empty();
-                        pasted.voices[0].beats = source
-                            .voices
-                            .first()
-                            .map(|v| v.beats.iter().map(fit).collect())
-                            .unwrap_or_default();
+                        if !source.voices.is_empty() {
+                            pasted.voices = (source.voices.iter())
+                                .map(|v| Voice {
+                                    beats: v.beats.iter().map(fit).collect(),
+                                })
+                                .collect();
+                        }
                         let mut pasted = Some(pasted);
                         Command::InsertBar {
                             index: bar + i,
@@ -729,9 +881,11 @@ impl Editor {
                             bars: (self.score.tracks.iter().enumerate())
                                 .map(|(t, tr)| {
                                     (0..tr.staves.len())
-                                        .map(|s| match pasted.take_if(|_| t == track && s == 0) {
-                                            Some(bar) => bar,
-                                            None => Bar::empty(),
+                                        .map(|s| {
+                                            match pasted.take_if(|_| t == track && s == staff) {
+                                                Some(bar) => bar,
+                                                None => Bar::empty(),
+                                            }
                                         })
                                         .collect()
                                 })
@@ -812,6 +966,8 @@ impl Editor {
     fn settle(&mut self) {
         self.digit_pending = false;
         self.cursor.track = self.cursor.track.min(self.score.tracks.len() - 1);
+        let staves = self.score.tracks[self.cursor.track].staves.len();
+        self.cursor.staff = self.cursor.staff.min(staves - 1);
         self.cursor.bar = self.cursor.bar.min(self.score.master_bars.len() - 1);
         let len = self.beats(self.cursor.bar).len();
         self.cursor.beat = self.cursor.beat.min(len);
@@ -828,20 +984,46 @@ impl Editor {
     }
 
     fn staff(&self) -> &Staff {
-        &self.score.tracks[self.cursor.track].staves[0]
+        &self.score.tracks[self.cursor.track].staves[self.cursor.staff]
     }
 
     fn string_count(&self) -> usize {
         self.staff().tuning.strings.len()
     }
 
+    /// The cursor's voice in a bar, which is empty if the bar does not have that voice yet.
     fn beats(&self, bar: usize) -> &[Beat] {
-        &self.staff().bars[bar].voices[0].beats
+        (self.staff().bars[bar].voices.get(self.cursor.voice)).map_or(&[], |v| &v.beats)
     }
 
     fn bar_full(&self, bar: usize) -> bool {
-        self.staff().bars[bar].voices[0].length()
-            >= self.score.master_bars[bar].time_signature.bar_length()
+        let length: gtr_model::Rational =
+            (self.beats(bar).iter()).map(|b| b.duration.length()).sum();
+        length >= self.score.master_bars[bar].time_signature.bar_length()
+    }
+
+    /// Wraps edits to the cursor's bar so that they first give the bar the cursor's voice,
+    /// if it does not have it yet.
+    fn in_voice(&self, mut commands: Vec<Command>) -> Command {
+        let Cursor {
+            track,
+            staff,
+            bar,
+            voice,
+            ..
+        } = self.cursor;
+        if self.staff().bars[bar].voices.len() <= voice {
+            commands.insert(
+                0,
+                Command::SetVoiceCount {
+                    track,
+                    staff,
+                    bar,
+                    count: voice + 1,
+                },
+            );
+        }
+        Command::Batch(commands)
     }
 
     fn current_beat(&self) -> Option<&Beat> {
@@ -855,9 +1037,9 @@ impl Editor {
     fn beat_ref(&self, bar: usize, beat: usize) -> BeatRef {
         BeatRef {
             track: self.cursor.track,
-            staff: 0,
+            staff: self.cursor.staff,
             bar,
-            voice: 0,
+            voice: self.cursor.voice,
             beat,
         }
     }

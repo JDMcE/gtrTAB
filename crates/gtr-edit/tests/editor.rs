@@ -1,6 +1,7 @@
 use gtr_edit::{Editor, Move, Technique};
 use gtr_model::{
-    Bend, BendKind, Dynamic, Note, NoteValue, Rational, Score, TimeSignature, Tuning, demo_score,
+    Bend, BendKind, Dynamic, Instrument, Mix, Note, NoteValue, Rational, Score, TimeSignature,
+    Tuning, demo_score,
 };
 use proptest::prelude::*;
 
@@ -153,12 +154,12 @@ fn copy_and_paste_bars_and_beats() {
 #[test]
 fn time_signature_applies_until_the_next_change() {
     let mut score = demo_score();
-    score.master_bars.push(gtr_model::MasterBar {
-        time_signature: TimeSignature {
+    score
+        .master_bars
+        .push(gtr_model::MasterBar::new(TimeSignature {
             numerator: 6,
             denominator: 8,
-        },
-    });
+        }));
     score.tracks[0].staves[0].bars.push(gtr_model::Bar::empty());
     let mut e = Editor::new(score);
     let three_four = TimeSignature {
@@ -409,4 +410,216 @@ proptest! {
         prop_assert_eq!(e.score(), &original);
         prop_assert!(!e.state().dirty);
     }
+}
+
+#[test]
+fn tracks_are_added_moved_and_removed_around_the_cursor() {
+    let names =
+        |e: &Editor| -> Vec<String> { e.score().tracks.iter().map(|t| t.name.clone()).collect() };
+    let mut e = Editor::new(demo_score());
+    e.set_cursor(1, 2, 4, false);
+    e.add_track("Bass", Instrument::Bass, None).unwrap();
+    // The new track goes below the current one, takes the cursor and has every bar.
+    assert_eq!(names(&e), ["Guitar", "Bass"]);
+    assert_eq!((e.cursor().track, e.cursor().bar), (1, 1));
+    assert_eq!(e.cursor().string, 3);
+    assert_eq!(
+        e.score().tracks[1].staves[0].tuning,
+        Tuning::bass_standard()
+    );
+    assert_eq!(e.score().tracks[1].staves[0].bars.len(), 2);
+    e.score().validate().unwrap();
+
+    // Notes go to the cursor's track, and a new bar reaches every track.
+    e.type_digit(3, false).unwrap();
+    assert_eq!(
+        e.score().tracks[1].staves[0].bars[1].voices[0].beats.len(),
+        1
+    );
+    e.insert_bar().unwrap();
+    assert!(e.score().tracks.iter().all(|t| t.staves[0].bars.len() == 3));
+
+    e.set_track(0);
+    let drop_d = Some((Tuning::guitar_drop_d(), 2));
+    e.add_track("Lead", Instrument::DistortionGuitar, drop_d)
+        .unwrap();
+    assert_eq!(names(&e), ["Guitar", "Lead", "Bass"]);
+    assert_eq!(e.cursor().track, 1);
+    let lead = &e.score().tracks[1].staves[0];
+    assert_eq!((&lead.tuning, lead.capo), (&Tuning::guitar_drop_d(), 2));
+    // A tuning without strings is refused, and nothing is added.
+    let no_strings = Some((Tuning::new(Vec::new()), 0));
+    assert!(e.add_track("Air", Instrument::Bass, no_strings).is_err());
+    assert_eq!(e.score().tracks.len(), 3);
+
+    // Moving a track carries the cursor with it; moving another past it shifts the cursor.
+    e.move_track(1, 2).unwrap();
+    assert_eq!(names(&e), ["Guitar", "Bass", "Lead"]);
+    assert_eq!(e.cursor().track, 2);
+    e.move_track(0, 2).unwrap();
+    assert_eq!(names(&e), ["Bass", "Lead", "Guitar"]);
+    assert_eq!(e.cursor().track, 1);
+    e.undo().unwrap();
+    assert_eq!(names(&e), ["Guitar", "Bass", "Lead"]);
+    assert_eq!(e.cursor().track, 2);
+
+    // Removing a track above the cursor keeps the cursor on its track.
+    e.remove_track(0).unwrap();
+    assert_eq!(names(&e), ["Bass", "Lead"]);
+    assert_eq!(e.cursor().track, 1);
+    e.remove_track(1).unwrap();
+    assert_eq!(e.cursor().track, 0);
+    assert!(e.remove_track(0).is_err());
+    e.undo().unwrap();
+    e.undo().unwrap();
+    assert_eq!(names(&e), ["Guitar", "Bass", "Lead"]);
+    e.score().validate().unwrap();
+}
+
+#[test]
+fn track_settings_are_undoable_and_checked() {
+    let mut e = Editor::new(demo_score());
+    e.set_track_info(0, "Rhythm", Instrument::OverdriveGuitar)
+        .unwrap();
+    let loud = Mix {
+        volume: 100,
+        pan: -40,
+        mute: false,
+        solo: true,
+    };
+    e.set_mix(0, loud).unwrap();
+    let track = &e.score().tracks[0];
+    assert_eq!(
+        (track.name.as_str(), track.instrument),
+        ("Rhythm", Instrument::OverdriveGuitar)
+    );
+    assert_eq!(track.mix, loud);
+
+    // Setting the same mix again is not an edit.
+    let revision = e.state().revision;
+    e.set_mix(0, loud).unwrap();
+    assert_eq!(e.state().revision, revision);
+    let off_scale = Mix {
+        volume: 101,
+        ..loud
+    };
+    assert!(e.set_mix(0, off_scale).is_err());
+    assert!(e.set_mix(3, loud).is_err());
+
+    e.undo().unwrap();
+    assert_eq!(e.score().tracks[0].mix, Mix::default());
+    e.undo().unwrap();
+    assert_eq!(e.score().tracks[0].name, "Guitar");
+}
+
+#[test]
+fn a_second_voice_is_added_on_first_entry() {
+    let mut e = Editor::new(demo_score());
+    let voices = |e: &Editor, bar: usize| e.score().tracks[0].staves[0].bars[bar].voices.len();
+    e.set_voice(1);
+    assert_eq!(e.cursor().voice, 1);
+    // The second voice of a full bar starts out empty, so the cursor is on its first slot.
+    assert_eq!((e.cursor().bar, e.cursor().beat), (0, 0));
+    assert!(e.state().note.is_none());
+    // Looking at a voice does not create it.
+    assert_eq!(voices(&e, 0), 1);
+
+    e.set_note_value(NoteValue::Half).unwrap();
+    e.type_digit(7, false).unwrap();
+    e.move_cursor(Move::Right, false).unwrap();
+    e.rest().unwrap();
+    assert_eq!(voices(&e, 0), 2);
+    let second = &e.score().tracks[0].staves[0].bars[0].voices[1].beats;
+    assert_eq!(second.len(), 2);
+    assert_eq!(second[0].notes[0].fret, 7);
+    assert!(second[1].is_rest());
+    // The first voice is untouched, and the other bar still has only one.
+    assert_eq!(beats(&e, 0).len(), 8);
+    assert_eq!(voices(&e, 1), 1);
+    e.score().validate().unwrap();
+
+    // Moving right from the end of a full voice goes on to the next bar, in the same voice.
+    e.move_cursor(Move::Right, false).unwrap();
+    assert_eq!(
+        (e.cursor().bar, e.cursor().beat, e.cursor().voice),
+        (1, 0, 1)
+    );
+
+    // Each entry is one undo step, voice and all.
+    e.undo().unwrap();
+    e.undo().unwrap();
+    assert_eq!(voices(&e, 0), 1);
+    assert_eq!(e.score(), &demo_score());
+
+    // Voices beyond the fourth do not exist.
+    e.set_voice(9);
+    assert_eq!(e.cursor().voice, 3);
+}
+
+#[test]
+fn key_signature_applies_until_the_next_change() {
+    let mut score = demo_score();
+    score
+        .master_bars
+        .push(gtr_model::MasterBar::new(TimeSignature::COMMON));
+    score.tracks[0].staves[0].bars.push(gtr_model::Bar::empty());
+    score.master_bars[2].key_signature = -1;
+    let mut e = Editor::new(score);
+    e.set_key_signature(2).unwrap();
+    let keys: Vec<i8> = (e.score().master_bars.iter())
+        .map(|m| m.key_signature)
+        .collect();
+    assert_eq!(keys, [2, 2, -1]);
+    assert!(e.set_key_signature(8).is_err());
+    e.undo().unwrap();
+    assert_eq!(e.score().master_bars[0].key_signature, 0);
+}
+
+#[test]
+fn a_piano_is_edited_one_staff_at_a_time() {
+    let mut e = Editor::new(demo_score());
+    e.add_track("Piano", Instrument::Piano, None).unwrap();
+    assert_eq!(e.score().tracks[1].staves.len(), 2);
+    assert_eq!((e.cursor().track, e.cursor().staff), (1, 0));
+
+    e.set_staff(1);
+    e.type_digit(3, false).unwrap();
+    let staves = &e.score().tracks[1].staves;
+    assert!(staves[0].bars[0].voices[0].beats.is_empty());
+    assert_eq!(staves[1].bars[0].voices[0].beats[0].notes[0].fret, 3);
+    // A new bar reaches both staves, and a staff that does not exist is not gone to.
+    e.insert_bar().unwrap();
+    assert!(e.score().tracks[1].staves.iter().all(|s| s.bars.len() == 3));
+    e.set_staff(5);
+    assert_eq!(e.cursor().staff, 1);
+    // Going to another track starts on its first staff.
+    e.set_track(0);
+    assert_eq!(e.cursor().staff, 0);
+    e.score().validate().unwrap();
+}
+
+#[test]
+fn drum_tracks_take_kit_numbers_as_frets() {
+    let mut e = Editor::new(demo_score());
+    // Fret 42 does not exist on a guitar.
+    assert!(e.set_fret(42).is_err());
+    e.type_digit(4, true).unwrap();
+    e.type_digit(2, true).unwrap();
+    assert_eq!(e.state().note.map(|n| n.fret), Some(2));
+
+    e.add_track("Drums", Instrument::Drums, None).unwrap();
+    assert_eq!(e.score().tracks[1].staves[0].tuning.strings.len(), 5);
+    // Closed hi-hat by typing its number, then a snare in one go on the line below.
+    e.type_digit(4, true).unwrap();
+    e.type_digit(2, true).unwrap();
+    assert_eq!(e.state().note.map(|n| n.fret), Some(42));
+    e.move_cursor(Move::Up, false).unwrap();
+    e.set_fret(38).unwrap();
+    let frets: Vec<u8> = (e.score().tracks[1].staves[0].bars[0].voices[0].beats[0]
+        .notes
+        .iter())
+    .map(|n| n.fret)
+    .collect();
+    assert_eq!(frets, [38, 42]);
+    assert!(e.set_fret(88).is_err());
 }

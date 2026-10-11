@@ -1,30 +1,22 @@
+//! The tab staff: fret numbers on string lines, the techniques written around them, and
+//! the rhythm underneath.
+
 use gtr_model::{
-    Accent, Beat, BendKind, Dynamic, Hairpin, Note, NoteValue, PickStroke, Rational, Score, Slap,
-    Slide, Staff, Strum, TimeSignature, Vibrato, interval_label,
+    Accent, Beat, BendKind, Dynamic, Hairpin, Note, NoteValue, PickStroke, Rational, Slap, Slide,
+    Staff, Strum, TimeSignature, Vibrato, interval_label,
 };
 
 use crate::display::r;
-use crate::{Align, BarBox, BarStatus, Color, Font, Item, Layout, SystemBox};
+use crate::spacing::{BAR_PAD_LEFT, TIME_SIG_DIGIT_WIDTH};
+use crate::{Align, BarBox, Color, Font, Item};
 
-const MARGIN_X: f64 = 36.0;
-const HEADER_HEIGHT: f64 = 96.0;
-const STRING_SPACING: f64 = 13.0;
+pub(crate) const STRING_SPACING: f64 = 13.0;
 /// Space above the staff for bar numbers and the tempo mark, before any effect lanes.
-const ABOVE_STAFF: f64 = 30.0;
+pub(crate) const ABOVE_STAFF: f64 = 30.0;
 /// Space below the staff for stems, beams and tuplet numbers.
-const BELOW_STAFF: f64 = 64.0;
+pub(crate) const BELOW_STAFF: f64 = 64.0;
 /// Extra space below that for dynamics and hairpins, on lines that have them.
-const DYNAMICS_HEIGHT: f64 = 22.0;
-const SYSTEM_GAP: f64 = 18.0;
-const CLEF_WIDTH: f64 = 28.0;
-
-const BAR_PAD_LEFT: f64 = 12.0;
-const BAR_PAD_RIGHT: f64 = 4.0;
-const TIME_SIG_DIGIT_WIDTH: f64 = 24.0;
-/// Distance from the start of a beat's space to the centre of its fret numbers.
-const BEAT_INSET: f64 = 9.0;
-const SLOT_WIDTH: f64 = 26.0;
-const MIN_BAR_WIDTH: f64 = 76.0;
+pub(crate) const DYNAMICS_HEIGHT: f64 = 22.0;
 
 const STEM_GAP: f64 = 10.0;
 const STEM_LENGTH: f64 = 26.0;
@@ -58,10 +50,15 @@ enum Lane {
     Stroke,
     Trill,
     Whammy,
+    Fermata,
+    Mix,
+    Diagram,
+    Chord,
+    Text,
 }
 
 /// Lanes from the staff upwards, with their heights.
-const LANES: [(Lane, f64); 10] = [
+const LANES: [(Lane, f64); 15] = [
     (Lane::Bend, 30.0),
     (Lane::Vibrato, 11.0),
     (Lane::PalmMute, 12.0),
@@ -72,28 +69,53 @@ const LANES: [(Lane, f64); 10] = [
     (Lane::Stroke, 15.0),
     (Lane::Trill, 12.0),
     (Lane::Whammy, 26.0),
+    (Lane::Fermata, 16.0),
+    (Lane::Mix, 13.0),
+    (Lane::Diagram, DIAGRAM_HEIGHT),
+    (Lane::Chord, 15.0),
+    (Lane::Text, 13.0),
 ];
+
+/// Height a chord diagram takes: five frets and the open-string marks above them.
+const DIAGRAM_HEIGHT: f64 = 52.0;
+const DIAGRAM_STRING_GAP: f64 = 5.5;
+const DIAGRAM_FRET_GAP: f64 = 7.0;
+/// Frets a chord diagram shows.
+const DIAGRAM_FRETS: i8 = 5;
+
+/// Height of one line of lyrics under a staff.
+pub(crate) const LYRIC_LINE: f64 = 13.0;
+const FERMATA: char = '\u{E4C0}';
 
 /// Distance from the top string up to the first lane, clear of the bar numbers.
 const LANE_BASE: f64 = 17.0;
 
 /// The lanes one system uses and where they sit.
 #[derive(Default)]
-struct Lanes {
+pub(crate) struct Lanes {
     used: [bool; LANES.len()],
     /// Vertical centre of each used lane, as a distance above the top string.
     centre: [f64; LANES.len()],
-    height: f64,
+    pub height: f64,
     /// The line has dynamics or hairpins, which go below the staff.
-    dynamics: bool,
+    pub dynamics: bool,
+    /// Lines of lyrics under the staff.
+    pub lyrics: usize,
 }
 
 impl Lanes {
-    fn for_beats<'a>(beats: impl Iterator<Item = &'a Beat>) -> Lanes {
+    pub fn for_beats<'a>(beats: impl Iterator<Item = &'a Beat>) -> Lanes {
         let mut lanes = Lanes::default();
         for beat in beats {
             lanes.dynamics |= beat.effects.dynamic.is_some() || beat.effects.hairpin.is_some();
+            lanes.lyrics = lanes.lyrics.max(beat.effects.lyrics.len());
             let mut mark = |lane: Lane, used: bool| lanes.used[lane as usize] |= used;
+            mark(Lane::Fermata, beat.effects.fermata);
+            mark(Lane::Chord, beat.effects.chord.is_some());
+            mark(Lane::Diagram, beat.effects.diagram.is_some());
+            let mixed = beat.effects.volume.is_some() || beat.effects.pan.is_some();
+            mark(Lane::Mix, mixed);
+            mark(Lane::Text, beat.effects.text.is_some());
             mark(Lane::Stroke, beat.effects.stroke.is_some());
             mark(Lane::Whammy, beat.effects.whammy.is_some());
             let hand = beat.effects.slap.is_some() || beat.effects.strum == Some(Strum::Rasgueado);
@@ -127,232 +149,101 @@ impl Lanes {
     }
 }
 
-/// A bar measured at its natural width, with x positions relative to the bar's left edge.
-struct Measured {
-    /// Width of the part that does not stretch when the system is justified.
-    fixed: f64,
-    width: f64,
-    beats: Vec<f64>,
-    slot: Option<f64>,
-    status: BarStatus,
-    time_signature: Option<TimeSignature>,
-}
-
-/// Lays out the first staff and voice of `track` as tablature, wrapped to `width` pixels.
-pub fn layout_track(score: &Score, track: usize, width: f64) -> Layout {
-    let staff = &score.tracks[track.min(score.tracks.len() - 1)].staves[0];
-    let string_count = staff.tuning.strings.len();
-    let staff_height = (string_count - 1) as f64 * STRING_SPACING;
-    let width = width.max(2.0 * MARGIN_X + CLEF_WIDTH + MIN_BAR_WIDTH);
-    let available = width - 2.0 * MARGIN_X - CLEF_WIDTH;
-    let voice = |bar: usize| staff.bars[bar].voices[0].beats.as_slice();
-
-    let measured: Vec<Measured> = (score.master_bars.iter().enumerate())
-        .map(|(i, master)| {
-            let shown = (i == 0
-                || score.master_bars[i - 1].time_signature != master.time_signature)
-                .then_some(master.time_signature);
-            measure(voice(i), master.time_signature, shown)
-        })
-        .collect();
-
-    let mut items = vec![];
-    header(score, width, &mut items);
-
-    let mut systems = Vec::new();
-    let mut bars: Vec<BarBox> = Vec::with_capacity(measured.len());
-    let mut top = HEADER_HEIGHT;
-    let mut first = 0;
-    while first < measured.len() {
-        // Take as many bars as fit, but always at least one.
-        let mut end = first + 1;
-        let mut natural = measured[first].width;
-        while end < measured.len() && natural + measured[end].width <= available {
-            natural += measured[end].width;
-            end += 1;
-        }
-        let fixed: f64 = measured[first..end].iter().map(|m| m.fixed).sum();
-        let mut stretch = (available - fixed) / (natural - fixed).max(1.0);
-        if end == measured.len() {
-            // Leave a short final line ragged rather than stretching it across the page.
-            stretch = stretch.min(1.0);
-        }
-
-        let lanes = Lanes::for_beats((first..end).flat_map(voice));
-        let y = top + ABOVE_STAFF + lanes.height;
-        let below = BELOW_STAFF + if lanes.dynamics { DYNAMICS_HEIGHT } else { 0.0 };
-        let bottom = y + staff_height + below;
-        let system = systems.len();
-        systems.push(SystemBox {
-            top: r(top),
-            y: r(y),
-            bottom: r(bottom),
-        });
-
-        let mut x = MARGIN_X + CLEF_WIDTH;
-        for m in &measured[first..end] {
-            let place = |rel: f64| r(x + m.fixed + (rel - m.fixed) * stretch);
-            let w = m.fixed + (m.width - m.fixed) * stretch;
-            bars.push(BarBox {
-                system,
-                x: r(x),
-                w: r(w),
-                beats: m.beats.iter().map(|&b| place(b)).collect(),
-                slot: m.slot.map(place),
-                status: m.status,
-            });
-            x += w;
-        }
-        let context = System {
-            score,
-            staff,
-            bars: &bars,
-            first,
-            y,
-            staff_height,
-            lanes: &lanes,
-        };
-        for (offset, measured_bar) in measured[first..end].iter().enumerate() {
-            context.draw_bar(first + offset, measured_bar, &mut items);
-        }
-        context.draw_hairpins(end, &mut items);
-
-        draw_staff(
-            MARGIN_X,
-            x,
-            y,
-            string_count,
-            end == measured.len(),
-            &mut items,
-        );
-        if first == 0 {
-            items.push(Item::Text {
-                x: MARGIN_X,
-                y: r(top + 6.0),
-                s: format!("\u{2669} = {}", score.tempo),
-                size: 13.0,
-                font: Font::Text,
-                align: Align::Left,
-                knockout: false,
-                c: Color::Ink,
-            });
-        }
-        top = bottom + SYSTEM_GAP;
-        first = end;
+/// Draws a chord diagram whose left string is at `left`, centred vertically on `centre`:
+/// a grid of strings and frets with a dot where each string is stopped, a ring over an
+/// open string and a cross over one that is not played. The lowest string is on the left.
+fn draw_diagram(diagram: &gtr_model::ChordDiagram, left: f64, centre: f64, items: &mut Vec<Item>) {
+    let strings = diagram.frets.len();
+    let width = (strings.max(2) - 1) as f64 * DIAGRAM_STRING_GAP;
+    let top = centre - DIAGRAM_HEIGHT / 2.0 + 13.0;
+    let bottom = top + f64::from(DIAGRAM_FRETS) * DIAGRAM_FRET_GAP;
+    let base = diagram.base_fret();
+    for string in 0..strings {
+        let x = left + string as f64 * DIAGRAM_STRING_GAP;
+        items.push(Item::line(x, top, x, bottom, 0.8, Color::Ink));
     }
-
-    Layout {
-        width: r(width),
-        height: r(top + 24.0),
-        string_spacing: STRING_SPACING,
-        string_count,
-        items,
-        systems,
-        bars,
+    for fret in 0..=DIAGRAM_FRETS {
+        let y = top + f64::from(fret) * DIAGRAM_FRET_GAP;
+        items.push(Item::line(left, y, left + width, y, 0.8, Color::Ink));
     }
-}
-
-fn header(score: &Score, width: f64, items: &mut Vec<Item>) {
-    let title = match score.info.title.as_str() {
-        "" => "Untitled",
-        title => title,
-    };
-    items.push(Item::text(width / 2.0, 38.0, title, 24.0, Font::Text));
-    let credits: Vec<&str> = [score.info.artist.as_str(), score.info.album.as_str()]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect();
-    if !credits.is_empty() {
-        let credit = Item::text(
-            width / 2.0,
-            64.0,
-            credits.join(" \u{2013} "),
-            13.0,
+    if base == 1 {
+        // The nut.
+        items.push(Item::rect(
+            left - 0.4,
+            top - 2.0,
+            width + 0.8,
+            2.4,
+            Color::Ink,
+        ));
+    } else {
+        let label = Item::text(
+            left + width + 4.0,
+            top + DIAGRAM_FRET_GAP / 2.0,
+            format!("{base}fr"),
+            8.0,
             Font::Text,
         );
-        items.push(credit.colored(Color::Muted));
+        items.push(left_aligned(label));
+    }
+    // `frets` runs from the highest string, which the diagram puts on the right.
+    for (string, &fret) in diagram.frets.iter().rev().enumerate() {
+        let x = left + string as f64 * DIAGRAM_STRING_GAP;
+        match fret {
+            ..0 => items.push(Item::text(x, top - 7.0, "\u{00D7}", 9.0, Font::Text)),
+            0 => items.push(Item::text(x, top - 7.0, "\u{25CB}", 7.0, Font::Text)),
+            _ => {
+                let row = f64::from((fret - base).clamp(0, DIAGRAM_FRETS - 1));
+                items.push(Item::Dot {
+                    x: r(x),
+                    y: r(top + (row + 0.5) * DIAGRAM_FRET_GAP),
+                    r: 2.3,
+                });
+            }
+        }
     }
 }
 
-/// Horizontal space a beat takes at its natural width. Longer notes get more room, but less
-/// than proportionally, and markings that sit beside a note get room of their own.
-fn spacing(beat: &Beat) -> f64 {
-    let quarters = beat.duration.length() * 4;
-    let quarters = *quarters.numer() as f64 / *quarters.denom() as f64;
-    let wide = beat.notes.iter().any(|n| {
-        let e = &n.effects;
-        e.bend.is_some()
-            || e.harmonic.is_some()
-            || e.slide.is_some()
-            || e.hammer
-            || e.trill.is_some()
-    });
-    let width = (28.0 * quarters.powf(0.55)).max(if wide { 30.0 } else { 20.0 });
-    // Grace notes and strum arrows sit to the left of the beat.
-    let grace = beat.notes.iter().any(|n| n.effects.grace.is_some());
-    let strum = matches!(beat.effects.strum, Some(s) if s != Strum::Rasgueado);
-    width + if grace { 12.0 } else { 0.0 } + if strum { 6.0 } else { 0.0 }
+fn left_aligned(mut item: Item) -> Item {
+    if let Item::Text { align, .. } = &mut item {
+        *align = Align::Left;
+    }
+    item
 }
 
-fn measure(
-    beats: &[Beat],
-    time_signature: TimeSignature,
-    shown: Option<TimeSignature>,
-) -> Measured {
-    let mut x = BAR_PAD_LEFT;
-    if let Some(ts) = shown {
-        let digits = ts.numerator.max(ts.denominator).to_string().len();
-        x += digits as f64 * TIME_SIG_DIGIT_WIDTH + 6.0;
-    }
-    let fixed = x;
-
-    let mut positions = Vec::with_capacity(beats.len());
-    let mut length = Rational::from_integer(0);
-    for beat in beats {
-        let grace = beat.notes.iter().any(|n| n.effects.grace.is_some());
-        let strum = matches!(beat.effects.strum, Some(s) if s != Strum::Rasgueado);
-        let lead = if grace { 12.0 } else { 0.0 } + if strum { 6.0 } else { 0.0 };
-        positions.push(x + BEAT_INSET + lead);
-        x += spacing(beat);
-        length += beat.duration.length();
-    }
-    let status = match length.cmp(&time_signature.bar_length()) {
-        _ if beats.is_empty() => BarStatus::Empty,
-        std::cmp::Ordering::Less => BarStatus::Incomplete,
-        std::cmp::Ordering::Equal => BarStatus::Complete,
-        std::cmp::Ordering::Greater => BarStatus::Overfull,
-    };
-    let slot = matches!(status, BarStatus::Empty | BarStatus::Incomplete).then(|| {
-        let slot = x + BEAT_INSET;
-        x += SLOT_WIDTH;
-        slot
-    });
-    Measured {
-        fixed,
-        width: (x + BAR_PAD_RIGHT).max(MIN_BAR_WIDTH),
-        beats: positions,
-        slot,
-        status,
-        time_signature: shown,
-    }
-}
-
-fn draw_staff(x1: f64, x2: f64, y: f64, strings: usize, last: bool, items: &mut Vec<Item>) {
-    let bottom = y + (strings - 1) as f64 * STRING_SPACING;
+/// Draws the string lines of a tab staff with the letters TAB at its start.
+pub(crate) fn draw_staff(x1: f64, x2: f64, y: f64, strings: usize, items: &mut Vec<Item>) {
     // String lines go first so that fret numbers can knock them out.
     for s in 0..strings {
         let line_y = y + s as f64 * STRING_SPACING;
         items.insert(0, Item::line(x1, line_y, x2, line_y, 1.0, Color::Muted));
     }
-    items.push(Item::line(x1, y, x1, bottom, 1.0, Color::Ink));
-    if last {
-        items.push(Item::line(x2 - 5.0, y, x2 - 5.0, bottom, 1.0, Color::Ink));
-        items.push(Item::rect(x2 - 3.0, y, 3.0, bottom - y, Color::Ink));
-    }
-    let middle = (y + bottom) / 2.0;
+    let middle = y + (strings - 1) as f64 * STRING_SPACING / 2.0;
     for (i, letter) in ["T", "A", "B"].into_iter().enumerate() {
         let letter_y = middle + (i as f64 - 1.0) * 13.0;
         items.push(Item::text(x1 + 13.0, letter_y, letter, 13.0, Font::Text).knockout());
+    }
+}
+
+/// Draws a time signature on a tab staff, at the start of the bar whose left edge is
+/// `bar_x`.
+pub(crate) fn draw_time(
+    ts: TimeSignature,
+    bar_x: f64,
+    y: f64,
+    staff_height: f64,
+    items: &mut Vec<Item>,
+) {
+    let digits = ts.numerator.max(ts.denominator).to_string().len();
+    let x = bar_x + BAR_PAD_LEFT + digits as f64 * TIME_SIG_DIGIT_WIDTH / 2.0;
+    let size = (staff_height * 0.8).clamp(28.0, 60.0);
+    for (number, at) in [(ts.numerator, 0.25), (ts.denominator, 0.75)] {
+        let glyphs: String = number
+            .to_string()
+            .bytes()
+            .filter_map(|d| char::from_u32(TIME_SIG_0 + u32::from(d - b'0')))
+            .collect();
+        let digit_y = y + staff_height * at;
+        items.push(Item::text(x, digit_y, glyphs, size, Font::Music));
     }
 }
 
@@ -375,90 +266,62 @@ fn half_width(note: &Note) -> f64 {
     fret_label(note).chars().count() as f64 * 3.4 + 1.5
 }
 
-/// One line of music being drawn.
-struct System<'a> {
-    score: &'a Score,
-    staff: &'a Staff,
-    /// Boxes of every bar laid out so far, up to the end of this system.
-    bars: &'a [BarBox],
-    /// Index of the system's first bar.
-    first: usize,
-    /// Y of the top string.
-    y: f64,
-    staff_height: f64,
-    lanes: &'a Lanes,
+/// One voice of one staff on one line of music.
+pub(crate) struct System<'a> {
+    pub staff: &'a Staff,
+    pub voice: usize,
+    /// X of every beat of this voice, per bar, for the bars laid out so far.
+    pub xs: &'a [Vec<f64>],
+    /// Boxes of every bar laid out so far, up to the end of this line.
+    pub bars: &'a [BarBox],
+    /// Index of the line's first bar.
+    pub first: usize,
+    /// Y of the top string, or of the top of the notation when there is no tab staff.
+    pub y: f64,
+    pub staff_height: f64,
+    pub lanes: &'a Lanes,
+    /// Distance from the bottom of the staff to the row of dynamics.
+    pub below: f64,
+    /// Whether there are string lines to write on. Without them only the markings above
+    /// and below the staff are drawn.
+    pub strings: bool,
+    /// Colour of the fret numbers: muted for the voices not being edited.
+    pub ink: Color,
 }
 
 impl System<'_> {
     fn beats(&self, bar: usize) -> &[Beat] {
-        &self.staff.bars[bar].voices[0].beats
+        (self.staff.bars.get(bar))
+            .and_then(|b| b.voices.get(self.voice))
+            .map_or(&[], |v| &v.beats)
     }
 
-    /// The beat after `beat`, with its x position if it is on this system.
+    /// The beat after `beat`, with its x position if it is on this line.
     fn following(&self, bar: usize, beat: usize) -> Option<(&Beat, Option<f64>)> {
         if let Some(next) = self.beats(bar).get(beat + 1) {
-            return Some((next, Some(self.bars[bar].beats[beat + 1])));
+            return Some((next, Some(self.xs[bar][beat + 1])));
         }
-        let next = self.staff.bars.get(bar + 1)?.voices[0].beats.first()?;
-        let x = self.bars.get(bar + 1).map(|b| b.beats[0]);
+        let next = self.beats(bar + 1).first()?;
+        let x = self.xs.get(bar + 1).and_then(|xs| xs.first().copied());
         Some((next, x))
     }
 
-    fn draw_bar(&self, index: usize, measured: &Measured, items: &mut Vec<Item>) {
+    /// Draws this voice's part of a bar. `rhythm` adds the rests on the staff and the
+    /// stems and beams under it, which only one voice of a staff gets.
+    pub fn draw_voice(
+        &self,
+        index: usize,
+        time_signature: TimeSignature,
+        rhythm: bool,
+        items: &mut Vec<Item>,
+    ) {
         let beats = self.beats(index);
-        let bar = &self.bars[index];
-        let (y, staff_height) = (self.y, self.staff_height);
-        let bottom = y + staff_height;
-        let invalid = matches!(bar.status, BarStatus::Incomplete | BarStatus::Overfull);
-        let right = bar.x + bar.w;
-
-        items.push(Item::line(right, y, right, bottom, 1.0, Color::Ink));
-        items.push(Item::Text {
-            x: r(bar.x + 3.0),
-            y: r(y - 9.0),
-            s: (index + 1).to_string(),
-            size: 10.0,
-            font: Font::Text,
-            align: Align::Left,
-            knockout: false,
-            c: if invalid { Color::Error } else { Color::Muted },
-        });
-        if invalid {
-            let mark_y = bottom + BELOW_STAFF - 12.0;
-            items.push(Item::rect(
-                bar.x + 4.0,
-                mark_y,
-                bar.w - 8.0,
-                2.0,
-                Color::Error,
-            ));
-        }
-
-        if let Some(ts) = measured.time_signature {
-            let digits = ts.numerator.max(ts.denominator).to_string().len();
-            let x = bar.x + BAR_PAD_LEFT + digits as f64 * TIME_SIG_DIGIT_WIDTH / 2.0;
-            let size = (staff_height * 0.8).clamp(28.0, 60.0);
-            for (number, at) in [(ts.numerator, 0.25), (ts.denominator, 0.75)] {
-                let glyphs: String = number
-                    .to_string()
-                    .bytes()
-                    .filter_map(|d| char::from_u32(TIME_SIG_0 + u32::from(d - b'0')))
-                    .collect();
-                items.push(Item::text(
-                    x,
-                    y + staff_height * at,
-                    glyphs,
-                    size,
-                    Font::Music,
-                ));
-            }
-        }
-
+        let xs = &self.xs[index];
         for (i, beat) in beats.iter().enumerate() {
-            let x = bar.beats[i];
-            if beat.is_rest() {
+            let x = xs[i];
+            if beat.is_rest() && rhythm && self.strings {
                 let glyph = char::from_u32(REST_WHOLE + beat.duration.value as u32).unwrap_or(' ');
-                let middle = y + staff_height / 2.0;
+                let middle = self.y + self.staff_height / 2.0;
                 items.push(Item::text(x, middle, glyph, REST_SIZE, Font::Music).knockout());
                 for dot in 0..beat.duration.dots.min(2) {
                     items.push(Item::Dot {
@@ -468,8 +331,10 @@ impl System<'_> {
                     });
                 }
             }
-            for note in &beat.notes {
-                self.draw_note(index, i, note, items);
+            if self.strings {
+                for note in &beat.notes {
+                    self.draw_note(index, i, note, items);
+                }
             }
             self.draw_beat_marks(index, i, items);
         }
@@ -487,33 +352,29 @@ impl System<'_> {
             |n| n.effects.let_ring,
             items,
         );
-
-        draw_rhythm(
-            beats,
-            &bar.beats,
-            self.score.master_bars[index].time_signature,
-            bottom,
-            items,
-        );
+        if rhythm && self.strings {
+            let bottom = self.y + self.staff_height;
+            draw_rhythm(beats, xs, time_signature, bottom, items);
+        }
     }
 
     /// Draws a note's fret number and the markings tied to its string: ties, slurs, slides
     /// and bends.
     fn draw_note(&self, bar_index: usize, beat: usize, note: &Note, items: &mut Vec<Item>) {
         let bar = &self.bars[bar_index];
-        let x = bar.beats[beat];
+        let x = self.xs[bar_index][beat];
         let y = self.y + f64::from(note.string) * STRING_SPACING;
         let half = half_width(note);
         let effects = &note.effects;
-        items.push(Item::text(x, y, fret_label(note), FRET_SIZE, Font::Fret).knockout());
+        let label = Item::text(x, y, fret_label(note), FRET_SIZE, Font::Fret);
+        items.push(label.knockout().colored(self.ink));
 
         if note.tied {
             // Tie back to the previous beat, or to the start of the line.
             let from = match beat.checked_sub(1) {
-                Some(previous) => bar.beats[previous],
+                Some(previous) => self.xs[bar_index][previous],
                 None if bar_index > self.first => {
-                    let previous = &self.bars[bar_index - 1];
-                    previous.beats.last().copied().unwrap_or(bar.x)
+                    (self.xs[bar_index - 1].last().copied()).unwrap_or(bar.x)
                 }
                 None => bar.x - 6.0,
             };
@@ -673,7 +534,7 @@ impl System<'_> {
     fn draw_beat_marks(&self, bar_index: usize, beat_index: usize, items: &mut Vec<Item>) {
         let beat = &self.beats(bar_index)[beat_index];
         let bar = &self.bars[bar_index];
-        let x = bar.beats[beat_index];
+        let x = self.xs[bar_index][beat_index];
         let lane = |lane: Lane| self.lanes.y(lane, self.y);
         let any = |test: fn(&Note) -> bool| beat.notes.iter().any(test);
 
@@ -750,7 +611,7 @@ impl System<'_> {
                 items.push(Item::text(peak_x, label_y, label, 8.0, Font::Text));
             }
         }
-        if let Some(strum) = beat.effects.strum.filter(|s| *s != Strum::Rasgueado)
+        if let Some(strum) = (beat.effects.strum).filter(|s| self.strings && *s != Strum::Rasgueado)
             && let (Some(top), Some(low)) = (beat.notes.first(), beat.notes.last())
         {
             // An arrow beside the chord. A downstroke runs from the low strings to the
@@ -797,8 +658,55 @@ impl System<'_> {
                 Color::Ink,
             ));
         }
+        if beat.effects.fermata {
+            let y = lane(Lane::Fermata) + 6.0;
+            items.push(Item::text(x, y, FERMATA, 26.0, Font::Music));
+        }
+        if let Some(chord) = &beat.effects.chord {
+            let name = Item::text(x - 4.0, lane(Lane::Chord), chord.as_str(), 13.0, Font::Fret);
+            items.push(left_aligned(name));
+        }
+        if let Some(diagram) = &beat.effects.diagram {
+            draw_diagram(diagram, x - 1.0, lane(Lane::Diagram), items);
+        }
+        let mut changes = Vec::new();
+        if let Some(volume) = beat.effects.volume {
+            changes.push(format!("vol {volume}"));
+        }
+        match beat.effects.pan {
+            Some(0) => changes.push("pan centre".into()),
+            Some(pan @ ..0) => changes.push(format!("pan {} L", pan.unsigned_abs())),
+            Some(pan) => changes.push(format!("pan {pan} R")),
+            None => {}
+        }
+        if !changes.is_empty() {
+            let label = Item::text(
+                x - 4.0,
+                lane(Lane::Mix),
+                changes.join(", "),
+                9.0,
+                Font::Text,
+            );
+            items.push(left_aligned(label).colored(Color::Muted));
+        }
+        if let Some(text) = &beat.effects.text {
+            let words = Item::text(x - 4.0, lane(Lane::Text), text.as_str(), 11.0, Font::Text);
+            items.push(left_aligned(words));
+        }
+        let lyrics_top = self.y
+            + self.staff_height
+            + self.below
+            + if self.lanes.dynamics {
+                DYNAMICS_HEIGHT
+            } else {
+                0.0
+            };
+        for (line, syllable) in beat.effects.lyrics.iter().enumerate() {
+            let y = lyrics_top + (line as f64 + 0.5) * LYRIC_LINE;
+            items.push(Item::text(x, y, syllable.as_str(), 11.0, Font::Text));
+        }
         if let Some(dynamic) = beat.effects.dynamic {
-            let y = self.y + self.staff_height + BELOW_STAFF + 9.0;
+            let y = self.y + self.staff_height + self.below + 9.0;
             let glyph = DYNAMICS[dynamic as usize];
             items.push(Item::text(x, y, glyph, 22.0, Font::Music));
         }
@@ -842,12 +750,11 @@ impl System<'_> {
 
     /// Draws a wedge under each run of beats that share a hairpin, up to `end`, the bar
     /// after the last one on this line.
-    fn draw_hairpins(&self, end: usize, items: &mut Vec<Item>) {
-        let y = self.y + self.staff_height + BELOW_STAFF + 5.0;
+    pub fn draw_hairpins(&self, end: usize, items: &mut Vec<Item>) {
+        let y = self.y + self.staff_height + self.below + 5.0;
         let beats: Vec<(f64, Option<Hairpin>, Option<Dynamic>)> = (self.first..end)
             .flat_map(|bar| {
-                let xs = &self.bars[bar].beats;
-                (self.beats(bar).iter().zip(xs))
+                (self.beats(bar).iter().zip(&self.xs[bar]))
                     .map(|(b, &x)| (x, b.effects.hairpin, b.effects.dynamic))
             })
             .collect();
@@ -912,7 +819,7 @@ impl System<'_> {
                 && self.bars.len() > bar_index + 1
                 && self.beats(bar_index + 1).first().is_some_and(has);
 
-            let first_x = bar.beats[start];
+            let first_x = self.xs[bar_index][start];
             let mut dash = if continued {
                 bar.x
             } else {
@@ -931,7 +838,7 @@ impl System<'_> {
             let stop = if continues {
                 bar.x + bar.w
             } else {
-                bar.beats[end - 1] + 6.0
+                self.xs[bar_index][end - 1] + 6.0
             };
             while dash + 4.0 <= stop {
                 items.push(Item::line(dash, y, dash + 4.0, y, 1.0, Color::Ink));
@@ -1103,6 +1010,8 @@ mod tests {
     use gtr_model::{Bar, Bend, Finger, Grace, Harmonic, MasterBar, Trill, demo_score};
 
     use super::*;
+    use crate::score::{MARGIN_X, layout_track};
+    use crate::{BarStatus, Layout};
 
     fn texts(layout: &Layout) -> Vec<&str> {
         (layout.items.iter())
@@ -1133,9 +1042,9 @@ mod tests {
     fn bars_wrap_and_fill_the_width() {
         let mut score = demo_score();
         for _ in 0..10 {
-            score.master_bars.push(MasterBar {
-                time_signature: TimeSignature::COMMON,
-            });
+            score
+                .master_bars
+                .push(MasterBar::new(TimeSignature::COMMON));
             let bar = score.tracks[0].staves[0].bars[0].clone();
             score.tracks[0].staves[0].bars.push(bar);
         }
@@ -1160,9 +1069,9 @@ mod tests {
     fn empty_and_incomplete_bars_have_a_slot() {
         let mut score = demo_score();
         score.tracks[0].staves[0].bars[0].voices[0].beats.pop();
-        score.master_bars.push(MasterBar {
-            time_signature: TimeSignature::COMMON,
-        });
+        score
+            .master_bars
+            .push(MasterBar::new(TimeSignature::COMMON));
         score.tracks[0].staves[0].bars.push(Bar::empty());
         let layout = layout_track(&score, 0, 1000.0);
         assert_eq!(layout.bars[0].status, BarStatus::Incomplete);

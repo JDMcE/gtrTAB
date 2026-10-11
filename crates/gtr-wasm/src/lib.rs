@@ -3,7 +3,9 @@
 use gtr_audio::Options;
 use gtr_edit::{Editor, Move, Technique};
 use gtr_io::{guitar_pro, native};
-use gtr_model::{NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score};
+use gtr_model::{
+    Instrument, Mix, NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score,
+};
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
 
@@ -14,22 +16,36 @@ pub struct Document {
     import_report: String,
 }
 
-/// Audio rendered for playback, with the times at which each beat sounds.
+/// A passage ready to be played: its tracks are rendered one at a time, each on its own,
+/// so that the player can mix them and change the mix while they sound.
 #[wasm_bindgen]
 pub struct RenderedAudio {
-    samples: Vec<f32>,
+    timeline: gtr_audio::Timeline,
+    sample_rate: u32,
     timeline_json: String,
 }
 
 #[wasm_bindgen]
 impl RenderedAudio {
-    /// Mono samples. Can be taken once; later calls return an empty array.
-    #[wasm_bindgen(js_name = takeSamples)]
-    pub fn take_samples(&mut self) -> Vec<f32> {
-        std::mem::take(&mut self.samples)
+    /// Mono samples of one track, before its volume and pan; empty if it has no notes.
+    #[wasm_bindgen(js_name = renderTrack)]
+    pub fn render_track(&self, track: usize) -> Vec<f32> {
+        gtr_audio::render_channel(&self.timeline, track, self.sample_rate)
     }
 
-    /// JSON `{ beats: [{ bar, beat, time }], duration }`, times in seconds.
+    /// Mono samples of the metronome and count-in; empty if there are none.
+    #[wasm_bindgen(js_name = renderClicks)]
+    pub fn render_clicks(&self) -> Vec<f32> {
+        gtr_audio::render_clicks(&self.timeline, self.sample_rate)
+    }
+
+    #[wasm_bindgen(getter, js_name = trackCount)]
+    pub fn track_count(&self) -> usize {
+        self.timeline.channels.len()
+    }
+
+    /// JSON `{ beats: [{ bar, beat, time }], automation: [{ channel, time, gain, pan }],
+    /// duration }`, times in seconds.
     #[wasm_bindgen(getter, js_name = timelineJson)]
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
@@ -113,15 +129,23 @@ impl Document {
         Ok(serde_json::to_string(&self.editor.state())?)
     }
 
-    /// Display list for the cursor's track, wrapped to `width` pixels.
+    /// Display list for the score, wrapped to `width` pixels. `view_json` holds the
+    /// `notation` and `multitrack` fields of `gtr_layout::View`; the track and voice shown
+    /// are the cursor's.
     #[wasm_bindgen(js_name = layoutJson)]
-    pub fn layout_json(&self, width: f64) -> Result<String, JsError> {
-        let layout =
-            gtr_layout::layout_track(self.editor.score(), self.editor.cursor().track, width);
+    pub fn layout_json(&self, width: f64, view_json: &str) -> Result<String, JsError> {
+        let cursor = self.editor.cursor();
+        let view = gtr_layout::View {
+            track: cursor.track,
+            staff: cursor.staff,
+            voice: cursor.voice,
+            ..serde_json::from_str(view_json)?
+        };
+        let layout = gtr_layout::layout(self.editor.score(), &view, width);
         Ok(serde_json::to_string(&layout)?)
     }
 
-    /// Renders audio for playback. `options_json` holds `gtr_audio::Options` fields.
+    /// Prepares audio for playback. `options_json` holds `gtr_audio::Options` fields.
     #[wasm_bindgen(js_name = renderAudio)]
     pub fn render_audio(
         &self,
@@ -132,11 +156,13 @@ impl Document {
         let timeline =
             gtr_audio::compile(self.editor.score(), self.editor.cursor().track, &options);
         Ok(RenderedAudio {
-            samples: gtr_audio::render(&timeline, sample_rate),
             timeline_json: serde_json::to_string(&serde_json::json!({
                 "beats": timeline.beats,
+                "automation": timeline.automation,
                 "duration": timeline.duration,
             }))?,
+            timeline,
+            sample_rate,
         })
     }
 
@@ -159,11 +185,39 @@ impl Document {
         self.editor.set_track(track);
     }
 
+    /// Switches to another staff of the cursor's track, counted from the top.
+    #[wasm_bindgen(js_name = setStaff)]
+    pub fn set_staff(&mut self, staff: usize) {
+        self.editor.set_staff(staff);
+    }
+
+    /// Switches to another voice of the staff, counted from zero.
+    #[wasm_bindgen(js_name = setVoice)]
+    pub fn set_voice(&mut self, voice: usize) {
+        self.editor.set_voice(voice);
+    }
+
     // --- Editing ---
 
     #[wasm_bindgen(js_name = typeDigit)]
     pub fn type_digit(&mut self, digit: u8, combine: bool) -> Result<(), JsError> {
         Ok(self.editor.type_digit(digit, combine)?)
+    }
+
+    /// Puts a note on a fret under the cursor in one go; on a drum track the fret is the
+    /// General MIDI number of a piece of the kit.
+    #[wasm_bindgen(js_name = setFret)]
+    pub fn set_fret(&mut self, fret: u8) -> Result<(), JsError> {
+        Ok(self.editor.set_fret(fret)?)
+    }
+
+    /// The pieces of the drum kit as JSON `[{ number, name }]`.
+    #[wasm_bindgen(js_name = drumKitJson)]
+    pub fn drum_kit_json() -> String {
+        let kit: Vec<_> = (gtr_model::DRUM_KIT.iter())
+            .map(|p| serde_json::json!({ "number": p.number, "name": p.name }))
+            .collect();
+        serde_json::Value::Array(kit).to_string()
     }
 
     pub fn rest(&mut self) -> Result<(), JsError> {
@@ -269,6 +323,21 @@ impl Document {
         })?)
     }
 
+    /// Sets one shared property of the cursor's bar, such as `"repeat_start"`,
+    /// `"repeat_count"`, `"alternate_endings"`, `"section"`, `"target"`, `"jump"`,
+    /// `"tempo"` or `"feel"`. `value_json` is its JSON, with `null` clearing it.
+    #[wasm_bindgen(js_name = setBarProperty)]
+    pub fn set_bar_property(&mut self, field: &str, value_json: &str) -> Result<(), JsError> {
+        let value = serde_json::from_str(value_json)?;
+        Ok(self.editor.set_bar_property(field, &value)?)
+    }
+
+    /// Sets the key signature from the cursor's bar: `key` sharps, or flats if negative.
+    #[wasm_bindgen(js_name = setKeySignature)]
+    pub fn set_key_signature(&mut self, key: i8) -> Result<(), JsError> {
+        Ok(self.editor.set_key_signature(key)?)
+    }
+
     #[wasm_bindgen(js_name = setTempo)]
     pub fn set_tempo(&mut self, tempo: u32) -> Result<(), JsError> {
         Ok(self.editor.set_tempo(tempo)?)
@@ -280,18 +349,61 @@ impl Document {
         Ok(self.editor.set_tuning(Tuning::new(strings), capo)?)
     }
 
+    /// Sets the title, credits and copyright. `info_json` holds `gtr_model::ScoreInfo`
+    /// fields; the ones left out are cleared.
     #[wasm_bindgen(js_name = setInfo)]
-    pub fn set_info(
+    pub fn set_info(&mut self, info_json: &str) -> Result<(), JsError> {
+        let info: ScoreInfo = serde_json::from_str(info_json)?;
+        Ok(self.editor.set_info(info)?)
+    }
+
+    // --- Tracks ---
+
+    /// Adds an empty track below the cursor's track and moves to it. `instrument` is a
+    /// `gtr_model::Instrument` name such as `"bass"` or `"distortion_guitar"`; `strings`
+    /// are its open-string MIDI pitches from the highest string to the lowest.
+    #[wasm_bindgen(js_name = addTrack)]
+    pub fn add_track(
         &mut self,
-        title: String,
-        artist: String,
-        album: String,
+        name: &str,
+        instrument: &str,
+        strings: Vec<u8>,
+        capo: u8,
     ) -> Result<(), JsError> {
-        Ok(self.editor.set_info(ScoreInfo {
-            title,
-            artist,
-            album,
-        })?)
+        let instrument: Instrument = parse_name(instrument)?;
+        // Without strings the track gets the staves and tunings its instrument usually has.
+        let tuning = (!strings.is_empty()).then(|| (Tuning::new(strings), capo));
+        Ok(self.editor.add_track(name, instrument, tuning)?)
+    }
+
+    #[wasm_bindgen(js_name = removeTrack)]
+    pub fn remove_track(&mut self, track: usize) -> Result<(), JsError> {
+        Ok(self.editor.remove_track(track)?)
+    }
+
+    /// Moves a track to position `to` among the others.
+    #[wasm_bindgen(js_name = moveTrack)]
+    pub fn move_track(&mut self, from: usize, to: usize) -> Result<(), JsError> {
+        Ok(self.editor.move_track(from, to)?)
+    }
+
+    #[wasm_bindgen(js_name = setTrackInfo)]
+    pub fn set_track_info(
+        &mut self,
+        track: usize,
+        name: &str,
+        instrument: &str,
+    ) -> Result<(), JsError> {
+        let instrument: Instrument = parse_name(instrument)?;
+        Ok(self.editor.set_track_info(track, name, instrument)?)
+    }
+
+    /// Sets a track's mixer settings. `mix_json` holds `gtr_model::Mix` fields; the ones
+    /// left out keep their defaults.
+    #[wasm_bindgen(js_name = setMix)]
+    pub fn set_mix(&mut self, track: usize, mix_json: &str) -> Result<(), JsError> {
+        let mix: Mix = serde_json::from_str(mix_json)?;
+        Ok(self.editor.set_mix(track, mix)?)
     }
 
     // --- Clipboard and history ---

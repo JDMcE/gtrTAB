@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 3;
+pub const FORMAT_VERSION: u64 = 4;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -75,6 +75,7 @@ pub fn load(bytes: &[u8]) -> Result<Score, NativeError> {
 /// Upgrades score JSON written by an older format version to the current layout.
 fn migrate(from: u64, score: &mut Value) {
     // Version 2 added note and beat effects as optional fields, so version 1 needs nothing.
+    // Version 4 likewise only added optional fields, for instruments and the mixer.
     if from < 3 {
         // Version 3 stores a bend as a curve instead of a shape and a height.
         for_each_note(score, |note| {

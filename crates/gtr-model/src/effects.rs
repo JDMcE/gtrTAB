@@ -340,6 +340,32 @@ pub enum Hairpin {
     Decrescendo,
 }
 
+/// The fingering of a chord: for each string from the highest to the lowest, the fret it is
+/// stopped at, zero for an open string or -1 for one that is not played.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct ChordDiagram {
+    pub frets: Vec<i8>,
+}
+
+impl ChordDiagram {
+    pub const MAX_FRET: i8 = 36;
+
+    pub fn is_valid(&self) -> bool {
+        (1..=crate::Tuning::MAX_STRINGS).contains(&self.frets.len())
+            && (self.frets.iter()).all(|f| (-1..=ChordDiagram::MAX_FRET).contains(f))
+    }
+
+    /// The fret the diagram's top line stands for: 1 for a chord near the nut, otherwise
+    /// the lowest fret that is stopped.
+    pub fn base_fret(&self) -> i8 {
+        let stopped = || self.frets.iter().copied().filter(|f| *f > 0);
+        match stopped().max() {
+            Some(highest) if highest > 5 => stopped().min().unwrap_or(1),
+            _ => 1,
+        }
+    }
+}
+
 /// Playing techniques attached to a whole beat.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields)]
@@ -362,9 +388,34 @@ pub struct BeatEffects {
     /// The beat is part of a gradual change of loudness.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hairpin: Option<Hairpin>,
+    /// A pause mark over the beat.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fermata: bool,
+    /// The name of the chord from this beat on, such as `Am7`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chord: Option<String>,
+    /// How the chord is fingered, drawn as a diagram above the beat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub diagram: Option<ChordDiagram>,
+    /// The track's volume from this beat on, on the scale of the mixer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub volume: Option<u8>,
+    /// The track's pan from this beat on, on the scale of the mixer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pan: Option<i8>,
+    /// Free text written above the beat.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text: Option<String>,
+    /// The syllable sung on this beat in each line of the lyrics; empty for none.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lyrics: Vec<String>,
 }
 
 impl BeatEffects {
+    /// Longest chord name, text or syllable, in characters.
+    pub const MAX_TEXT: usize = 120;
+    pub const MAX_LYRIC_LINES: usize = 5;
+
     pub fn is_none(&self) -> bool {
         *self == BeatEffects::default()
     }
@@ -376,7 +427,18 @@ impl BeatEffects {
                 NoteValue::Eighth | NoteValue::Sixteenth | NoteValue::ThirtySecond
             )
         });
-        tremolo && (self.whammy.as_ref()).is_none_or(|w| w.is_valid(Bend::WHAMMY_RANGE))
+        let short = |text: &String| text.chars().count() <= BeatEffects::MAX_TEXT;
+        tremolo
+            && (self.whammy.as_ref()).is_none_or(|w| w.is_valid(Bend::WHAMMY_RANGE))
+            && self.chord.as_ref().is_none_or(short)
+            && self.diagram.as_ref().is_none_or(ChordDiagram::is_valid)
+            && self.volume.is_none_or(|v| v <= crate::Mix::MAX_VOLUME)
+            && self
+                .pan
+                .is_none_or(|p| p.unsigned_abs() <= crate::Mix::MAX_PAN.unsigned_abs())
+            && self.text.as_ref().is_none_or(short)
+            && self.lyrics.len() <= BeatEffects::MAX_LYRIC_LINES
+            && self.lyrics.iter().all(short)
     }
 }
 

@@ -3,6 +3,12 @@
 // 24-unit grid so that the three sets sit together.
 
 import {
+  ArrowDown,
+  ArrowUp,
+  Drum,
+  Piano,
+  Timer,
+  Volume2,
   Check,
   ChevronDown,
   ChevronRight,
@@ -19,16 +25,21 @@ import {
   Metronome,
   Monitor,
   Moon,
+  PanelBottom,
   PanelLeft,
   PanelRight,
   Pencil,
+  Type,
   Play,
+  Plus,
   Redo2,
   Save,
   SaveAll,
   Scissors,
+  Settings2,
   Square,
   Sun,
+  Trash2,
   Undo2,
   X,
   ZoomIn,
@@ -92,6 +103,72 @@ export const ICONS = {
   check: { lucide: Check },
   chevronDown: { lucide: ChevronDown },
   chevronRight: { lucide: ChevronRight },
+
+  // Tracks
+  trackPane: { lucide: PanelBottom },
+  addTrack: { lucide: Plus },
+  removeTrack: { lucide: Trash2 },
+  trackSettings: { lucide: Settings2 },
+  moveUp: { lucide: ArrowUp },
+  moveDown: { lucide: ArrowDown },
+  acousticGuitar: { lucide: Guitar },
+  piano: { lucide: Piano },
+  drums: { lucide: Drum },
+  // A solid body with two horns, its neck running up to the right.
+  electricGuitar: svg(
+    '<path d="M21 3l-8.5 8.5"/><path d="M19 2.500l2.5 2.5"/>' +
+      '<path d="M13.5 8.500c-1.2-1.8-3.3-2-4.5-.5-.8 1-.5 2.3-1.7 3-1.5.9-3.8.6-4.7 2.7' +
+      '-1 2.4.6 5.6 3.3 6.6 2.7 1 5.3-.2 6-2.6.4-1.5 0-2.6 1.2-3.6 1.3-1.1 3-.7 ' +
+      '3.6-2.4.5-1.4-.6-2.7-2.3-2.7"/>',
+  ),
+  // The same shape, longer in the neck, with the four tuners along one side.
+  bassGuitar: svg(
+    '<path d="M21.5 2.500L11 13"/>' +
+      `${dot(17, 3.5, 0.9)}${dot(19, 5.5, 0.9)}${dot(20.5, 7.5, 0.9)}${dot(15, 2, 0.9)}` +
+      '<path d="M11.5 10c-1-1.5-2.8-1.5-3.8-.3-.7.9-.4 2-1.5 2.7-1.3.8-3.2.6-3.9 2.5' +
+      '-.8 2.2.7 5 3.1 5.8 2.4.8 4.7-.3 5.3-2.4.3-1.3 0-2.3 1-3.2 1.1-1 2.6-.7 ' +
+      '3.1-2.2.4-1.2-.5-2.4-2-2.4"/>',
+  ),
+  // A small figure-of-eight body.
+  ukulele: svg(
+    '<path d="M20.5 3.500l-7 7"/><path d="M18.5 2.500l3 3"/>' +
+      '<circle cx="7.5" cy="16.5" r="4.8"/><circle cx="12.5" cy="11.5" r="3.2"/>' +
+      dot(8, 16, 1.2),
+  ),
+  // A round drum for a body.
+  banjo: svg(
+    '<path d="M21 3l-7.5 7.5"/><path d="M19 2.500l2.5 2.5"/>' +
+      '<circle cx="9" cy="15" r="6.5"/><circle cx="9" cy="15" r="3.8" stroke-width="1"/>',
+  ),
+
+  // Bar marks and beat text
+  repeatStart: svg(`<path d="M4.5 4v16" stroke-width="3" stroke-linecap="butt"/><path d="M9.5 4v16"/>${dot(14.5, 9, 1.7)}${dot(14.5, 15, 1.7)}`),
+  repeatEnd: svg(`${dot(9.5, 9, 1.7)}${dot(9.5, 15, 1.7)}<path d="M14.5 4v16"/><path d="M19.5 4v16" stroke-width="3" stroke-linecap="butt"/>`),
+  ending: svg(`<path d="M3 20V6h18"/>${letters('1.', 11, 17, 10)}`),
+  section: svg(`<rect x="3.5" y="5.5" width="17" height="13" rx="1.5"/>${letters('A', 12, 16, 11)}`),
+  fermata: glyph(0xe4c0, 30, 19),
+  timer: { lucide: Timer },
+  volumeChange: { lucide: Volume2 },
+  panChange: svg(`<path d="M3 12h18"/><path d="M7 8l-4 4 4 4M17 8l4 4-4 4"/>${dot(12, 12, 2)}`),
+  chordDiagram: svg(
+    '<path d="M6 5v15M12 5v15M18 5v15M6 10h12M6 15h12" stroke-width="1.2"/>' +
+      '<path d="M5 5h14" stroke-width="2.6" stroke-linecap="butt"/>' +
+      dot(12, 7.5, 1.9) + dot(6, 12.5, 1.9),
+  ),
+  chordName: svg(letters('Am', 12, 16.5, 12)),
+  beatText: { lucide: Type },
+  lyrics: svg(`${letters('la', 8, 12, 10)}<path d="M3 17h7M13 17h8M14 9h7" stroke-width="1.4"/>`),
+
+  // Voices and views
+  voice1: svg(`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/>${letters('1', 12, 16.5, 13)}`),
+  voice2: svg(`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/>${letters('2', 12, 16.5, 13)}`),
+  voice3: svg(`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/>${letters('3', 12, 16.5, 13)}`),
+  voice4: svg(`<rect x="3.5" y="3.5" width="17" height="17" rx="3"/>${letters('4', 12, 16.5, 13)}`),
+  keySignature: svg(
+    `<text x="7.5" y="13" text-anchor="middle" font-size="26" font-family="Bravura" ${FILL}>\ue262</text>` +
+      `<text x="16.5" y="17.5" text-anchor="middle" font-size="26" font-family="Bravura" ${FILL}>\ue262</text>`,
+  ),
+  multitrack: svg('<path d="M3 5h18M3 8h18M3 11h18"/><path d="M3 14.5h18M3 17.5h18M3 20.5h18" stroke-width="1.1"/>'),
 
   // Note values, rests and ornaments (Bravura)
   whole: glyph(0xe1d2, 32, 13),

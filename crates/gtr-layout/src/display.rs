@@ -1,13 +1,16 @@
 use serde::Serialize;
 
-/// A laid-out track. Coordinates are in pixels at 100% zoom, origin top left.
+/// A laid-out score. Coordinates are in pixels at 100% zoom, origin top left.
 #[derive(Debug, Clone, Serialize)]
 pub struct Layout {
     pub width: f64,
     pub height: f64,
     /// Vertical distance between adjacent string lines.
     pub string_spacing: f64,
+    /// Strings of the track being edited.
     pub string_count: usize,
+    /// Whether tab staves are shown, which is where the cursor picks out a string.
+    pub tab: bool,
     pub items: Vec<Item>,
     pub systems: Vec<SystemBox>,
     /// One entry per bar of the score.
@@ -19,9 +22,29 @@ pub struct Layout {
 pub struct SystemBox {
     /// Top of the system including the space reserved above the staff.
     pub top: f64,
-    /// Y of the first (highest) string line.
+    /// Y of the first (highest) string line of the track being edited, or of the top line
+    /// of its notation when no tab is shown.
     pub y: f64,
     pub bottom: f64,
+    /// Top and bottom staff lines of the track being edited, across all its staves.
+    pub cursor_top: f64,
+    pub cursor_bottom: f64,
+    /// The tracks shown on this line, from the top.
+    pub rows: Vec<RowBox>,
+}
+
+/// The space one track takes on a line.
+#[derive(Debug, Clone, Serialize)]
+pub struct RowBox {
+    pub track: usize,
+    /// Which of the track's staves this is, counted from the top.
+    pub staff: usize,
+    pub top: f64,
+    pub bottom: f64,
+    /// Y of the track's first string line, or of the top line of its notation.
+    pub y: f64,
+    /// Number of string lines shown; zero without a tab staff.
+    pub strings: usize,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -70,6 +93,7 @@ pub enum Font {
 pub enum Align {
     Left,
     Center,
+    Right,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -163,6 +187,25 @@ impl Item {
         }
     }
 
+    /// Moves the item down the page.
+    pub(crate) fn shift_y(&mut self, by: f64) {
+        match self {
+            Item::Line { y1, y2, .. } => {
+                *y1 = r(*y1 + by);
+                *y2 = r(*y2 + by);
+            }
+            Item::Curve { y1, cy, y2, .. } => {
+                *y1 = r(*y1 + by);
+                *cy = r(*cy + by);
+                *y2 = r(*y2 + by);
+            }
+            Item::Rect { y, .. }
+            | Item::Dot { y, .. }
+            | Item::Arc { y, .. }
+            | Item::Text { y, .. } => *y = r(*y + by),
+        }
+    }
+
     /// Makes a text item erase what is behind it.
     pub(crate) fn knockout(mut self) -> Item {
         if let Item::Text { knockout, .. } = &mut self {
@@ -172,7 +215,7 @@ impl Item {
     }
 
     pub(crate) fn colored(mut self, color: Color) -> Item {
-        if let Item::Text { c, .. } = &mut self {
+        if let Item::Text { c, .. } | Item::Line { c, .. } | Item::Rect { c, .. } = &mut self {
             *c = color;
         }
         self
