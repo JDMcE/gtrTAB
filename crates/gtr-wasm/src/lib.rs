@@ -16,36 +16,22 @@ pub struct Document {
     import_report: String,
 }
 
-/// A passage ready to be played: its tracks are rendered one at a time, each on its own,
-/// so that the player can mix them and change the mix while they sound.
+/// A passage ready to be played.
 #[wasm_bindgen]
-pub struct RenderedAudio {
-    timeline: gtr_audio::Timeline,
-    sample_rate: u32,
+pub struct Passage {
+    events: Vec<u8>,
     timeline_json: String,
 }
 
 #[wasm_bindgen]
-impl RenderedAudio {
-    /// Mono samples of one track, before its volume and pan; empty if it has no notes.
-    #[wasm_bindgen(js_name = renderTrack)]
-    pub fn render_track(&self, track: usize) -> Vec<f32> {
-        gtr_audio::render_channel(&self.timeline, track, self.sample_rate)
+impl Passage {
+    /// The passage as `gtr_audio::Timeline` bytes, for the synth in the AudioWorklet.
+    #[wasm_bindgen(getter)]
+    pub fn events(&self) -> Vec<u8> {
+        self.events.clone()
     }
 
-    /// Mono samples of the metronome and count-in; empty if there are none.
-    #[wasm_bindgen(js_name = renderClicks)]
-    pub fn render_clicks(&self) -> Vec<f32> {
-        gtr_audio::render_clicks(&self.timeline, self.sample_rate)
-    }
-
-    #[wasm_bindgen(getter, js_name = trackCount)]
-    pub fn track_count(&self) -> usize {
-        self.timeline.channels.len()
-    }
-
-    /// JSON `{ beats: [{ bar, beat, time }], automation: [{ channel, time, gain, pan }],
-    /// duration }`, times in seconds.
+    /// JSON `{ beats: [{ bar, beat, time }], duration }`, times in seconds.
     #[wasm_bindgen(getter, js_name = timelineJson)]
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
@@ -145,24 +131,19 @@ impl Document {
         Ok(serde_json::to_string(&layout)?)
     }
 
-    /// Prepares audio for playback. `options_json` holds `gtr_audio::Options` fields.
-    #[wasm_bindgen(js_name = renderAudio)]
-    pub fn render_audio(
-        &self,
-        options_json: &str,
-        sample_rate: u32,
-    ) -> Result<RenderedAudio, JsError> {
+    /// Compiles the score to the events the synth plays. `options_json` holds
+    /// `gtr_audio::Options` fields; `follow` is the track whose beats move the playback
+    /// cursor.
+    #[wasm_bindgen(js_name = compileAudio)]
+    pub fn compile_audio(&self, options_json: &str, follow: usize) -> Result<Passage, JsError> {
         let options: Options = serde_json::from_str(options_json)?;
-        let timeline =
-            gtr_audio::compile(self.editor.score(), self.editor.cursor().track, &options);
-        Ok(RenderedAudio {
+        let timeline = gtr_audio::compile(self.editor.score(), follow, &options);
+        Ok(Passage {
             timeline_json: serde_json::to_string(&serde_json::json!({
                 "beats": timeline.beats,
-                "automation": timeline.automation,
                 "duration": timeline.duration,
             }))?,
-            timeline,
-            sample_rate,
+            events: timeline.to_bytes(),
         })
     }
 
@@ -178,6 +159,12 @@ impl Document {
     #[wasm_bindgen(js_name = setCursor)]
     pub fn set_cursor(&mut self, bar: usize, beat: usize, string: u8, extend: bool) {
         self.editor.set_cursor(bar, beat, string, extend);
+    }
+
+    /// Moves the cursor to the start of a bar, staying on its string or pitch.
+    #[wasm_bindgen(js_name = goToBar)]
+    pub fn go_to_bar(&mut self, bar: usize) {
+        self.editor.go_to_bar(bar);
     }
 
     #[wasm_bindgen(js_name = setTrack)]
@@ -211,13 +198,38 @@ impl Document {
         Ok(self.editor.set_fret(fret)?)
     }
 
-    /// The pieces of the drum kit as JSON `[{ number, name }]`.
+    /// The pieces of the standard drum kit as JSON: `gtr_model::KitPiece` values.
     #[wasm_bindgen(js_name = drumKitJson)]
-    pub fn drum_kit_json() -> String {
-        let kit: Vec<_> = (gtr_model::DRUM_KIT.iter())
-            .map(|p| serde_json::json!({ "number": p.number, "name": p.name }))
-            .collect();
-        serde_json::Value::Array(kit).to_string()
+    pub fn drum_kit_json() -> Result<String, JsError> {
+        Ok(serde_json::to_string(&gtr_model::standard_kit())?)
+    }
+
+    /// Gives a drum track a kit of its own. `kit_json` holds `gtr_model::KitPiece` values;
+    /// an empty list gives the standard kit back.
+    #[wasm_bindgen(js_name = setDrumKit)]
+    pub fn set_drum_kit(&mut self, track: usize, kit_json: &str) -> Result<(), JsError> {
+        let kit: Vec<gtr_model::KitPiece> = serde_json::from_str(kit_json)?;
+        Ok(self.editor.set_kit(track, kit)?)
+    }
+
+    /// On a staff without strings, enters the note named by `letter`, from 0 for C to 6
+    /// for B, in the octave nearest the cursor.
+    #[wasm_bindgen(js_name = enterLetter)]
+    pub fn enter_letter(&mut self, letter: u8) -> Result<(), JsError> {
+        Ok(self.editor.enter_letter(letter)?)
+    }
+
+    /// On a staff without strings, puts a note at the cursor's pitch.
+    #[wasm_bindgen(js_name = enterNote)]
+    pub fn enter_note(&mut self) -> Result<(), JsError> {
+        Ok(self.editor.enter_note()?)
+    }
+
+    /// On a staff without strings, moves the note under the cursor, or just the cursor,
+    /// by `semitones`.
+    #[wasm_bindgen(js_name = shiftPitch)]
+    pub fn shift_pitch(&mut self, semitones: i8) -> Result<(), JsError> {
+        Ok(self.editor.shift_pitch(semitones)?)
     }
 
     pub fn rest(&mut self) -> Result<(), JsError> {
@@ -336,6 +348,12 @@ impl Document {
     #[wasm_bindgen(js_name = setKeySignature)]
     pub fn set_key_signature(&mut self, key: i8) -> Result<(), JsError> {
         Ok(self.editor.set_key_signature(key)?)
+    }
+
+    /// Changes the tempo from the cursor's beat on; zero takes away the change there.
+    #[wasm_bindgen(js_name = setTempoChange)]
+    pub fn set_tempo_change(&mut self, tempo: u32) -> Result<(), JsError> {
+        Ok(self.editor.set_tempo_change((tempo > 0).then_some(tempo))?)
     }
 
     #[wasm_bindgen(js_name = setTempo)]

@@ -79,6 +79,8 @@ const LANES: [(Lane, f64); 15] = [
 /// Height a chord diagram takes: five frets and the open-string marks above them.
 const DIAGRAM_HEIGHT: f64 = 52.0;
 const DIAGRAM_STRING_GAP: f64 = 5.5;
+/// Distance between one grace note and the next.
+pub(crate) const GRACE_STEP: f64 = 9.0;
 const DIAGRAM_FRET_GAP: f64 = 7.0;
 /// Frets a chord diagram shows.
 const DIAGRAM_FRETS: i8 = 5;
@@ -466,13 +468,21 @@ impl System<'_> {
             None => {}
         }
 
-        if let Some(grace) = effects.grace {
-            let grace_x = x - half - 8.0;
-            let label = Item::text(grace_x, y, grace.fret.to_string(), 8.5, Font::Fret);
-            items.push(label.knockout());
-            if grace.hammer {
+        if let Some(grace) = &effects.grace {
+            // Small numbers to the left of the note, the last of them nearest to it, each
+            // on its own string.
+            let count = grace.notes.len();
+            let grace_x = |g: usize| x - half - 8.0 - GRACE_STEP * (count - 1 - g) as f64;
+            for (g, grace_note) in grace.notes.iter().enumerate() {
+                let grace_y = self.y + f64::from(grace_note.string) * STRING_SPACING;
+                let fret = grace_note.fret.to_string();
+                let label = Item::text(grace_x(g), grace_y, fret, 8.5, Font::Fret);
+                items.push(label.knockout());
+            }
+            let joined = grace.notes.last().is_some_and(|g| g.string == note.string);
+            if grace.hammer && joined {
                 items.push(Item::Arc {
-                    x1: r(grace_x),
+                    x1: r(grace_x(count - 1)),
                     x2: r(x - 1.0),
                     y: r(y - 7.0),
                     h: 3.0,
@@ -1123,11 +1133,8 @@ mod tests {
             fret: 4,
             speed: NoteValue::Sixteenth,
         });
-        beats[7].notes[0].effects.grace = Some(Grace {
-            fret: 9,
-            on_beat: false,
-            hammer: true,
-        });
+        let string = beats[7].notes[0].string;
+        beats[7].notes[0].effects.grace = Some(Grace::single(string, 9, false, true));
         beats[7].notes[0].effects.left_finger = Some(Finger::Ring);
         beats[7].notes[0].effects.right_finger = Some(Finger::Middle);
         let layout = layout_track(&score, 0, 1000.0);

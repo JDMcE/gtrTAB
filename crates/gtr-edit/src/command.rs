@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, Instrument, MasterBar, Mix, Note, Score, ScoreInfo, Staff,
-    TimeSignature, Track, Tuning, Voice,
+    Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Score, ScoreInfo,
+    Staff, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -90,6 +90,12 @@ pub enum Command {
         index: usize,
         track: Track,
     },
+    /// Puts another track in a track's place, as when its instrument changes to one whose
+    /// staves are of another kind.
+    ReplaceTrack {
+        index: usize,
+        track: Track,
+    },
     /// Removes a track. The last remaining track cannot be removed.
     RemoveTrack {
         index: usize,
@@ -107,6 +113,11 @@ pub enum Command {
     SetMix {
         track: usize,
         mix: Mix,
+    },
+    /// Gives a drum track a kit of its own, or with an empty one the standard kit back.
+    SetKit {
+        track: usize,
+        kit: Vec<KitPiece>,
     },
     /// Applies several commands as one undo step. If one fails, none are applied.
     Batch(Vec<Command>),
@@ -147,12 +158,16 @@ pub enum EditError {
     InvalidEffect,
     #[error("fret is out of range")]
     FretOutOfRange,
+    #[error("this staff has no frets: enter notes by name, with the letters A to G")]
+    NoFrets,
     #[error("a score needs at least one bar")]
     LastBar,
     #[error("a score needs at least one track")]
     LastTrack,
     #[error("the track does not fit the score")]
     InvalidTrack,
+    #[error("a drum kit cannot have a number twice, or a piece that far from the staff")]
+    InvalidKit,
     #[error("volume or pan is out of range")]
     InvalidMix,
 }
@@ -176,8 +191,12 @@ impl Command {
     pub fn apply(self, score: &mut Score) -> Result<Command, EditError> {
         match self {
             Command::PutNote { at, note } => {
-                if usize::from(note.string) >= staff(score, &at)?.tuning.strings.len() {
+                let staff = staff(score, &at)?;
+                if usize::from(note.string) >= staff.places() {
                     return Err(EditError::StringOutOfRange);
+                }
+                if staff.is_pitched() && note.fret != 0 {
+                    return Err(EditError::NoFrets);
                 }
                 if !note.effects.is_valid() {
                     return Err(EditError::InvalidEffect);
@@ -208,7 +227,7 @@ impl Command {
                 })
             }
             Command::InsertBeat { at, beat } => {
-                if !beat.is_valid_for(staff(score, &at)?.tuning.strings.len()) {
+                if !staff(score, &at)?.holds(&beat) {
                     return Err(EditError::InvalidBeat);
                 }
                 let beats = &mut voice_mut(score, &at)?.beats;
@@ -369,6 +388,11 @@ impl Command {
                     .get_mut(track)
                     .and_then(|t| t.staves.get_mut(staff))
                     .ok_or(EditError::InvalidLocation)?;
+                // A staff without strings is not given any this way: its notes are
+                // pitches, which have to be put on the strings (see `ReplaceTrack`).
+                if target.is_pitched() {
+                    return Err(EditError::InvalidTuning);
+                }
                 let fits = target
                     .bars
                     .iter()
@@ -392,24 +416,21 @@ impl Command {
                 if index > score.tracks.len() {
                     return Err(EditError::InvalidLocation);
                 }
-                let bar_count = score.master_bars.len();
-                let fits = !track.staves.is_empty()
-                    && track.mix.is_valid()
-                    && track.staves.iter().all(|s| {
-                        let string_count = s.tuning.strings.len();
-                        (1..=Tuning::MAX_STRINGS).contains(&string_count)
-                            && s.bars.len() == bar_count
-                            && s.bars.iter().all(|b| {
-                                !b.voices.is_empty()
-                                    && (b.voices.iter().flat_map(|v| &v.beats))
-                                        .all(|beat| beat.is_valid_for(string_count))
-                            })
-                    });
-                if !fits {
+                if !track_fits(score, &track) {
                     return Err(EditError::InvalidTrack);
                 }
                 score.tracks.insert(index, track);
                 Ok(Command::RemoveTrack { index })
+            }
+            Command::ReplaceTrack { index, track } => {
+                if !track_fits(score, &track) {
+                    return Err(EditError::InvalidTrack);
+                }
+                let target = (score.tracks.get_mut(index)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::ReplaceTrack {
+                    index,
+                    track: std::mem::replace(target, track),
+                })
             }
             Command::RemoveTrack { index } => {
                 if index >= score.tracks.len() {
@@ -453,6 +474,16 @@ impl Command {
                     mix: std::mem::replace(&mut target.mix, mix),
                 })
             }
+            Command::SetKit { track, kit } => {
+                if !gtr_model::kit_is_valid(&kit) {
+                    return Err(EditError::InvalidKit);
+                }
+                let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                Ok(Command::SetKit {
+                    track,
+                    kit: std::mem::replace(&mut target.kit, kit),
+                })
+            }
             Command::Batch(commands) => {
                 let mut inverses = Vec::with_capacity(commands.len());
                 for command in commands {
@@ -475,6 +506,24 @@ impl Command {
     }
 }
 
+/// Whether a track can be part of the score: it has staves, each with a bar for every bar
+/// of the score and nothing in them that its strings, or its lack of them, cannot hold.
+fn track_fits(score: &Score, track: &Track) -> bool {
+    let bar_count = score.master_bars.len();
+    !track.staves.is_empty()
+        && track.mix.is_valid()
+        && gtr_model::kit_is_valid(&track.kit)
+        && track.staves.iter().all(|s| {
+            s.tuning.strings.len() <= Tuning::MAX_STRINGS
+                && s.bars.len() == bar_count
+                && s.bars.iter().all(|b| {
+                    !b.voices.is_empty()
+                        && b.voices.len() <= Bar::MAX_VOICES
+                        && (b.voices.iter().flat_map(|v| &v.beats)).all(|beat| s.holds(beat))
+                })
+        })
+}
+
 fn check_bars(score: &Score, bars: &[Vec<Bar>]) -> Result<(), EditError> {
     if bars.len() != score.tracks.len() {
         return Err(EditError::BarShapeMismatch);
@@ -484,10 +533,9 @@ fn check_bars(score: &Score, bars: &[Vec<Bar>]) -> Result<(), EditError> {
             return Err(EditError::BarShapeMismatch);
         }
         for (staff, bar) in track.staves.iter().zip(track_bars) {
-            let string_count = staff.tuning.strings.len();
             let valid = !bar.voices.is_empty()
                 && bar.voices.len() <= Bar::MAX_VOICES
-                && (bar.voices.iter().flat_map(|v| &v.beats)).all(|b| b.is_valid_for(string_count));
+                && (bar.voices.iter().flat_map(|v| &v.beats)).all(|b| staff.holds(b));
             if !valid {
                 return Err(EditError::InvalidBeat);
             }

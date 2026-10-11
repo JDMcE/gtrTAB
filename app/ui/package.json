@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "wasm": "wasm-pack build ../../crates/gtr-wasm --target web --out-dir ../../app/ui/src/wasm",
-    "dev": "npm run wasm -- --dev && vite",
-    "build": "npm run wasm && vite build",
+    "worklet": "node scripts/build-worklet.mjs",
+    "soundfont": "node scripts/fetch-soundfont.mjs",
+    "dev": "npm run wasm -- --dev && npm run worklet && vite",
+    "build": "npm run wasm && npm run worklet && vite build",
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },

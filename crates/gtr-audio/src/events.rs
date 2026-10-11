@@ -1,6 +1,6 @@
 use gtr_model::{
-    Accent, Beat, Bend, Dynamic, Feel, Hairpin, Harmonic, Instrument, Note, Rational, Score, Slap,
-    Slide, Staff, Strum, Vibrato, play_order,
+    Accent, BarTiming, Beat, Bend, Dynamic, Hairpin, Harmonic, Instrument, Note, Rational, Score,
+    Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,8 @@ pub struct Options {
     /// The staff and voice of the followed track whose beats move the playback cursor.
     pub staff: usize,
     pub voice: usize,
+    /// Play the repeats again after a D.C. or D.S., instead of passing through them.
+    pub replay_repeats: bool,
 }
 
 impl Default for Options {
@@ -31,6 +33,7 @@ impl Default for Options {
             speed: 1.0,
             staff: 0,
             voice: 0,
+            replay_repeats: false,
         }
     }
 }
@@ -47,10 +50,11 @@ pub enum Tone {
 }
 
 /// The character of a track's sound.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Timbre {
-    /// Bright, long-ringing steel strings. Also stands in for banjo and mandolin.
+    /// Bright, long-ringing steel strings.
+    #[default]
     Steel,
     /// Softer attack and a shorter ring.
     Nylon,
@@ -62,13 +66,22 @@ pub enum Timbre {
     Piano,
     /// Each note is a piece of the drum kit, chosen by its pitch.
     Drums,
+    /// Nylon strings on a small body: soft, and soon over.
+    Ukulele,
+    /// A skin for a soundboard: a hard, bright attack that dies at once.
+    Banjo,
+    /// Pairs of short steel strings: bright, with little sustain.
+    Mandolin,
 }
 
 impl Timbre {
     pub fn of(instrument: Instrument) -> Timbre {
         match instrument {
-            Instrument::SteelGuitar | Instrument::Banjo | Instrument::Mandolin => Timbre::Steel,
-            Instrument::NylonGuitar | Instrument::Ukulele => Timbre::Nylon,
+            Instrument::SteelGuitar => Timbre::Steel,
+            Instrument::NylonGuitar => Timbre::Nylon,
+            Instrument::Ukulele => Timbre::Ukulele,
+            Instrument::Banjo => Timbre::Banjo,
+            Instrument::Mandolin => Timbre::Mandolin,
             Instrument::CleanGuitar => Timbre::Clean,
             Instrument::OverdriveGuitar => Timbre::Overdrive,
             Instrument::DistortionGuitar => Timbre::Distortion,
@@ -76,6 +89,34 @@ impl Timbre {
             Instrument::Piano => Timbre::Piano,
             Instrument::Drums => Timbre::Drums,
         }
+    }
+
+    /// How much louder than a bank has it this sound is played from samples. A driven
+    /// guitar is recorded no louder than a clean one, but in a band it is the loud one, as
+    /// its model is.
+    pub fn sample_trim(self) -> f32 {
+        match self {
+            Timbre::Distortion => 2.5,
+            Timbre::Overdrive => 1.3,
+            _ => 1.0,
+        }
+    }
+
+    /// Where a General MIDI SoundFont keeps this sound, as a bank and a program, if it has
+    /// it at all: General MIDI has no ukulele and no mandolin, which are always modelled.
+    pub fn preset(self) -> Option<(u16, u16)> {
+        Some(match self {
+            Timbre::Steel => (0, 25),
+            Timbre::Nylon => (0, 24),
+            Timbre::Clean => (0, 27),
+            Timbre::Overdrive => (0, 29),
+            Timbre::Distortion => (0, 30),
+            Timbre::Bass => (0, 33),
+            Timbre::Piano => (0, 0),
+            Timbre::Banjo => (0, 105),
+            Timbre::Drums => (crate::soundfont::DRUM_BANK, 0),
+            Timbre::Ukulele | Timbre::Mandolin => return None,
+        })
     }
 }
 
@@ -97,7 +138,7 @@ impl Default for Channel {
             audible: true,
             gain: 1.0,
             pan: 0.0,
-            timbre: Timbre::Steel,
+            timbre: Timbre::default(),
         }
     }
 }
@@ -149,7 +190,8 @@ pub struct Click {
 }
 
 /// When a beat of the followed track sounds, for moving the playback cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct BeatTime {
     pub bar: usize,
     pub beat: usize,
@@ -169,7 +211,7 @@ pub struct Automation {
     pub pan: Option<f32>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Timeline {
     /// One per track of the score.
     pub channels: Vec<Channel>,
@@ -190,40 +232,14 @@ const GRACE_LENGTH: f64 = 0.07;
 /// Seconds between strings in a quick strum.
 const BRUSH_STEP: f64 = 0.012;
 
-/// Stretches a position within a bar for a swing feel: of each pair of short notes, the
-/// first takes two thirds of the time and the second one third.
-fn swing(feel: Feel, position: Rational) -> Rational {
-    let unit = match feel {
-        Feel::Straight => return position,
-        Feel::SwingEighths => Rational::new(1, 4),
-        Feel::SwingSixteenths => Rational::new(1, 8),
-    };
-    let start = (position / unit).floor() * unit;
-    let within = position - start;
-    let half = unit / 2;
-    start
-        + if within <= half {
-            within * Rational::new(4, 3)
-        } else {
-            unit * Rational::new(2, 3) + (within - half) * Rational::new(2, 3)
-        }
-}
+/// Seconds between the strokes of a rasgueado, at most.
+const RASGUEADO_STEP: f64 = 0.11;
 
 /// One bar of the passage being played.
 struct Played {
-    /// Index of the bar in the score.
-    bar: usize,
     /// Seconds from the start of playback.
     start: f64,
-    /// Seconds a whole note lasts at this bar's tempo.
-    whole: f64,
-    feel: Feel,
-}
-
-impl Played {
-    fn seconds(&self, length: Rational) -> f64 {
-        *length.numer() as f64 / *length.denom() as f64 * self.whole
-    }
+    timing: BarTiming,
 }
 
 /// Compiles the score to timed events. Every track's notes are included, and its channel
@@ -231,7 +247,7 @@ impl Played {
 /// picks the track whose beats are reported for the playback cursor.
 ///
 /// Playing to the end follows repeats and jumps; playing a range of bars (`to_bar` set)
-/// plays them once, in order.
+/// follows the repeats inside it.
 pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
     let masters = &score.master_bars;
     let bar_count = masters.len();
@@ -243,26 +259,15 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         1.0
     };
     let order: Vec<usize> = match options.to_bar {
-        Some(_) => (from_bar..to_bar).collect(),
+        Some(_) => range_order(masters, from_bar, to_bar),
         None => {
-            let full = play_order(masters);
+            let full = play_order(masters, options.replay_repeats);
             match full.iter().position(|&bar| bar == from_bar) {
                 Some(at) => full[at..].to_vec(),
                 None => (from_bar..to_bar).collect(),
             }
         }
     };
-
-    // The tempo and feel in force at each bar: the last change at or before it.
-    let mut tempo = score.tempo;
-    let mut feel = Feel::Straight;
-    let in_force: Vec<(u32, Feel)> = (masters.iter())
-        .map(|master| {
-            tempo = master.tempo.unwrap_or(tempo);
-            feel = master.feel.unwrap_or(feel);
-            (tempo, feel)
-        })
-        .collect();
 
     let any_solo = score.tracks.iter().any(|t| t.mix.solo);
     let mut timeline = Timeline {
@@ -283,25 +288,30 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
 
     let mut time = 0.0;
     let mut played = Vec::with_capacity(order.len());
-    for (position, &bar) in order.iter().enumerate() {
-        let (tempo, feel) = in_force[bar];
-        let mut this = Played {
-            bar,
-            start: time,
-            whole: 240.0 / (f64::from(tempo.max(1)) * speed),
-            feel,
-        };
-        let signature = masters[bar].time_signature;
+    for (position, timing) in timings(score, &order, speed).into_iter().enumerate() {
+        let signature = masters[timing.bar].time_signature;
+        let pulse = Rational::new(1, signature.denominator.into());
+        let pulses = (0..signature.numerator).map(|i| (pulse * i64::from(i), i == 0));
         if position == 0 && options.count_in {
-            add_clicks(&mut timeline.clicks, &this, signature);
-            time += this.seconds(signature.bar_length());
-            this.start = time;
+            // The count-in keeps strict time, whatever the bar it leads into holds.
+            let whole = timing.whole();
+            timeline
+                .clicks
+                .extend(pulses.clone().map(|(at, accent)| Click {
+                    time: seconds(at, whole),
+                    accent,
+                }));
+            time += seconds(signature.bar_length(), whole);
         }
         if options.metronome {
-            add_clicks(&mut timeline.clicks, &this, signature);
+            timeline.clicks.extend(pulses.map(|(at, accent)| Click {
+                time: time + timing.at(at),
+                accent,
+            }));
         }
-        time += this.seconds(signature.bar_length());
-        played.push(this);
+        let start = time;
+        time += timing.length;
+        played.push(Played { start, timing });
     }
     timeline.duration = time;
 
@@ -326,14 +336,9 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
     timeline
 }
 
-fn add_clicks(clicks: &mut Vec<Click>, bar: &Played, signature: gtr_model::TimeSignature) {
-    let pulse = Rational::new(1, signature.denominator.into());
-    for i in 0..signature.numerator {
-        clicks.push(Click {
-            time: bar.start + bar.seconds(pulse * i64::from(i)),
-            accent: i == 0,
-        });
-    }
+/// Seconds that `length` whole notes last when one lasts `whole` seconds.
+fn seconds(length: Rational, whole: f64) -> f64 {
+    *length.numer() as f64 / *length.denom() as f64 * whole
 }
 
 /// Loudness of each beat of the staff's first voice, per bar, from its dynamic marks and
@@ -393,21 +398,21 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
     let gains = beat_gains(staff);
     // Each voice keeps track of its own ties, slurs and ringing strings.
     let voice_count = staff.bars.iter().map(|b| b.voices.len()).max().unwrap_or(1);
-    let mut states = vec![vec![StringState::default(); staff.tuning.strings.len()]; voice_count];
+    let mut states = vec![vec![StringState::default(); staff.places()]; voice_count];
     for (b, this) in played.iter().enumerate() {
-        let bar = &staff.bars[this.bar];
-        let seconds = |length: Rational| this.seconds(length);
+        let bar = &staff.bars[this.timing.bar];
         for (v, voice) in bar.voices.iter().enumerate() {
             let strings = &mut states[v];
             let mut offset = Rational::from_integer(0);
             for (i, beat) in voice.beats.iter().enumerate() {
-                let from = swing(this.feel, offset);
+                let from = this.timing.seconds(offset);
+                let whole = this.timing.whole_at(offset);
                 offset += beat.duration.length();
-                let time = this.start + seconds(from);
-                let duration = seconds(swing(this.feel, offset) - from);
+                let time = this.start + from;
+                let duration = this.timing.seconds(offset) - from;
                 if followed == Some(v) {
                     timeline.beats.push(BeatTime {
-                        bar: this.bar,
+                        bar: this.timing.bar,
                         beat: i,
                         time,
                     });
@@ -421,15 +426,38 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                             .map(|pan| f32::from(pan) / f32::from(gtr_model::Mix::MAX_PAN)),
                     });
                 }
-                // Tremolo picking re-picks the beat in equal short notes.
-                let picks = match beat.effects.tremolo {
-                    Some(value) => (duration / seconds(value.length())).round().max(1.0) as usize,
-                    None => 1,
+                // When the beat's notes are struck, from its start; for how long; and how
+                // hard. Tremolo picking re-picks the beat in equal short notes, and a
+                // rasgueado strums it with one finger after another, the last the hardest.
+                let hits: Vec<(f64, f64, f32)> = match (beat.effects.tremolo, beat.effects.strum) {
+                    (Some(value), _) => {
+                        let pick = seconds(value.length(), whole);
+                        let picks = (duration / pick).round().max(1.0) as usize;
+                        let length = duration / picks as f64;
+                        (0..picks)
+                            .map(|i| (length * i as f64, length, 1.0))
+                            .collect()
+                    }
+                    (None, Some(Strum::Rasgueado)) => {
+                        let step = (duration / 4.0).min(RASGUEADO_STEP);
+                        (0..4)
+                            .map(|i| {
+                                let length = if i == 3 { duration - step * 3.0 } else { step };
+                                (
+                                    step * f64::from(i),
+                                    length,
+                                    [0.7, 0.75, 0.85, 1.0][i as usize],
+                                )
+                            })
+                            .collect()
+                    }
+                    _ => vec![(0.0, duration, 1.0)],
                 };
-                let pick_length = duration / picks as f64;
+                let pick_length = hits[0].1;
+                let tremolo = beat.effects.tremolo.is_some();
 
                 let gain = match v {
-                    0 => gains[this.bar][i],
+                    0 => gains[this.timing.bar][i],
                     _ => 1.0,
                 } * match beat.effects.slap {
                     Some(Slap::Slap) => 1.3,
@@ -439,11 +467,10 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                 // A strum or arpeggio starts the strings one after another: downwards
                 // means from the lowest string to the highest.
                 let step = match beat.effects.strum {
-                    Some(Strum::BrushDown | Strum::BrushUp) => BRUSH_STEP,
+                    Some(Strum::BrushDown | Strum::BrushUp | Strum::Rasgueado) => BRUSH_STEP,
                     Some(Strum::ArpeggioDown | Strum::ArpeggioUp) => {
                         (duration / (beat.notes.len() + 1) as f64).min(0.06)
                     }
-                    Some(Strum::Rasgueado) => 0.03,
                     None => 0.0,
                 };
                 let upwards =
@@ -457,7 +484,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                             false => beat.notes.len() - 1 - order,
                         } as f64;
                     let string = usize::from(note.string);
-                    let Some(pitch) = staff.tuning.pitch(note.string, note.fret, staff.capo) else {
+                    let Some(pitch) = staff.pitch(note.string, note.fret) else {
                         continue;
                     };
                     let previous = strings[string];
@@ -479,7 +506,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         event.duration = (time - event.time).min(limit);
                     }
 
-                    let next_bar = played.get(b + 1).map(|next| &staff.bars[next.bar]);
+                    let next_bar = played.get(b + 1).map(|next| &staff.bars[next.timing.bar]);
                     let following = following_note(bar, next_bar, v, i, note.string);
                     // Share of this note taken by one note of a trill, if it has one.
                     let trill_step = note.effects.trill.map_or(1.0, |t| {
@@ -488,8 +515,9 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                     });
                     let mut event =
                         note_event(note, staff, pitch, time, pick_length, following, trill_step);
-                    event.soft = previous.legato;
-                    event.velocity *= gain;
+                    // A tapped note is hammered on by the picking hand, not picked.
+                    event.soft = previous.legato || note.effects.tapped;
+                    event.velocity *= gain * hits[0].2;
                     if event.pitch_curve.is_empty()
                         && let Some(whammy) = &beat.effects.whammy
                     {
@@ -497,41 +525,54 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                     }
                     event.time += delay;
                     event.duration = (event.duration - delay).max(event.duration * 0.25);
-                    if let Some(grace) = note.effects.grace {
-                        // A grace note before the beat borrows its time from what came
-                        // before; one on the beat pushes the main note back.
-                        let length = GRACE_LENGTH.min(pick_length / 3.0);
-                        let before = !grace.on_beat && event.time >= length;
-                        let grace_pitch = staff.tuning.pitch(note.string, grace.fret, staff.capo);
-                        let mut ornament = NoteEvent::plain(
-                            if before {
-                                event.time - length
-                            } else {
-                                event.time
-                            },
-                            length,
-                            grace_pitch.unwrap_or(pitch),
-                        );
-                        ornament.velocity = event.velocity;
-                        timeline.notes.push(ornament);
-                        if !before {
-                            event.time += length;
-                            event.duration -= length;
+                    if let Some(grace) = &note.effects.grace {
+                        // Grace notes before the beat borrow their time from what came
+                        // before; on the beat they push the main note back.
+                        let count = grace.notes.len() as f64;
+                        let length = GRACE_LENGTH.min(pick_length / (count + 2.0));
+                        let before = !grace.on_beat && event.time >= length * count;
+                        let first = match before {
+                            true => event.time - length * count,
+                            false => event.time,
+                        };
+                        let mut last_string = None;
+                        for (g, grace_note) in grace.notes.iter().enumerate() {
+                            let grace_pitch = staff.pitch(grace_note.string, grace_note.fret);
+                            let mut ornament = NoteEvent::plain(
+                                first + length * g as f64,
+                                length,
+                                grace_pitch.unwrap_or(pitch),
+                            );
+                            ornament.velocity = event.velocity;
+                            // Only a note on the same string can be hammered into.
+                            ornament.soft = grace.hammer && last_string == Some(grace_note.string);
+                            last_string = Some(grace_note.string);
+                            timeline.notes.push(ornament);
                         }
-                        event.soft |= grace.hammer;
+                        if !before {
+                            event.time += length * count;
+                            event.duration -= length * count;
+                        }
+                        event.soft |= grace.hammer && last_string == Some(note.string);
                     }
-                    for pick in 1..picks {
-                        let mut repeat = event.clone();
-                        repeat.time = time + pick_length * pick as f64;
-                        repeat.soft = false;
-                        timeline.notes.push(repeat);
-                    }
+                    let again: Vec<NoteEvent> = (hits[1..].iter())
+                        .map(|&(at, length, loudness)| NoteEvent {
+                            time: time + at + delay,
+                            duration: (length - delay).max(length * 0.25),
+                            velocity: event.velocity / hits[0].2 * loudness,
+                            soft: false,
+                            ..event.clone()
+                        })
+                        .collect();
                     timeline.notes.push(event);
+                    timeline.notes.extend(again);
+                    // What a tie or the ringing string carries on is the last stroke; the
+                    // picks of a tremolo are too short to carry anything on.
                     let index = timeline.notes.len() - 1;
                     next[string] = StringState {
-                        sounding: (picks == 1).then_some(index),
+                        sounding: (!tremolo).then_some(index),
                         legato: joins_next(note),
-                        ringing: (note.effects.let_ring && picks == 1).then_some(index),
+                        ringing: (note.effects.let_ring && !tremolo).then_some(index),
                     };
                 }
                 // Strings left alone keep ringing; everything else starts afresh.
@@ -614,21 +655,12 @@ fn note_event(
             // A natural harmonic sounds an overtone of the open string, chosen by where
             // the string is touched.
             Harmonic::Natural => {
-                let open = staff
-                    .tuning
-                    .pitch(note.string, 0, staff.capo)
-                    .unwrap_or(fretted);
-                let above = match note.fret % 12 {
-                    0 => 12,
-                    7 => 19,
-                    5 => 24,
-                    4 | 9 => 28,
-                    3 => 31,
-                    _ => 12 + note.fret % 12,
-                };
-                open.saturating_add(above + if note.fret >= 24 { 12 } else { 0 })
+                let open = staff.pitch(note.string, 0).unwrap_or(fretted);
+                open.saturating_add(Harmonic::overtone(note.fret))
             }
-            _ => fretted.saturating_add(12),
+            // The others sound an overtone of the stopped note, chosen by where above it
+            // the string is touched.
+            kind => fretted.saturating_add(kind.interval(effects.harmonic_touch)),
         }
         .min(127);
     }
@@ -693,7 +725,7 @@ mod tests {
         Beat, BendKind, Duration, Grace, Note, NoteEffects, NoteValue, Score, Trill, demo_score,
     };
 
-    use gtr_model::{Jump, MasterBar, Target};
+    use gtr_model::{Feel, MasterBar};
 
     use super::*;
 
@@ -865,58 +897,8 @@ mod tests {
         assert_eq!(times, [0.0, 1.0]);
     }
 
-    fn masters(count: usize) -> Vec<MasterBar> {
-        vec![MasterBar::new(gtr_model::TimeSignature::COMMON); count]
-    }
-
     #[test]
-    fn repeats_and_alternate_endings_are_followed() {
-        // |: 0 | 1 (first time) :| 2 (second time) | 3 |
-        let mut bars = masters(4);
-        bars[0].repeat_start = true;
-        bars[1].repeat_count = 2;
-        bars[1].alternate_endings = 0b01;
-        bars[2].alternate_endings = 0b10;
-        assert_eq!(play_order(&bars), [0, 1, 0, 2, 3]);
-
-        // A repeat with no start goes back to the beginning; three times through.
-        let mut bars = masters(3);
-        bars[1].repeat_count = 3;
-        assert_eq!(play_order(&bars), [0, 1, 0, 1, 0, 1, 2]);
-
-        // Two repeats in a row each go back to their own start.
-        let mut bars = masters(4);
-        bars[1].repeat_count = 2;
-        bars[2].repeat_start = true;
-        bars[3].repeat_count = 2;
-        assert_eq!(play_order(&bars), [0, 1, 0, 1, 2, 3, 2, 3]);
-        assert_eq!(play_order(&masters(3)), [0, 1, 2]);
-    }
-
-    #[test]
-    fn jumps_are_taken_once() {
-        // 0 | segno 1 | 2 to coda | 3 D.S. al Coda | coda 4 | 5
-        let mut bars = masters(6);
-        bars[1].target = Some(Target::Segno);
-        bars[2].jump = Some(Jump::ToCoda);
-        bars[3].jump = Some(Jump::DalSegnoAlCoda);
-        bars[4].target = Some(Target::Coda);
-        assert_eq!(play_order(&bars), [0, 1, 2, 3, 1, 2, 4, 5]);
-
-        // 0 | 1 fine | 2 D.C. al Fine
-        let mut bars = masters(3);
-        bars[1].target = Some(Target::Fine);
-        bars[2].jump = Some(Jump::DaCapoAlFine);
-        assert_eq!(play_order(&bars), [0, 1, 2, 0, 1]);
-
-        // A plain D.C. plays the piece twice and then stops.
-        let mut bars = masters(2);
-        bars[1].jump = Some(Jump::DaCapo);
-        assert_eq!(play_order(&bars), [0, 1, 0, 1]);
-    }
-
-    #[test]
-    fn playback_unrolls_repeats_but_a_range_plays_straight_through() {
+    fn playback_unrolls_repeats_from_the_start_the_cursor_or_in_a_range() {
         let mut score = demo_score();
         score.master_bars[0].repeat_count = 2;
         let t = compile(&score, 0, &Options::default());
@@ -933,12 +915,18 @@ mod tests {
             ..Options::default()
         };
         assert_eq!(compile(&score, 0, &from_second).duration, 2.0);
-        // A selected range ignores the repeat.
+        // A selected range follows the repeats inside it.
         let range = Options {
             to_bar: Some(2),
             ..Options::default()
         };
-        assert_eq!(compile(&score, 0, &range).duration, 4.0);
+        assert_eq!(compile(&score, 0, &range).duration, 6.0);
+        let range = Options {
+            from_bar: 1,
+            to_bar: Some(2),
+            ..Options::default()
+        };
+        assert_eq!(compile(&score, 0, &range).duration, 2.0);
     }
 
     #[test]
@@ -981,7 +969,7 @@ mod tests {
         drums.staves[0].bars[0].voices[0].beats[1].effects.pan = Some(50);
         let mut piano = Track::empty("Piano", Instrument::Piano, 1);
         assert_eq!(piano.staves.len(), 2);
-        piano.staves[1].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(5, 0)])];
+        piano.staves[1].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(28, 0)])];
         score.tracks.push(drums);
         score.tracks.push(piano);
 
@@ -1182,14 +1170,104 @@ mod tests {
     }
 
     #[test]
-    fn grace_notes_and_trills() {
-        let grace = |on_beat| {
-            Some(Grace {
-                fret: 3,
-                on_beat,
-                hammer: true,
-            })
+    fn a_fermata_holds_the_beat_in_every_track() {
+        use gtr_model::Track;
+
+        let mut score = quarters(vec![Note::new(5, 0); 4]);
+        score.tracks[0].staves[0].bars[0].voices[0].beats[1]
+            .effects
+            .fermata = true;
+        let mut bass = Track::empty("Bass", Instrument::Bass, 1);
+        bass.staves[0].bars[0].voices[0].beats = vec![
+            Beat::new(Duration::new(NoteValue::Half), vec![Note::new(3, 0)]),
+            Beat::new(Duration::new(NoteValue::Half), vec![Note::new(3, 2)]),
+        ];
+        score.tracks.push(bass);
+        let options = Options {
+            metronome: true,
+            ..Options::default()
         };
+        let t = compile(&score, 0, &options);
+        // The second beat lasts twice as long, and the bar half a second longer.
+        let times: Vec<f64> = t.beats.iter().map(|b| b.time).collect();
+        assert_eq!(times, [0.0, 0.5, 1.5, 2.0]);
+        assert_eq!(t.duration, 2.5);
+        // The bass, which has no fermata of its own, waits with the guitar.
+        let bass: Vec<(f64, f64)> = (t.notes.iter().filter(|n| n.channel == 1))
+            .map(|n| (n.time, n.duration))
+            .collect();
+        assert_eq!(bass, [(0.0, 1.5), (1.5, 1.0)]);
+        let clicks: Vec<f64> = t.clicks.iter().map(|c| c.time).collect();
+        assert_eq!(clicks, [0.0, 0.5, 1.5, 2.0]);
+    }
+
+    #[test]
+    fn a_rasgueado_is_four_strokes_and_a_tapped_note_is_not_picked() {
+        let mut score = quarters(vec![Note::new(5, 3), with(7, |e| e.tapped = true)]);
+        let beat = first_beat(&mut score);
+        beat.notes = vec![Note::new(4, 5), Note::new(5, 3)];
+        beat.effects.strum = Some(Strum::Rasgueado);
+        let t = compile(&score, 0, &Options::default());
+        let strokes: Vec<&NoteEvent> = t.notes.iter().filter(|n| n.pitch == 43).collect();
+        // One finger after another across the strings, lowest string first, and the last
+        // stroke, the hardest, rings for what is left of the beat.
+        let times: Vec<f64> = strokes.iter().map(|n| n.time).collect();
+        assert_eq!(times, [0.0, 0.11, 0.22, 0.33]);
+        assert!(strokes[0].velocity < strokes[3].velocity);
+        assert_eq!(strokes[3].velocity, 1.0);
+        assert!((strokes[3].duration - 0.17).abs() < 1e-9);
+        let upper: Vec<f64> = (t.notes.iter().filter(|n| n.pitch == 50))
+            .map(|n| n.time)
+            .collect();
+        assert_eq!(upper[0], BRUSH_STEP);
+        assert_eq!(upper.len(), 4);
+
+        let tapped = t.notes.last().unwrap();
+        assert!(tapped.soft && tapped.time == 0.5);
+        assert!(t.notes[..8].iter().all(|n| !n.soft));
+    }
+
+    #[test]
+    fn a_staff_without_strings_plays_its_notes_as_the_pitches_they_are() {
+        use gtr_model::Track;
+
+        let mut score = Score::blank();
+        let mut piano = Track::empty("Piano", Instrument::Piano, 1);
+        let half = Duration::new(NoteValue::Half);
+        // A chord of more notes than a hand has strings to make up, then the top note held.
+        let chord: Vec<Note> = [48, 52, 55, 60, 64, 67, 72].map(|p| Note::new(p, 0)).into();
+        piano.staves[0].bars[0].voices[0].beats = vec![
+            Beat::new(half, chord),
+            Beat::new(
+                half,
+                vec![Note {
+                    tied: true,
+                    ..Note::new(72, 0)
+                }],
+            ),
+        ];
+        score.tracks.push(piano);
+        score.validate().unwrap();
+        let t = compile(&score, 1, &Options::default());
+        let notes: Vec<(u8, f64)> = t.notes.iter().map(|n| (n.pitch, n.duration)).collect();
+        assert_eq!(
+            notes,
+            [
+                (48, 1.0),
+                (52, 1.0),
+                (55, 1.0),
+                (60, 1.0),
+                (64, 1.0),
+                (67, 1.0),
+                (72, 2.0)
+            ]
+        );
+        assert!(t.notes.iter().all(|n| n.channel == 1));
+    }
+
+    #[test]
+    fn grace_notes_and_trills() {
+        let grace = |on_beat| Some(Grace::single(5, 3, on_beat, true));
         let score = quarters(vec![
             Note::new(5, 0),
             with(5, |e| e.grace = grace(false)),
@@ -1215,5 +1293,59 @@ mod tests {
         assert_eq!(trill.len(), 8);
         assert_eq!(trill[1], (0.125, 2.0));
         assert_eq!(trill[3], (0.25, 0.0));
+    }
+
+    #[test]
+    fn several_grace_notes_play_in_turn_on_their_own_strings() {
+        use gtr_model::GraceNote;
+
+        let score = quarters(vec![
+            Note::new(5, 0),
+            with(5, |e| {
+                e.grace = Some(Grace {
+                    notes: vec![
+                        GraceNote { string: 4, fret: 2 },
+                        GraceNote { string: 5, fret: 3 },
+                        GraceNote { string: 5, fret: 4 },
+                    ],
+                    on_beat: false,
+                    hammer: true,
+                })
+            }),
+        ]);
+        let t = compile(&score, 0, &Options::default());
+        let events: Vec<(f64, u8, bool)> = (t.notes[1..].iter())
+            .map(|n| (n.time, n.pitch, n.soft))
+            .collect();
+        // Three notes share the time one would take, ending as the main note starts. The
+        // first is on the next string up; a note is hammered only from one on its string.
+        let step = GRACE_LENGTH;
+        assert_eq!(events[0], (0.5 - step * 3.0, 47, false));
+        assert_eq!(events[1], (0.5 - step * 2.0, 43, false));
+        assert_eq!(events[2], (0.5 - step, 44, true));
+        assert_eq!(events[3], (0.5, 45, true));
+        assert!(t.notes[1..4].iter().all(|n| n.duration == step));
+    }
+
+    #[test]
+    fn harmonics_on_a_stopped_string_sound_the_overtone_touched() {
+        let harmonic = |kind, touch| {
+            with(5, move |e| {
+                e.harmonic = Some(kind);
+                e.harmonic_touch = touch;
+            })
+        };
+        let score = quarters(vec![
+            harmonic(Harmonic::Artificial, None),
+            harmonic(Harmonic::Artificial, Some(7)),
+            harmonic(Harmonic::Tapped, Some(5)),
+            harmonic(Harmonic::Pinch, None),
+        ]);
+        let t = compile(&score, 0, &Options::default());
+        let pitches: Vec<u8> = t.notes.iter().map(|n| n.pitch).collect();
+        // A on the low E string: an octave up, an octave and a fifth, and two octaves,
+        // which is also where a pinch harmonic sounds unless it says otherwise.
+        assert_eq!(pitches, [57, 64, 69, 69]);
+        assert!(t.notes.iter().all(|n| n.tone == Tone::Harmonic));
     }
 }

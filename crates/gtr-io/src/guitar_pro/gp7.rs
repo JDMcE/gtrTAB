@@ -6,9 +6,9 @@ use std::collections::HashMap;
 use std::io::{Cursor, Read};
 
 use gtr_model::{
-    Accent, Beat, BeatEffects, Bend, Duration, Dynamic, Feel, Finger, Grace, Hairpin, Harmonic,
-    Instrument, Jump, MasterBar, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap,
-    Staff, Strum, Target, TimeSignature, Track, Trill, Tuplet, Vibrato, Voice,
+    Accent, Beat, BeatEffects, Bend, Duration, Dynamic, Feel, Finger, Grace, GraceNote, Hairpin,
+    Harmonic, Instrument, Jump, MasterBar, Note, NoteEffects, NoteValue, PickStroke, Score,
+    ScoreInfo, Slap, Staff, Strum, Target, TimeSignature, Track, Trill, Tuplet, Vibrato, Voice,
 };
 use roxmltree::{Document, Node};
 use zip::ZipArchive;
@@ -262,24 +262,37 @@ fn read_voice<'a>(
     skipped: &mut Skipped,
 ) -> Voice {
     let mut beats = Vec::new();
-    let mut graces: Vec<(u8, Grace)> = Vec::new();
+    // Grace notes waiting for the beat they lead into: each with whether it is on the
+    // beat and whether it is hammered.
+    let mut graces: Vec<(GraceNote, bool, bool)> = Vec::new();
     for node in nodes {
         let mut beat = read_beat(node, notes, rhythms, staff, skipped);
         if let Some(kind) = child(node, "GraceNotes") {
             let on_beat = kind.text().map(str::trim) == Some("OnBeat");
             graces.extend(beat.notes.iter().map(|n| {
-                let grace = Grace {
+                let grace = GraceNote {
+                    string: n.string,
                     fret: n.fret,
-                    on_beat,
-                    hammer: n.effects.hammer,
                 };
-                (n.string, grace)
+                (grace, on_beat, n.effects.hammer)
             }));
             continue;
         }
-        for (string, grace) in graces.drain(..) {
-            if let Some(note) = beat.notes.iter_mut().find(|n| n.string == string) {
-                note.effects.grace = Some(grace);
+        for (grace, on_beat, hammer) in graces.drain(..) {
+            // A grace note belongs to the note on its string, or failing that to the
+            // first note of the beat.
+            let at = (beat.notes.iter()).position(|n| n.string == grace.string);
+            let Some(note) = beat.notes.get_mut(at.unwrap_or(0)) else {
+                continue;
+            };
+            let ornament = note.effects.grace.get_or_insert(Grace {
+                notes: Vec::new(),
+                on_beat,
+                hammer: false,
+            });
+            if ornament.notes.len() < Grace::MAX_NOTES {
+                ornament.notes.push(grace);
+                ornament.hammer |= hammer;
             }
         }
         beats.push(beat);
@@ -516,6 +529,12 @@ fn read_note_effects(note: Node) -> NoteEffects {
             "Semi" => Some(Harmonic::Semi),
             _ => None,
         }),
+        harmonic_touch: property(note, "HarmonicType")
+            .filter(|p| matches!(text(*p, "HType"), "Artificial" | "Pinch" | "Tap" | "Semi"))
+            .and_then(|_| property(note, "HarmonicFret"))
+            .and_then(|p| text(p, "HFret").parse::<f32>().ok())
+            .map(|fret| fret.round() as u8)
+            .filter(|fret| (1..=Harmonic::MAX_TOUCH).contains(fret)),
         accent: match accent_bits {
             bits if bits & 0x04 != 0 => Some(Accent::Heavy),
             bits if bits & 0x08 != 0 => Some(Accent::Normal),

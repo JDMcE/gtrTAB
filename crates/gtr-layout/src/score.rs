@@ -1,7 +1,7 @@
 //! Puts a score on the page: breaks it into lines, stacks the staves of each line and has
 //! each staff drawn.
 
-use gtr_model::{Bar, Clef, MasterBar, Score, Staff, Target};
+use gtr_model::{Bar, Clef, MasterBar, Rational, Score, Staff, Target};
 use serde::Deserialize;
 
 use crate::display::r;
@@ -33,7 +33,8 @@ const SEGNO: char = '\u{E047}';
 const CODA: char = '\u{E048}';
 
 /// Which staves a track is shown on.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Notation {
     Tab,
@@ -68,6 +69,12 @@ struct Part<'a> {
     name: &'a str,
     staff: &'a Staff,
     clef: Clef,
+    /// Whether the staff is shown as standard notation, and whether as tab. A staff
+    /// without strings has no tab to show, and gets notation in its place.
+    standard: bool,
+    tab: bool,
+    /// A drum staff's notation with the feet apart from the hands, if any bar needs it.
+    split: Option<notation::Split>,
     spelled: Option<Vec<SpelledBar>>,
     leads: Option<Vec<Vec<Vec<f64>>>>,
 }
@@ -102,9 +109,19 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             let track = &score.tracks[index];
             let staff = &track.staves[staff_index];
             let clef = track.instrument.clef(staff_index);
+            let tab = tab && !staff.is_pitched();
+            let standard = standard || (staff.is_pitched() && !slash);
+            let kit = match clef {
+                Clef::Percussion => track.drum_kit(),
+                _ => Vec::new(),
+            };
+            let split = (standard && clef == Clef::Percussion)
+                .then(|| notation::split_feet(staff, &kit, masters))
+                .flatten();
             let spelled = standard.then(|| {
                 let transposition = track.instrument.written_transposition();
-                notation::spell(staff, clef, transposition, masters)
+                let drawn = split.as_ref().map_or(staff, |s| &s.staff);
+                notation::spell(drawn, clef, transposition, masters, &kit)
             });
             let leads = (spelled.as_ref())
                 .map(|bars| bars.iter().map(notation::accidental_leads).collect());
@@ -115,6 +132,9 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 name: &track.name,
                 staff,
                 clef,
+                standard,
+                tab,
+                split,
                 spelled,
                 leads,
             }
@@ -123,7 +143,12 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
     let edit_row = (parts.iter())
         .position(|p| (p.track, p.index) == (edit_track, edit_staff))
         .unwrap_or(0);
-    let string_count = parts[edit_row].staff.tuning.strings.len();
+    let string_count = parts[edit_row].staff.places();
+    // Whether any staff is in standard notation, which decides what a line starts with.
+    let standard = parts.iter().any(|p| p.standard);
+    let middle_of = |part: &Part| {
+        (part.standard && part.staff.is_pitched()).then(|| notation::middle_line(part.clef))
+    };
 
     let measured: Vec<Measured> = (masters.iter().enumerate())
         .map(|(i, master)| {
@@ -212,7 +237,33 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         let range = first..end;
 
         // Stack the staves of the line, working down the page.
-        let mut cursor = bar_marks(score, &times, &bars, range.clone(), top, &mut items);
+        // Where a moment inside a bar falls across the page: on the beat that starts
+        // there in some staff shown, or failing that as far along the bar as it is through it.
+        let moment_x = |bar: usize, moment: Rational| -> f64 {
+            for (row, part) in parts.iter().enumerate() {
+                for (v, voice) in part.staff.bars[bar].voices.iter().enumerate() {
+                    let mut time = Rational::from_integer(0);
+                    for (i, beat) in voice.beats.iter().enumerate() {
+                        if time == moment {
+                            return positions[row][v][bar][i];
+                        }
+                        time += beat.duration.length();
+                    }
+                }
+            }
+            let through = moment / masters[bar].time_signature.bar_length();
+            let through = *through.numer() as f64 / *through.denom() as f64;
+            r(bars[bar].x + bars[bar].w * through)
+        };
+        let mut cursor = bar_marks(
+            score,
+            &times,
+            &bars,
+            &moment_x,
+            range.clone(),
+            top,
+            &mut items,
+        );
         // Top line of the first staff of a track that has several, for the bracket.
         let mut bracket_top = None;
         let mut rows = Vec::with_capacity(parts.len());
@@ -249,21 +300,22 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             let mut row_lines: Option<(f64, f64)> = None;
             let mut row_y = None;
 
-            if standard || slash {
+            if part.standard || slash {
                 let mut drawn = Vec::new();
                 let extent = NotationStaff {
-                    staff: part.staff,
+                    staff: part.split.as_ref().map_or(part.staff, |s| &s.staff),
                     spelled: part.spelled.as_deref(),
                     xs: &positions[row],
                     bars: &bars,
                     masters,
                     first,
                     end,
+                    feet: part.split.as_ref().map(|s| s.feet.as_slice()),
                 }
                 .draw(&mut drawn);
                 let head = if lines.is_none() { ABOVE_STAFF } else { 8.0 };
                 // Without a tab staff the technique markings go above the notation.
-                let above = if tab { 0.0 } else { lanes.height };
+                let above = if part.tab { 0.0 } else { lanes.height };
                 let mid = cursor + head + above - extent.top;
                 for item in &mut drawn {
                     item.shift_y(mid);
@@ -272,7 +324,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
 
                 let (line_top, line_bottom) = (mid - 2.0 * SPACE, mid + 2.0 * SPACE);
                 notation::draw_lines(MARGIN_X, right, mid, &mut items);
-                if standard {
+                if part.standard {
                     notation::draw_clef(part.clef, MARGIN_X + 5.0, mid, &mut items);
                     let key = masters[first].key_signature;
                     notation::draw_key(
@@ -308,7 +360,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 );
 
                 let mut bottom = mid + extent.bottom + 4.0;
-                if !tab {
+                if !part.tab {
                     // Only the markings above and below the staff: there are no strings
                     // to write the rest on.
                     let music_top = mid + extent.top;
@@ -337,13 +389,18 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                         mark_y
                     };
                     bottom += 8.0 + dynamics + lanes.lyrics as f64 * LYRIC_LINE;
-                    row_y = Some(line_top);
+                    // On a staff without strings the cursor is placed from its middle line.
+                    row_y = Some(if part.staff.is_pitched() {
+                        mid
+                    } else {
+                        line_top
+                    });
                 }
                 row_lines = Some((line_top, line_bottom));
                 cursor = bottom;
             }
 
-            if tab {
+            if part.tab {
                 let staff_height = (part.staff.tuning.strings.len() - 1) as f64 * STRING_SPACING;
                 let head = match (lines.is_none() && row_lines.is_none(), row_lines) {
                     (true, _) => ABOVE_STAFF,
@@ -351,7 +408,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                     (false, None) => 8.0,
                 };
                 // Under a notation staff the tab leaves the rhythm to the notation.
-                let rhythm = !standard && !slash;
+                let rhythm = !part.standard && !slash;
                 let below = if rhythm { BELOW_STAFF } else { 12.0 };
                 let y = cursor + head + lanes.height;
                 for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
@@ -462,11 +519,12 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 top: r(row_top),
                 bottom: r(cursor),
                 y: r(row_y.unwrap_or(line_top)),
-                strings: if tab {
+                strings: if part.tab {
                     part.staff.tuning.strings.len()
                 } else {
                     0
                 },
+                middle: middle_of(part),
             });
             if row + 1 < parts.len() {
                 cursor += if part.last { TRACK_GAP } else { STAFF_GAP };
@@ -537,7 +595,9 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         height: r(top + 24.0),
         string_spacing: STRING_SPACING,
         string_count,
-        tab,
+        tab: parts[edit_row].tab,
+        middle: middle_of(&parts[edit_row]),
+        step: SPACE / 2.0,
         items,
         systems,
         bars,
@@ -559,6 +619,7 @@ fn bar_marks(
     score: &Score,
     times: &[Option<f64>],
     bars: &[BarBox],
+    moment_x: &dyn Fn(usize, Rational) -> f64,
     range: std::ops::Range<usize>,
     top: f64,
     items: &mut Vec<Item>,
@@ -578,6 +639,7 @@ fn bar_marks(
         let m = &masters[bar];
         let changes = bar > 0 && (m.tempo.is_some() || m.feel.is_some());
         m.section.is_some()
+            || !m.tempo_changes.is_empty()
             || m.timer
             || m.target.is_some()
             || m.jump.is_some()
@@ -646,6 +708,12 @@ fn bar_marks(
                     };
                     items.push(text(x, y, name.into(), 11.0, Align::Left));
                 }
+            }
+            // A change of tempo inside the bar stands over the beat it starts on.
+            for change in &m.tempo_changes {
+                let mark = format!("\u{2669} = {}", change.tempo);
+                let at = moment_x(bar, change.position) - 5.0;
+                items.push(text(at, y, mark, 12.0, Align::Left));
             }
             // What happens at the end of the bar is written at its right-hand end.
             let mut ending = Vec::new();
@@ -1022,6 +1090,10 @@ mod tests {
         second.alternate_endings = 0b110;
         second.jump = Some(gtr_model::Jump::DalSegnoAlFine);
         second.tempo = Some(90);
+        second.tempo_changes = vec![gtr_model::TempoChange {
+            position: Rational::new(1, 2),
+            tempo: 132,
+        }];
         second.feel = Some(gtr_model::Feel::SwingEighths);
         let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
         beats[0].effects.chord = Some("Em7".into());
@@ -1040,6 +1112,7 @@ mod tests {
             "2. 3.",
             "D.S. al Fine",
             "\u{2669} = 90",
+            "\u{2669} = 132",
             "Swing 8ths",
             "Em7",
             "with feeling",
@@ -1112,9 +1185,9 @@ mod tests {
         let mut score = demo_score();
         let quarter = Duration::new(NoteValue::Quarter);
         let mut piano = Track::empty("Piano", Instrument::Piano, 2);
-        piano.staves[0].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(2, 0)])];
+        piano.staves[0].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(67, 0)])];
         piano.staves[1].bars[0].voices[0].beats =
-            vec![Beat::new(quarter, vec![Note::new(3, 0)]); 2];
+            vec![Beat::new(quarter, vec![Note::new(38, 0)]); 2];
         let mut drums = Track::empty("Drums", Instrument::Drums, 2);
         drums.staves[0].bars[0].voices[0].beats =
             vec![Beat::new(quarter, vec![Note::new(0, 42), Note::new(4, 36)])];
@@ -1166,6 +1239,44 @@ mod tests {
             ..view(Notation::Standard)
         };
         assert_eq!(layout(&score, &all, 1000.0).systems[0].rows.len(), 4);
+
+        // A piano has no strings, so no view gives it a tab staff: asked for tab alone or
+        // for both, it is drawn as its two notation staves, one straight under the other.
+        for notation in [Notation::Tab, Notation::Both] {
+            let shown = layout(
+                &score,
+                &View {
+                    track: 1,
+                    staff: 1,
+                    ..view(notation)
+                },
+                1000.0,
+            );
+            let rows = &shown.systems[0].rows;
+            assert_eq!(rows.len(), 2);
+            assert!(rows.iter().all(|r| r.strings == 0));
+            let found = texts(&shown);
+            assert!(found.contains(&"\u{E050}") && found.contains(&"\u{E062}"));
+            assert!(!found.contains(&"T") && !found.contains(&"67"));
+            // The cursor is placed from the middle line of the staff being edited: D3 in
+            // the bass clef, where the left hand's notes are a step and a half octave apart.
+            assert!(!shown.tab && shown.string_count == 128);
+            assert_eq!((shown.middle, rows[0].middle), (Some(22), Some(34)));
+            assert_eq!(shown.systems[0].y, rows[1].y);
+            assert_eq!(rows[1].y, piano.systems[0].rows[1].y);
+        }
+        // Beside a guitar in the tab view, the guitar keeps its tab and the piano its notes.
+        let mixed = layout(
+            &score,
+            &View {
+                multitrack: true,
+                ..view(Notation::Tab)
+            },
+            1000.0,
+        );
+        let strings: Vec<usize> = mixed.systems[0].rows.iter().map(|r| r.strings).collect();
+        assert_eq!(strings, [6, 0, 0, 5]);
+        assert!(mixed.tab && mixed.middle.is_none());
     }
 
     #[test]

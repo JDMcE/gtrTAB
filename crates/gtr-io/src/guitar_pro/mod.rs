@@ -44,6 +44,17 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
     } else {
         gp5::read(bytes, &mut skipped)?
     };
+    let mut score = score;
+    // Guitar Pro writes a piano on strings; here it has none, and its notes are pitches.
+    for track in score
+        .tracks
+        .iter_mut()
+        .filter(|t| t.instrument.is_pitched())
+    {
+        for staff in &mut track.staves {
+            *staff = staff.to_pitched();
+        }
+    }
     score.validate()?;
     Ok(Imported {
         score,

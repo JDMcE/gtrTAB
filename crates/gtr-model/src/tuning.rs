@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
-/// Open-string MIDI pitches, from string 1 (highest) to the lowest string.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Open-string MIDI pitches, from string 1 (highest) to the lowest string. A staff for an
+/// instrument without strings, such as a piano, has none.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Tuning {
     pub strings: Vec<u8>,
 }
@@ -13,6 +15,11 @@ impl Tuning {
         Tuning {
             strings: strings.into(),
         }
+    }
+
+    /// The tuning of a staff without strings, whose notes are pitches.
+    pub fn none() -> Self {
+        Tuning::new([])
     }
 
     pub fn guitar_standard() -> Self {

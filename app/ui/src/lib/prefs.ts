@@ -22,6 +22,11 @@ export interface Prefs {
   tracks: boolean;
   /** Height of the track pane in pixels; `null` fits the tracks. */
   tracksHeight: number | null;
+  /**
+   * What playback sounds through: the SoundFont that ships with the app, one the user
+   * picked, or the synth's own models of the instruments.
+   */
+  sound: 'default' | 'custom' | 'models';
 }
 
 const KEY = 'gtrtab.ui';
@@ -34,6 +39,7 @@ const DEFAULTS: Prefs = {
   multitrack: false,
   tracks: true,
   tracksHeight: null,
+  sound: 'default',
 };
 
 export function loadPrefs(): Prefs {

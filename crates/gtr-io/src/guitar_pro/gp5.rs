@@ -556,6 +556,9 @@ fn read_note(
         false => (NoteEffects::default(), None),
     };
     effects.ghost = flags & 0x04 != 0;
+    for grace in effects.grace.iter_mut().flat_map(|g| &mut g.notes) {
+        grace.string = string;
+    }
     effects.dead = kind == 3;
     effects.accent = match flags {
         f if f & 0x02 != 0 => Some(Accent::Heavy),
@@ -613,11 +616,13 @@ fn read_note_effects(
         let transition = r.byte()?;
         r.skip(1)?; // duration
         let grace_flags = r.byte()?;
-        effects.grace = Some(Grace {
-            fret: fret.min(99),
-            on_beat: grace_flags & 0x02 != 0,
-            hammer: transition == 3,
-        });
+        // The string is the note's own, which the caller fills in.
+        effects.grace = Some(Grace::single(
+            0,
+            fret.min(99),
+            grace_flags & 0x02 != 0,
+            transition == 3,
+        ));
     }
     if flags2 & 0x04 != 0 {
         tremolo = match r.byte()? {
