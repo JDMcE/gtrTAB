@@ -25,6 +25,11 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
+      # The tests write the TypeScript types the interface uses; what is committed has to
+      # be what they write.
+      - name: Check the generated TypeScript types are up to date
+        if: runner.os == 'Linux'
+        run: test -z "$(git status --porcelain app/ui/src/lib/generated)" || (git status --short app/ui/src/lib/generated && git diff app/ui/src/lib/generated && exit 1)
 
   ui:
     name: UI

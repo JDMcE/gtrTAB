@@ -4,7 +4,8 @@ use crate::Tuning;
 
 /// What a track is played on. It decides the tuning a new track starts with, how the track
 /// sounds and which icon it gets.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Instrument {
     #[default]
@@ -17,15 +18,15 @@ pub enum Instrument {
     Ukulele,
     Banjo,
     Mandolin,
-    /// Two staves, one for each hand. Its notes are still entered as tablature, on strings
-    /// that only exist to hold them.
+    /// Two staves, one for each hand. It has no strings: its notes are pitches.
     Piano,
     /// Every note is a piece of the kit: its fret is the piece's General MIDI number.
     Drums,
 }
 
 /// The clef a staff's standard notation is written in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Clef {
     Treble,
@@ -76,16 +77,18 @@ impl Instrument {
             Instrument::Ukulele => vec![Tuning::new([69, 64, 60, 67])],
             Instrument::Banjo => vec![Tuning::new([62, 59, 55, 50, 67])],
             Instrument::Mandolin => vec![Tuning::new([76, 69, 62, 55])],
-            // The right hand an octave above a guitar, the left hand an octave below.
-            Instrument::Piano => vec![
-                Tuning::new([76, 71, 67, 62, 57, 52]),
-                Tuning::new([52, 47, 43, 38, 33, 28]),
-            ],
+            // A staff for each hand, neither with strings.
+            Instrument::Piano => vec![Tuning::none(), Tuning::none()],
             // Lines to write the kit on. They have no pitch, so a note's fret alone says
             // which piece it is.
             Instrument::Drums => vec![Tuning::new([0; 5])],
             _ => vec![Tuning::guitar_standard()],
         }
+    }
+
+    /// Whether the instrument has no strings, so that its notes are written as pitches.
+    pub fn is_pitched(self) -> bool {
+        self == Instrument::Piano
     }
 
     pub fn is_percussion(self) -> bool {
@@ -154,7 +157,8 @@ impl Instrument {
 }
 
 /// A track's mixer settings.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct Mix {
     /// From 0 to [`Mix::MAX_VOLUME`]; [`Mix::UNITY`] plays the track at its natural level.
@@ -210,7 +214,10 @@ mod tests {
                 Instrument::Ukulele | Instrument::Mandolin | Instrument::Drums
             );
             assert!(back == instrument || shares_a_program, "{instrument:?}");
-            assert!(!instrument.default_tuning().strings.is_empty());
+            assert_eq!(
+                instrument.default_tuning().strings.is_empty(),
+                instrument.is_pitched()
+            );
         }
     }
 

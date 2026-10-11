@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, Instrument, MasterBar, Mix, Note, NoteValue, Score,
-    ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
+    Bar, Beat, BeatEffects, Clef, Duration, Instrument, KitPiece, MasterBar, Mix, Note, NoteValue,
+    Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
 use gtr_model::{Rational, TempoChange};
 use serde::de::DeserializeOwned;
@@ -15,11 +15,13 @@ pub const MAX_FRET: u8 = 36;
 
 /// Where typing goes. `beat` may equal the number of beats in the bar: that is the empty slot
 /// after the last beat, available while the bar is not yet full.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Cursor {
     pub track: usize,
     pub bar: usize,
     pub beat: usize,
+    /// The string typing goes to, or on a staff without strings the pitch.
     pub string: u8,
     /// The voice being edited. A bar may not have it yet; it is added on the first entry.
     pub voice: usize,
@@ -50,7 +52,8 @@ enum Clipboard {
 }
 
 /// Snapshot of the editor state the UI needs besides the score itself.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct EditorState {
     pub cursor: Cursor,
     /// First and last selected `[bar, beat]`, inclusive.
@@ -68,6 +71,7 @@ pub struct EditorState {
     pub can_paste: bool,
     pub dirty: bool,
     /// Changes whenever the score does.
+    #[ts(type = "number")]
     pub revision: u64,
 }
 
@@ -133,6 +137,7 @@ impl Editor {
         };
         editor.cursor.string = u8::MAX;
         editor.settle();
+        editor.home();
         editor
     }
 
@@ -184,8 +189,14 @@ impl Editor {
         let Cursor { bar, beat, .. } = self.cursor;
         let len = self.beats(bar).len();
         match direction {
+            // On a staff without strings the cursor moves through the notes of the key.
+            Move::Up | Move::Down if self.staff().is_pitched() => {
+                let key = self.score.master_bars[bar].key_signature;
+                let up = direction == Move::Up;
+                self.cursor.string = step_in_key(self.cursor.string, key, up);
+            }
             Move::Up => self.cursor.string = self.cursor.string.saturating_sub(1),
-            Move::Down => self.cursor.string += 1,
+            Move::Down => self.cursor.string = self.cursor.string.saturating_add(1),
             Move::Left if beat > 0 => self.cursor.beat -= 1,
             Move::Left | Move::PrevBar if bar > 0 && beat == 0 => {
                 self.cursor.bar -= 1;
@@ -244,11 +255,17 @@ impl Editor {
         self.settle();
     }
 
+    /// Moves the cursor to the start of a bar, on the string or pitch it is on.
+    pub fn go_to_bar(&mut self, bar: usize) {
+        self.set_cursor(bar, 0, self.cursor.string, false);
+    }
+
     pub fn set_track(&mut self, track: usize) {
         self.anchor = None;
         self.cursor.track = track;
         self.cursor.staff = 0;
         self.settle();
+        self.home();
     }
 
     /// Switches to another staff of the cursor's track, counted from the top.
@@ -256,6 +273,23 @@ impl Editor {
         self.anchor = None;
         self.cursor.staff = staff;
         self.settle();
+        self.home();
+    }
+
+    /// On arriving at a staff without strings, puts the cursor on the top note of its
+    /// beat, or failing that in the middle of the staff. A string needs no such help: the
+    /// one the cursor was on, or the nearest there is, will do.
+    fn home(&mut self) {
+        if !self.staff().is_pitched() {
+            return;
+        }
+        let top = self.current_beat().and_then(|b| b.notes.last());
+        let Cursor { track, staff, .. } = self.cursor;
+        let middle = match self.score.tracks[track].instrument.clef(staff) {
+            Clef::Bass => 48,
+            _ => 71,
+        };
+        self.cursor.string = top.map_or(middle, |n| n.string);
     }
 
     /// Switches to another voice of the staff, counted from zero.
@@ -287,6 +321,9 @@ impl Editor {
     /// Types one digit of a fret number. With `combine`, a digit typed straight after
     /// another extends it, so 1 then 2 gives fret 12.
     pub fn type_digit(&mut self, digit: u8, combine: bool) -> Result<(), EditError> {
+        if self.staff().is_pitched() {
+            return Err(EditError::NoFrets);
+        }
         let note = (self.current_beat())
             .and_then(|b| b.note_on(self.cursor.string))
             .cloned();
@@ -315,6 +352,9 @@ impl Editor {
     /// Puts a note on a given fret under the cursor, keeping the techniques of a note
     /// already there. On a drum track the fret is the number of a piece of the kit.
     pub fn set_fret(&mut self, fret: u8) -> Result<(), EditError> {
+        if self.staff().is_pitched() {
+            return Err(EditError::NoFrets);
+        }
         let note = (self.current_beat())
             .and_then(|b| b.note_on(self.cursor.string))
             .cloned();
@@ -323,6 +363,64 @@ impl Editor {
             tied: false,
             ..note.unwrap_or(Note::new(self.cursor.string, 0))
         })
+    }
+
+    /// On a staff without strings, enters the note with a letter name (0 for C up to 6 for
+    /// B) in the octave nearest the cursor, sharpened or flattened as the key has it, and
+    /// moves the cursor to it. Does nothing on a staff with strings.
+    pub fn enter_letter(&mut self, letter: u8) -> Result<(), EditError> {
+        if !self.staff().is_pitched() {
+            return Ok(());
+        }
+        let key = self.score.master_bars[self.cursor.bar].key_signature;
+        let class = i16::from(key_scale(key)[usize::from(letter.min(6))]);
+        let cursor = i16::from(self.cursor.string);
+        // The nearest note of that name: up to a tritone above, or else below.
+        let above = cursor + (class - cursor).rem_euclid(12);
+        let pitch = match above - cursor > 6 || above > 127 {
+            true if above >= 12 => above - 12,
+            _ => above,
+        };
+        self.cursor.string = pitch.clamp(0, 127) as u8;
+        self.enter_note()
+    }
+
+    /// On a staff without strings, puts a note at the cursor's pitch if there is none.
+    /// Does nothing on a staff with strings, where a note needs a fret.
+    pub fn enter_note(&mut self) -> Result<(), EditError> {
+        let pitch = self.cursor.string;
+        let there = self
+            .current_beat()
+            .is_some_and(|b| b.note_on(pitch).is_some());
+        if !self.staff().is_pitched() || there {
+            return Ok(());
+        }
+        self.put_note(Note::new(pitch, 0))
+    }
+
+    /// On a staff without strings, moves the note under the cursor up or down by
+    /// `semitones` and the cursor with it, or without a note there just the cursor. A note
+    /// is not moved onto another.
+    pub fn shift_pitch(&mut self, semitones: i8) -> Result<(), EditError> {
+        if !self.staff().is_pitched() {
+            return Ok(());
+        }
+        let from = self.cursor.string;
+        let to = (i16::from(from) + i16::from(semitones)).clamp(0, 127) as u8;
+        let note = (self.current_beat()).and_then(|b| b.note_on(from)).cloned();
+        let taken = self.current_beat().is_some_and(|b| b.note_on(to).is_some());
+        if let Some(note) = note.filter(|_| !taken && to != from) {
+            let at = self.at();
+            let moved = Note { string: to, ..note };
+            self.keep_selection(|e| {
+                e.run(Command::Batch(vec![
+                    Command::RemoveNote { at, string: from },
+                    Command::PutNote { at, note: moved },
+                ]))
+            })?;
+        }
+        self.cursor.string = to;
+        Ok(())
     }
 
     /// The highest fret the cursor's track has.
@@ -763,6 +861,10 @@ impl Editor {
     ) -> Result<(), EditError> {
         let index = self.cursor.track + 1;
         let mut track = Track::empty(name, instrument, self.score.master_bars.len());
+        // An instrument has strings to tune or it has not; a tuning cannot change that.
+        if (tuning.as_ref()).is_some_and(|(t, _)| t.strings.is_empty() != instrument.is_pitched()) {
+            return Err(EditError::InvalidTuning);
+        }
         if let Some((tuning, capo)) = tuning {
             track.staves[0].tuning = tuning;
             track.staves[0].capo = capo;
@@ -804,6 +906,11 @@ impl Editor {
         Ok(())
     }
 
+    /// Renames a track or changes what it is played on. A change to or from an instrument
+    /// without strings rewrites the music for the new one: the notes become the pitches
+    /// they sound at, or are put on the strings of the instrument's usual tuning, and the
+    /// track gets the staves the instrument has. What the strings cannot play, and a
+    /// piano's second staff, is lost.
     pub fn set_track_info(
         &mut self,
         track: usize,
@@ -811,13 +918,57 @@ impl Editor {
         instrument: Instrument,
     ) -> Result<(), EditError> {
         let name = name.to_owned();
-        self.keep_selection(|e| {
-            e.run(Command::SetTrackInfo {
-                track,
-                name,
-                instrument,
-            })
-        })
+        let old = (self.score.tracks.get(track)).ok_or(EditError::InvalidLocation)?;
+        let tunings = instrument.default_tunings();
+        let same_kind = old.staves.len() == tunings.len()
+            && (old.staves.iter().zip(&tunings))
+                .all(|(s, t)| s.is_pitched() == t.strings.is_empty());
+        if same_kind {
+            return self.keep_selection(|e| {
+                e.run(Command::SetTrackInfo {
+                    track,
+                    name,
+                    instrument,
+                })
+            });
+        }
+        let bar_count = self.score.master_bars.len();
+        // Drums have nothing to say to a pitch, nor a pitch to drums.
+        let carries = !old.instrument.is_percussion() && !instrument.is_percussion();
+        let staves = (tunings.into_iter().enumerate())
+            .map(
+                |(index, tuning)| match old.staves.get(index).filter(|_| carries) {
+                    Some(staff) if tuning.strings.is_empty() => staff.to_pitched(),
+                    Some(staff) => staff.to_pitched().to_strings(tuning, instrument.max_fret()),
+                    None => Staff {
+                        tuning,
+                        capo: 0,
+                        bars: vec![Bar::empty(); bar_count],
+                    },
+                },
+            )
+            .collect();
+        let replacement = Track {
+            name,
+            instrument,
+            mix: old.mix,
+            kit: old.kit.clone(),
+            staves,
+        };
+        self.run(Command::ReplaceTrack {
+            index: track,
+            track: replacement,
+        })?;
+        self.home();
+        Ok(())
+    }
+
+    /// Gives a drum track a kit of its own, or with an empty one the standard kit back.
+    pub fn set_kit(&mut self, track: usize, kit: Vec<KitPiece>) -> Result<(), EditError> {
+        if self.score.tracks.get(track).is_some_and(|t| t.kit == kit) {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetKit { track, kit }))
     }
 
     pub fn set_mix(&mut self, track: usize, mix: Mix) -> Result<(), EditError> {
@@ -870,15 +1021,24 @@ impl Editor {
     /// Pastes beats at the cursor, or bars before the cursor's bar. Notes on strings the
     /// current tuning does not have are dropped.
     pub fn paste(&mut self) -> Result<(), EditError> {
-        let string_count = self.string_count();
+        let (places, pitched) = (self.string_count(), self.staff().is_pitched());
         let fit = |beat: &Beat| Beat {
             duration: beat.duration,
             effects: beat.effects.clone(),
             notes: beat
                 .notes
                 .iter()
-                .filter(|n| usize::from(n.string) < string_count)
+                .filter(|n| usize::from(n.string) < places && (!pitched || n.fret == 0))
                 .cloned()
+                .map(|mut note| {
+                    // An ornament on a string the staff lacks goes with it.
+                    (note.effects.grace).take_if(|g| {
+                        g.notes
+                            .iter()
+                            .any(|g| usize::from(g.string) >= places || (pitched && g.fret != 0))
+                    });
+                    note
+                })
                 .collect(),
         };
         let Cursor {
@@ -1033,8 +1193,9 @@ impl Editor {
         &self.score.tracks[self.cursor.track].staves[self.cursor.staff]
     }
 
+    /// How many strings the cursor's staff has, or if it has none how many pitches.
     fn string_count(&self) -> usize {
-        self.staff().tuning.strings.len()
+        self.staff().places()
     }
 
     /// The cursor's voice in a bar, which is empty if the bar does not have that voice yet.
@@ -1089,6 +1250,31 @@ impl Editor {
             beat,
         }
     }
+}
+
+/// The pitch class of each letter from C to B in a key of `key` sharps, or flats if negative.
+fn key_scale(key: i8) -> [u8; 7] {
+    let mut scale = [0, 2, 4, 5, 7, 9, 11];
+    // Sharps are added in the order F C G D A E B, and flats in the reverse of it.
+    const SHARPS: [usize; 7] = [3, 0, 4, 1, 5, 2, 6];
+    for &letter in SHARPS.iter().take(key.clamp(0, 7) as usize) {
+        scale[letter] = (scale[letter] + 1) % 12;
+    }
+    for &letter in SHARPS.iter().rev().take((-key).clamp(0, 7) as usize) {
+        scale[letter] = (scale[letter] + 11) % 12;
+    }
+    scale
+}
+
+/// The next pitch above or below `pitch` that belongs to the key.
+fn step_in_key(pitch: u8, key: i8, up: bool) -> u8 {
+    let scale = key_scale(key);
+    let in_key = |p: &u8| scale.contains(&(p % 12));
+    let next = match up {
+        true => (pitch.saturating_add(1)..=127).find(in_key),
+        false => (0..pitch).rev().find(in_key),
+    };
+    next.unwrap_or(pitch)
 }
 
 /// Returns a copy of an effects struct with one of its fields replaced from JSON.

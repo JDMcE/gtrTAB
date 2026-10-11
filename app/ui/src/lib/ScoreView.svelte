@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Cursor, EditorState, Item, Layout } from './model';
+  import { pitchOfStep, stepOfPitch } from './pitch';
 
   interface Props {
     /** Builds the display list for a page of the given width in score pixels. */
@@ -8,6 +9,8 @@
     /** Changes whenever the score or track does, to trigger a new layout. */
     revision: unknown;
     editor: EditorState;
+    /** The key signature of each bar, which decides where a pitch is written on a staff. */
+    keys: number[];
     playhead: { bar: number; beat: number } | null;
     zoom: number;
     /** Changes with the colour theme, so that the canvas is repainted in the new colours. */
@@ -25,7 +28,7 @@
     onview?: (bar: number) => void;
   }
 
-  let { getLayout, revision, editor, playhead, zoom, theme, onpick, onview }: Props = $props();
+  let { getLayout, revision, editor, keys, playhead, zoom, theme, onpick, onview }: Props = $props();
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
@@ -52,7 +55,12 @@
     if (!bar) return undefined;
     const x = bar.beats[at.beat] ?? bar.slot ?? bar.x + bar.w / 2;
     const system = l.systems[bar.system];
-    return { x, y: system.y + string * l.string_spacing, system };
+    // On a staff without strings, `string` is a pitch, placed from the staff's middle line.
+    const y =
+      l.middle === null ?
+        system.y + string * l.string_spacing
+      : system.y - (stepOfPitch(string, keys[at.bar] ?? 0) - l.middle) * l.step;
+    return { x, y, system };
   }
 
   function itemY(item: Item): number {
@@ -179,6 +187,10 @@
       context.beginPath();
       if (layout.tab) {
         context.roundRect(at.x - CURSOR_WIDTH / 2, at.y - 8, CURSOR_WIDTH, 16, 3);
+      } else if (layout.middle !== null) {
+        // On a staff without strings the cursor sits on a line or in a space.
+        const height = layout.step * 2 + 3;
+        context.roundRect(at.x - CURSOR_WIDTH / 2, at.y - height / 2, CURSOR_WIDTH, height, 3);
       } else {
         // Without string lines the cursor marks the beat on the whole staff.
         const { cursor_top: top, cursor_bottom: bottom } = at.system;
@@ -189,7 +201,7 @@
   }
 
   $effect(() => {
-    void [layout, editor, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, fontsReady];
+    void [layout, editor, keys, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, fontsReady];
     draw();
   });
 
@@ -234,18 +246,26 @@
     stops.forEach((stop, i) => {
       if (Math.abs(stop - x) < Math.abs(stops[beat] - x)) beat = i;
     });
+    /** The pitch written at `y` on a staff without strings whose middle line is at `lineY`. */
+    const pitchAt = (lineY: number, middle: number) =>
+      pitchOfStep(middle + Math.round((lineY - y) / layout.step), keys[hit.i] ?? 0);
     const rows = layout.systems[system].rows;
     const row = rows.find((r) => y >= r.top && y <= r.bottom);
     if (row && (row.track !== editor.cursor.track || row.staff !== editor.cursor.staff)) {
       // Another staff: its beats are not the ones laid out for the cursor, so go to the
       // start of the bar.
+      if (row.middle !== null) {
+        onpick(hit.i, 0, pitchAt(row.y, row.middle), false, { track: row.track, staff: row.staff });
+        return;
+      }
       const string = row.strings ? Math.round((y - row.y) / layout.string_spacing) : 0;
       const clamped = Math.max(0, Math.min(row.strings - 1, string));
       onpick(hit.i, 0, clamped, false, { track: row.track, staff: row.staff });
       return;
     }
-    const string = layout.tab
-      ? Math.round((y - layout.systems[system].y) / layout.string_spacing)
+    const string =
+      layout.tab ? Math.round((y - layout.systems[system].y) / layout.string_spacing)
+      : layout.middle !== null ? pitchAt(layout.systems[system].y, layout.middle)
       : editor.cursor.string;
     const clamped = Math.max(0, Math.min(layout.string_count - 1, string));
     onpick(hit.i, beat, clamped, event.shiftKey, null);

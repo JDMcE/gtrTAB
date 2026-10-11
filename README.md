@@ -18,7 +18,7 @@ cd ../desktop && npm install
 
 | Task | Command | Run from |
 |---|---|---|
-| Core tests | `cargo test` | repo root |
+| Core tests, and the TypeScript types generated from Rust | `cargo test` | repo root |
 | Lint | `cargo clippy --all-targets -- -D warnings` | repo root |
 | Web app (dev server) | `npm run dev` | `app/ui` |
 | Web app (production build) | `npm run build` | `app/ui` |
@@ -27,6 +27,8 @@ cd ../desktop && npm install
 | Desktop app (installers) | `npm run build` | `app/desktop` |
 
 Playback sounds through the GeneralUser GS SoundFont, which is too big for the repository. Fetch it once with `npm run soundfont` in `app/ui`; without it the app plays through its built-in models.
+
+The interface's types for the score, the editor's state and the laid-out page are generated from the Rust ones into `app/ui/src/lib/generated` whenever the tests run. Commit them with the change that altered them; CI fails if they are out of date.
 
 The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the editor through `wasm-pack`, and the synth for the audio thread (`crates/gtr-worklet`) with a plain `cargo build`.
 

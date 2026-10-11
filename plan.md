@@ -63,7 +63,7 @@ Each phase ends with something usable. Phases 1–3 make a useful riff-writing t
 - [x] Score model with rational durations and tunings
 - [x] Command system with undo/redo
 - [x] Native file format (`.gtrtab`): save, load, version field
-- [x] WASM build and TypeScript bindings (score and command types in `app/ui/src/lib/model.ts` are hand-written; generating them from Rust is in phase 6)
+- [x] WASM build and TypeScript bindings (the score, editor and layout types are generated from Rust since phase 6)
 - [x] Svelte app running in the browser and inside Tauri
 - [x] CI: build, test, lint for Rust and TypeScript on Windows, macOS, Linux (`.github/workflows/ci.yml`; the desktop shell compiles on all three)
 - [x] Check open and save through the native file dialogs in the desktop app (automated once through Windows UI Automation; not part of the test suite)
@@ -161,8 +161,6 @@ Known simplifications, each with the phase that removes it:
 
 - Beams are level, never slanted, and accidentals are spelled by the key alone: sharps in sharp keys, flats in flat keys. (Phase 6)
 - In the combined view the technique markings, chord names and diagrams sit above the tab staff, so between the two staves. The notation-only view shows the markings above the staff but not the ones written on strings (bends, slides). (Phase 6)
-- A piano's notes are entered as tablature on six made-up strings per hand, since every note in the model is a string and a fret; there is no entry by pitch or from a keyboard. In the combined view each hand's tab sits under its notation, so the two notation staves are only adjacent in the notation-only view. Changing an existing track to a piano does not give it a second staff. (Phase 6)
-- Drum notation uses one voice with stems as the notes fall; it does not split hands and feet into two voices by itself (use voice 2 for the feet). The kit is fixed: 23 General MIDI pieces. (Phase 6)
 - The mixer sliders on the track rows are for the mouse; the keyboard reaches the same values through the track settings dialog. Tracks are reordered with the move up and move down buttons, not by dragging. (Phase 6)
 - Clicking another staff in the multitrack view goes to the start of the bar clicked, not the beat. (Phase 6)
 - The chord builder finds one shape per position with the root in the bass; it does not know slash chords or inversions, which can still be clicked in by hand. (Phase 6)
@@ -172,7 +170,7 @@ How things stand, for reference:
 
 - Tuning and capo are part of a track's settings (the settings button in the track pane, or double-click the track's name), alongside its instrument and mix. Changing the kind of instrument there switches to that instrument's usual tuning.
 - Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks (`.gp5`), key signatures, repeats, alternate endings, sections, swing feel, credits and, from `.gp`, jumps and free text.
-- The native format is at version 5. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched.
+- The native format is at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
 
 Still to check by hand, in phase 6: how each instrument and the drum kit sound, and the stereo mix; the track pane and the notation views in the desktop window and in a narrow window (only a wide browser window was tried); and Guitar Pro files with repeats, jumps or drum tracks, since none are in the repository.
 
@@ -205,10 +203,10 @@ Playback behaviour:
 
 Notes and entry:
 
-- [ ] Notes that are a pitch, not a string and a fret, for instruments without strings: the model, the commands, the native format (with a migration) and the importers
-- [ ] Piano entry by pitch on the notation staff; no tab staff for a piano; the two staves adjacent in every view; changing a track to or from a piano adds or removes its second staff
-- [ ] Drum notation that puts hands and feet in two voices by itself, and a kit map that can be edited
-- [ ] TypeScript types generated from the Rust model instead of written by hand
+- [x] Notes that are a pitch, not a string and a fret, for instruments without strings: the model, the commands, the native format (with a migration) and the importers. A staff for such an instrument has a tuning with no strings, and a note on it says its MIDI pitch where a note on strings says its string; a beat can hold any number of them. `Note` keeps its two fields, `string` and `fret`, with `string` holding the pitch: everything that tells the notes of a beat apart by string, from ties to the cursor, then works for pitches as it stands
+- [x] Piano entry by pitch on the notation staff; no tab staff for a piano; the two staves adjacent in every view; changing a track to or from a piano adds or removes its second staff. The letters A to G enter the note of that name nearest the cursor, as the key has it, and Enter a note where the cursor is; the arrows move the cursor through the notes of the key, Alt with them moves the note under it a semitone, and a click on the staff puts the cursor on the line or space clicked. Changing a guitar to a piano keeps its notes as the pitches they sound; changing back puts each on the string that plays it nearest the nut, and what the strings cannot reach, and the left hand's staff, is lost (it is one undo step). Still to do: entry from a MIDI keyboard
+- [x] Drum notation that puts hands and feet in two voices by itself, and a kit map that can be edited. A bar written in one voice is drawn in two wherever it has both: the hands as written with stems up, the feet with stems down, each note lasting to the next or to the end of its beat, and without the rests between. Track > Drum kit… gives a track a kit of its own: which numbers it has, what each is called, where and with which notehead it is written, and whether a foot plays it. A piece's number still decides its sound
+- [x] TypeScript types generated from the Rust model instead of written by hand: `ts-rs` writes them to `app/ui/src/lib/generated` when the tests run, `model.ts` gathers them, and CI fails if what is committed is out of date
 
 Engraving:
 

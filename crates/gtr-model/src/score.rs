@@ -1,8 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BeatEffects, Duration, Instrument, Mix, NoteEffects, Rational, Tuning};
+use crate::{
+    BeatEffects, Duration, Instrument, KitPiece, Mix, NoteEffects, Rational, Tuning, kit_is_valid,
+    standard_kit,
+};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Score {
     #[serde(default)]
     pub info: ScoreInfo,
@@ -13,7 +17,8 @@ pub struct Score {
     pub tracks: Vec<Track>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default)]
 pub struct ScoreInfo {
     pub title: String,
@@ -29,7 +34,8 @@ pub struct ScoreInfo {
     pub copyright: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct MasterBar {
     pub time_signature: TimeSignature,
     /// Sharps in the key signature if positive, flats if negative.
@@ -37,42 +43,54 @@ pub struct MasterBar {
     pub key_signature: i8,
     /// A repeated passage starts with this bar.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
     pub repeat_start: bool,
     /// A repeated passage ends with this bar and is played this many times in all; zero
     /// if none ends here.
     #[serde(default, skip_serializing_if = "is_zero")]
+    #[ts(optional, as = "Option<u8>")]
     pub repeat_count: u8,
     /// The passes of a repeat on which this bar is played, as a bit per pass starting with
     /// the first; zero for a bar played every time.
     #[serde(default, skip_serializing_if = "is_zero")]
+    #[ts(optional, as = "Option<u8>")]
     pub alternate_endings: u8,
     /// A section name or rehearsal mark, such as `Chorus` or `A`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub section: Option<String>,
     /// A place that a jump leads to.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub target: Option<Target>,
     /// An instruction, at the end of this bar, to carry on from somewhere else.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub jump: Option<Jump>,
     /// A new tempo from this bar on, in quarter notes per minute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tempo: Option<u32>,
     /// Changes of tempo part-way through the bar, in the order they come.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<TempoChange>>")]
     pub tempo_changes: Vec<TempoChange>,
     /// Whether pairs of short notes are played unevenly from this bar on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub feel: Option<Feel>,
     /// The time elapsed when the piece reaches this bar is written above it.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
     pub timer: bool,
 }
 
 /// A new tempo from a beat inside a bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct TempoChange {
     /// Where in the bar it happens, in whole notes from the bar's start.
+    #[ts(type = "[number, number]")]
     pub position: Rational,
     /// Quarter notes per minute.
     pub tempo: u32,
@@ -83,7 +101,8 @@ fn is_zero(value: &u8) -> bool {
 }
 
 /// A marked place in the score.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Target {
     Segno,
@@ -93,7 +112,8 @@ pub enum Target {
 }
 
 /// Where to carry on from at the end of a bar.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Jump {
     /// Back to the beginning.
@@ -123,7 +143,8 @@ impl Jump {
 }
 
 /// How evenly pairs of short notes are played.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Feel {
     Straight,
@@ -168,7 +189,8 @@ impl MasterBar {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct TimeSignature {
     pub numerator: u8,
     pub denominator: u8,
@@ -190,23 +212,38 @@ impl TimeSignature {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Track {
     pub name: String,
     #[serde(default)]
     pub instrument: Instrument,
     #[serde(default)]
     pub mix: Mix,
+    /// The drum kit of a drum track that has one of its own: which pieces it has and how
+    /// each is written. Empty for the standard kit.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<KitPiece>>")]
+    pub kit: Vec<KitPiece>,
     pub staves: Vec<Staff>,
 }
 
 impl Track {
+    /// The track's drum kit: its own, or the standard one.
+    pub fn drum_kit(&self) -> Vec<KitPiece> {
+        match self.kit.is_empty() {
+            true => standard_kit(),
+            false => self.kit.clone(),
+        }
+    }
+
     /// A track with default mixer settings.
     pub fn new(name: impl Into<String>, instrument: Instrument, staves: Vec<Staff>) -> Self {
         Track {
             name: name.into(),
             instrument,
             mix: Mix::default(),
+            kit: Vec::new(),
             staves,
         }
     }
@@ -225,15 +262,154 @@ impl Track {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Staff {
+    /// The strings the staff's notes are played on. A staff without any is for an
+    /// instrument that has none: its notes are pitches (see [`Note::string`]).
     pub tuning: Tuning,
     #[serde(default)]
     pub capo: u8,
     pub bars: Vec<Bar>,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+impl Staff {
+    /// How many pitches a staff without strings can hold: every MIDI pitch.
+    pub const PITCHES: usize = 128;
+
+    /// Whether the staff's notes are pitches, not frets on strings.
+    pub fn is_pitched(&self) -> bool {
+        self.tuning.strings.is_empty()
+    }
+
+    /// How many places a beat has for a note: one for each string, or on a staff without
+    /// strings one for each pitch.
+    pub fn places(&self) -> usize {
+        match self.is_pitched() {
+            true => Staff::PITCHES,
+            false => self.tuning.strings.len(),
+        }
+    }
+
+    /// Sounding MIDI pitch of a note at `string` and `fret`, or `None` if the staff has no
+    /// such string.
+    pub fn pitch(&self, string: u8, fret: u8) -> Option<u8> {
+        match self.is_pitched() {
+            true => (usize::from(string) < Staff::PITCHES).then_some(string),
+            false => self.tuning.pitch(string, fret, self.capo),
+        }
+    }
+
+    /// Checks a beat against the staff: its notes are on places the staff has, and on a
+    /// staff without strings they have no fret.
+    pub fn holds(&self, beat: &Beat) -> bool {
+        beat.is_valid_for(self.places())
+            && (!self.is_pitched() || beat.notes.iter().all(|n| n.fret == 0))
+    }
+
+    /// The same music for an instrument without strings: every note becomes the pitch it
+    /// sounds at. Two strings stopped at the same pitch become one note.
+    pub fn to_pitched(&self) -> Staff {
+        let mut staff = Staff {
+            tuning: Tuning::none(),
+            capo: 0,
+            bars: self.bars.clone(),
+        };
+        if self.is_pitched() {
+            return staff;
+        }
+        for beat in staff
+            .bars
+            .iter_mut()
+            .flat_map(|b| &mut b.voices)
+            .flat_map(|v| &mut v.beats)
+        {
+            let mut notes: Vec<Note> = (beat.notes.drain(..))
+                .filter_map(|mut note| {
+                    if let Some(grace) = &mut note.effects.grace {
+                        grace.notes.retain_mut(|g| {
+                            let pitch = self.pitch(g.string, g.fret);
+                            (g.string, g.fret) = (pitch.unwrap_or(0), 0);
+                            pitch.is_some_and(|p| usize::from(p) < Staff::PITCHES)
+                        });
+                    }
+                    note.effects.grace.take_if(|g| g.notes.is_empty());
+                    let pitch = self.pitch(note.string, note.fret)?;
+                    (usize::from(pitch) < Staff::PITCHES).then_some(Note {
+                        string: pitch,
+                        fret: 0,
+                        ..note
+                    })
+                })
+                .collect();
+            notes.sort_by_key(|n| n.string);
+            notes.dedup_by_key(|n| n.string);
+            beat.notes = notes;
+        }
+        staff
+    }
+
+    /// The same music on strings tuned to `tuning`, with frets up to `max_fret`: each note
+    /// goes on the string that plays it nearest the nut, highest notes first. Notes the
+    /// strings cannot reach, or that have no string left in their chord, are left out.
+    pub fn to_strings(&self, tuning: Tuning, max_fret: u8) -> Staff {
+        let place = |pitch: u8, taken: &[u8]| {
+            (tuning.strings.iter().enumerate())
+                .filter(|(string, open)| {
+                    !taken.contains(&(*string as u8))
+                        && **open <= pitch
+                        && pitch - **open <= max_fret
+                })
+                .min_by_key(|(_, open)| pitch - **open)
+                .map(|(string, open)| (string as u8, pitch - *open))
+        };
+        let mut bars = self.bars.clone();
+        if !self.is_pitched() {
+            return Staff {
+                tuning,
+                capo: 0,
+                bars,
+            };
+        }
+        for beat in bars
+            .iter_mut()
+            .flat_map(|b| &mut b.voices)
+            .flat_map(|v| &mut v.beats)
+        {
+            let mut taken = Vec::new();
+            let mut notes: Vec<Note> = (beat.notes.drain(..).rev())
+                .filter_map(|mut note| {
+                    let (string, fret) = place(note.string, &taken)?;
+                    taken.push(string);
+                    if let Some(grace) = &mut note.effects.grace {
+                        // An ornament stays on the string of the note it leads to.
+                        grace.notes.retain_mut(|g| {
+                            let fret = g.string.checked_sub(tuning.strings[usize::from(string)]);
+                            (g.string, g.fret) = (string, fret.unwrap_or(0));
+                            fret.is_some_and(|fret| fret <= max_fret)
+                        });
+                    }
+                    note.effects.grace.take_if(|g| g.notes.is_empty());
+                    Some(Note {
+                        string,
+                        fret,
+                        ..note
+                    })
+                })
+                .collect();
+            notes.sort_by_key(|n| n.string);
+            beat.notes = notes;
+        }
+        Staff {
+            tuning,
+            capo: 0,
+            bars,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Bar {
     pub voices: Vec<Voice>,
 }
@@ -250,7 +426,8 @@ impl Bar {
     }
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Voice {
     pub beats: Vec<Beat>,
 }
@@ -263,13 +440,16 @@ impl Voice {
 }
 
 /// A rhythmic position. A beat without notes is a rest.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Beat {
     pub duration: Duration,
-    /// Sorted by string, at most one note per string.
+    /// Sorted by string, at most one note per string; on a staff without strings, sorted
+    /// by pitch, at most one note per pitch.
     #[serde(default)]
     pub notes: Vec<Note>,
     #[serde(default, skip_serializing_if = "BeatEffects::is_none")]
+    #[ts(optional, as = "Option<BeatEffects>")]
     pub effects: BeatEffects,
 }
 
@@ -311,14 +491,19 @@ impl Beat {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Note {
-    /// Index into the staff tuning; 0 is the highest string.
+    /// Index into the staff tuning; 0 is the highest string. On a staff without strings
+    /// this is the note itself: its MIDI pitch.
     pub string: u8,
+    /// The fret the string is stopped at; zero on a staff without strings. On a drum
+    /// track it is the General MIDI number of a piece of the kit.
     pub fret: u8,
     #[serde(default)]
     pub tied: bool,
     #[serde(default, skip_serializing_if = "NoteEffects::is_none")]
+    #[ts(optional, as = "Option<NoteEffects>")]
     pub effects: NoteEffects,
 }
 
@@ -341,8 +526,8 @@ pub enum ModelError {
     InvalidTimeSignature { bar: usize },
     #[error("track {track} has no staff, or mixer settings that are out of range")]
     InvalidTrack { track: usize },
-    #[error("track {track} staff {staff} has no strings")]
-    EmptyTuning { track: usize, staff: usize },
+    #[error("track {track} staff {staff} has too many strings")]
+    TooManyStrings { track: usize, staff: usize },
     #[error("track {track} staff {staff} has {found} bars, expected {expected}")]
     BarCountMismatch {
         track: usize,
@@ -379,13 +564,12 @@ impl Score {
             return Err(ModelError::InvalidTimeSignature { bar });
         }
         for (track, t) in self.tracks.iter().enumerate() {
-            if t.staves.is_empty() || !t.mix.is_valid() {
+            if t.staves.is_empty() || !t.mix.is_valid() || !kit_is_valid(&t.kit) {
                 return Err(ModelError::InvalidTrack { track });
             }
             for (staff, s) in t.staves.iter().enumerate() {
-                let string_count = s.tuning.strings.len();
-                if string_count == 0 {
-                    return Err(ModelError::EmptyTuning { track, staff });
+                if s.tuning.strings.len() > Tuning::MAX_STRINGS {
+                    return Err(ModelError::TooManyStrings { track, staff });
                 }
                 if s.bars.len() != self.master_bars.len() {
                     return Err(ModelError::BarCountMismatch {
@@ -400,7 +584,7 @@ impl Score {
                         && b.voices
                             .iter()
                             .flat_map(|v| &v.beats)
-                            .all(|beat| beat.is_valid_for(string_count));
+                            .all(|beat| s.holds(beat));
                     if !valid {
                         return Err(ModelError::InvalidBeat { track, staff, bar });
                     }

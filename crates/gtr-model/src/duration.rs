@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 /// Exact musical time, measured in whole notes.
 pub type Rational = num_rational::Ratio<i64>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum NoteValue {
     Whole,
@@ -49,7 +50,8 @@ impl NoteValue {
 }
 
 /// `actual` notes played in the time of `normal`, e.g. 3:2 for a triplet.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Tuplet {
     pub actual: NonZeroU8,
     pub normal: NonZeroU8,
@@ -62,7 +64,8 @@ impl Tuplet {
     };
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Duration {
     pub value: NoteValue,
     #[serde(default)]
@@ -71,6 +74,7 @@ pub struct Duration {
     pub tuplet: Option<Tuplet>,
     /// A second tuplet inside the first, such as a triplet within a quintuplet.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub nested: Option<Tuplet>,
 }
 

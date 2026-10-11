@@ -1,8 +1,13 @@
 //! The drum kit: which General MIDI percussion number is which piece, and how each piece
-//! is written on a percussion staff.
+//! is written on a percussion staff. A track can have a kit of its own in place of the
+//! standard one.
+
+use serde::{Deserialize, Serialize};
 
 /// The shape of a note on a percussion staff.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
 pub enum DrumHead {
     /// An ordinary notehead: drums.
     Normal,
@@ -16,7 +21,7 @@ pub enum DrumHead {
     Triangle,
 }
 
-/// One piece of the kit.
+/// One piece of the standard kit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DrumPiece {
     /// General MIDI percussion number, which is the fret of a note on a drum track.
@@ -25,6 +30,47 @@ pub struct DrumPiece {
     /// Steps above the middle line of the staff: lines are even, spaces odd.
     pub position: i32,
     pub head: DrumHead,
+    /// Played with a foot, and so written with its stem down, apart from the hands.
+    pub foot: bool,
+}
+
+/// One piece of a track's own kit.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct KitPiece {
+    /// General MIDI percussion number, which is the fret of a note on a drum track and
+    /// decides what the piece sounds like.
+    pub number: u8,
+    pub name: String,
+    /// Steps above the middle line of the staff: lines are even, spaces odd.
+    pub position: i8,
+    pub head: DrumHead,
+    /// Played with a foot, and so written with its stem down, apart from the hands.
+    #[serde(default)]
+    pub foot: bool,
+}
+
+impl KitPiece {
+    /// The most pieces a kit can have.
+    pub const MAX_PIECES: usize = 64;
+    /// Longest name of a piece, in characters.
+    pub const MAX_NAME: usize = 40;
+    /// The furthest from the middle line a piece can be written: three ledger lines out.
+    pub const MAX_POSITION: i8 = 10;
+
+    pub fn is_valid(&self) -> bool {
+        self.number <= 127
+            && self.name.chars().count() <= KitPiece::MAX_NAME
+            && self.position.abs() <= KitPiece::MAX_POSITION
+    }
+}
+
+/// Whether a kit can be a track's: no more pieces than a kit holds, each valid, and no
+/// number twice.
+pub fn kit_is_valid(kit: &[KitPiece]) -> bool {
+    kit.len() <= KitPiece::MAX_PIECES
+        && kit.iter().all(KitPiece::is_valid)
+        && (kit.iter().enumerate()).all(|(i, p)| kit[..i].iter().all(|q| q.number != p.number))
 }
 
 const fn piece(number: u8, name: &'static str, position: i32, head: DrumHead) -> DrumPiece {
@@ -33,6 +79,8 @@ const fn piece(number: u8, name: &'static str, position: i32, head: DrumHead) ->
         name,
         position,
         head,
+        // The bass drums and the hi-hat's pedal.
+        foot: matches!(number, 35 | 36 | 44),
     }
 }
 
@@ -64,9 +112,22 @@ pub const DRUM_KIT: [DrumPiece; 23] = [
     piece(57, "Crash cymbal 2", 6, DrumHead::Cross),
 ];
 
-/// The piece of the kit with a General MIDI percussion number, if the kit has it.
+/// The piece of the standard kit with a General MIDI percussion number, if it has it.
 pub fn drum_piece(number: u8) -> Option<&'static DrumPiece> {
     DRUM_KIT.iter().find(|p| p.number == number)
+}
+
+/// The standard kit as a kit a track can have and change.
+pub fn standard_kit() -> Vec<KitPiece> {
+    (DRUM_KIT.iter())
+        .map(|p| KitPiece {
+            number: p.number,
+            name: p.name.to_owned(),
+            position: p.position as i8,
+            head: p.head,
+            foot: p.foot,
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -79,5 +140,25 @@ mod tests {
         assert_eq!(drum_piece(38).map(|p| p.name), Some("Snare"));
         assert_eq!(drum_piece(42).map(|p| p.head), Some(DrumHead::Cross));
         assert!(drum_piece(20).is_none());
+        // The feet play the bass drums and the hi-hat's pedal.
+        let feet: Vec<u8> = (DRUM_KIT.iter().filter(|p| p.foot))
+            .map(|p| p.number)
+            .collect();
+        assert_eq!(feet, [35, 36, 44]);
+    }
+
+    #[test]
+    fn a_kit_of_a_tracks_own_is_checked() {
+        let mut kit = standard_kit();
+        assert!(kit_is_valid(&kit) && kit_is_valid(&[]));
+        assert_eq!(kit[1].name, "Bass drum");
+        kit[0].number = 36;
+        assert!(!kit_is_valid(&kit), "a number twice");
+        let mut kit = standard_kit();
+        kit[0].position = 11;
+        assert!(!kit_is_valid(&kit), "too far from the staff");
+        kit[0].position = -10;
+        kit[0].name = "x".repeat(41);
+        assert!(!kit_is_valid(&kit), "too long a name");
     }
 }

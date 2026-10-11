@@ -583,10 +583,10 @@ fn a_piano_is_edited_one_staff_at_a_time() {
     assert_eq!((e.cursor().track, e.cursor().staff), (1, 0));
 
     e.set_staff(1);
-    e.type_digit(3, false).unwrap();
+    e.enter_note().unwrap();
     let staves = &e.score().tracks[1].staves;
     assert!(staves[0].bars[0].voices[0].beats.is_empty());
-    assert_eq!(staves[1].bars[0].voices[0].beats[0].notes[0].fret, 3);
+    assert_eq!(staves[1].bars[0].voices[0].beats[0].notes.len(), 1);
     // A new bar reaches both staves, and a staff that does not exist is not gone to.
     e.insert_bar().unwrap();
     assert!(e.score().tracks[1].staves.iter().all(|s| s.bars.len() == 3));
@@ -596,6 +596,140 @@ fn a_piano_is_edited_one_staff_at_a_time() {
     e.set_track(0);
     assert_eq!(e.cursor().staff, 0);
     e.score().validate().unwrap();
+}
+
+#[test]
+fn notes_without_strings_are_entered_by_name_and_moved_by_pitch() {
+    let mut e = Editor::new(Score::blank());
+    e.add_track("Piano", Instrument::Piano, None).unwrap();
+    let pitches = |e: &Editor| -> Vec<u8> {
+        let beat = &e.score().tracks[1].staves[e.cursor().staff].bars[0].voices[0].beats[0];
+        beat.notes.iter().map(|n| n.string).collect()
+    };
+    // The cursor starts on the middle line of the staff: B above middle C.
+    assert_eq!(e.cursor().string, 71);
+    // A fret means nothing here.
+    assert!(e.type_digit(3, false).is_err() && e.set_fret(3).is_err());
+
+    // C is entered at the nearest C, which is the one above; then the E and G above it, as
+    // many notes on the beat as are wanted.
+    for letter in [0, 2, 4] {
+        e.enter_letter(letter).unwrap();
+    }
+    assert_eq!(pitches(&e), [72, 76, 79]);
+    assert_eq!(e.cursor().string, 79);
+    // The nearest F to that G is the one below it.
+    e.enter_letter(3).unwrap();
+    assert_eq!(pitches(&e), [72, 76, 77, 79]);
+
+    // Up and down go through the notes of the key; in D major that has F and C sharp.
+    e.set_key_signature(2).unwrap();
+    for (direction, expected) in [
+        (Move::Up, 78),
+        (Move::Up, 79),
+        (Move::Down, 78),
+        (Move::Down, 76),
+    ] {
+        e.move_cursor(direction, false).unwrap();
+        assert_eq!(e.cursor().string, expected);
+    }
+    // And a letter means the note the key has for it: F sharp.
+    e.enter_letter(3).unwrap();
+    assert_eq!(e.cursor().string, 78);
+    e.undo().unwrap();
+
+    // A semitone at a time moves the note under the cursor, and the cursor with it, but
+    // not onto another note; where there is no note only the cursor moves.
+    e.set_cursor(0, 0, 76, false);
+    e.shift_pitch(-1).unwrap();
+    assert_eq!((pitches(&e), e.cursor().string), (vec![72, 75, 77, 79], 75));
+    e.undo().unwrap();
+    assert_eq!(pitches(&e), [72, 76, 77, 79]);
+    e.set_cursor(0, 0, 76, false);
+    e.shift_pitch(1).unwrap();
+    assert_eq!((pitches(&e), e.cursor().string), (vec![72, 76, 77, 79], 77));
+    e.shift_pitch(1).unwrap();
+    assert_eq!((pitches(&e), e.cursor().string), (vec![72, 76, 78, 79], 78));
+
+    // Delete takes the note under the cursor, and Enter puts one back where it is.
+    e.delete().unwrap();
+    assert_eq!(pitches(&e), [72, 76, 79]);
+    e.enter_note().unwrap();
+    e.enter_note().unwrap();
+    assert_eq!(pitches(&e), [72, 76, 78, 79]);
+    // The left hand starts lower, and going back finds the top note of the beat.
+    e.set_staff(1);
+    assert_eq!(e.cursor().string, 48);
+    e.set_staff(0);
+    assert_eq!(e.cursor().string, 79);
+    e.score().validate().unwrap();
+}
+
+#[test]
+fn changing_to_and_from_a_piano_rewrites_the_notes() {
+    let mut e = Editor::new(Score::blank());
+    // A G major chord across all six strings, low to high: G2 B2 D3 G3 B3 G4.
+    for (string, fret) in [(5, 3), (4, 2), (3, 0), (2, 0), (1, 0), (0, 3)] {
+        e.set_cursor(0, 0, string, false);
+        e.type_digit(fret, false).unwrap();
+    }
+    let guitar = e.score().tracks[0].clone();
+
+    e.set_track_info(0, "Keys", Instrument::Piano).unwrap();
+    let track = &e.score().tracks[0];
+    assert_eq!((track.name.as_str(), track.staves.len()), ("Keys", 2));
+    assert!(
+        track
+            .staves
+            .iter()
+            .all(|s| s.is_pitched() && s.bars.len() == 1)
+    );
+    let pitches: Vec<u8> = (track.staves[0].bars[0].voices[0].beats[0].notes.iter())
+        .map(|n| n.string)
+        .collect();
+    assert_eq!(pitches, [43, 47, 50, 55, 59, 67]);
+    assert!(track.staves[1].bars[0].voices[0].beats.is_empty());
+    assert!(usize::from(e.cursor().string) < 128);
+    e.score().validate().unwrap();
+
+    // Back on a guitar every note finds a string, as near the nut as it can be played.
+    e.set_track_info(0, "Guitar", Instrument::SteelGuitar)
+        .unwrap();
+    let track = &e.score().tracks[0];
+    assert_eq!(track.staves.len(), 1);
+    assert_eq!(track.staves[0].tuning, Tuning::guitar_standard());
+    let frets: Vec<(u8, u8)> = (track.staves[0].bars[0].voices[0].beats[0].notes.iter())
+        .map(|n| (n.string, n.fret))
+        .collect();
+    assert_eq!(frets, [(0, 3), (1, 0), (2, 0), (3, 0), (4, 2), (5, 3)]);
+    assert!(e.cursor().string <= 5);
+    e.score().validate().unwrap();
+    // One step each way to undo.
+    e.undo().unwrap();
+    assert!(e.score().tracks[0].staves[0].is_pitched());
+    e.undo().unwrap();
+    assert_eq!(e.score().tracks[0], guitar);
+
+    // A bass has four strings for the six notes: the highest four get them. And a tuning
+    // cannot give a piano strings or take a guitar's away.
+    e.set_track_info(0, "Keys", Instrument::Piano).unwrap();
+    e.set_track_info(0, "Bass", Instrument::Bass).unwrap();
+    let frets: Vec<(u8, u8)> = (e.score().tracks[0].staves[0].bars[0].voices[0].beats[0]
+        .notes
+        .iter())
+    .map(|n| (n.string, n.fret))
+    .collect();
+    assert_eq!(frets, [(0, 24), (1, 21), (2, 22), (3, 22)]);
+    e.undo().unwrap();
+    assert!(e.set_tuning(Tuning::guitar_standard(), 0).is_err());
+    assert!(
+        e.add_track(
+            "Air",
+            Instrument::Piano,
+            Some((Tuning::guitar_standard(), 0))
+        )
+        .is_err()
+    );
 }
 
 #[test]
@@ -665,4 +799,35 @@ fn a_tempo_change_goes_on_the_beat_under_the_cursor() {
     assert_eq!(e.state().tempo_change, None);
     e.undo().unwrap();
     assert_eq!(e.state().tempo_change, Some(90));
+}
+
+#[test]
+fn a_drum_track_can_have_a_kit_of_its_own() {
+    let mut e = Editor::new(Score::blank());
+    e.add_track("Drums", Instrument::Drums, None).unwrap();
+    assert!(e.score().tracks[1].kit.is_empty());
+    assert_eq!(e.score().tracks[1].drum_kit().len(), 23);
+
+    // A kit of three pieces, with a cowbell where the snare is usually written.
+    let mut kit = gtr_model::standard_kit();
+    kit.retain(|p| matches!(p.number, 36 | 42 | 56));
+    kit[2].position = 1;
+    e.set_kit(1, kit.clone()).unwrap();
+    assert_eq!(e.score().tracks[1].drum_kit(), kit);
+    e.score().validate().unwrap();
+    // The same number twice is refused, and nothing changes.
+    let mut twice = kit.clone();
+    twice[1].number = 36;
+    assert!(e.set_kit(1, twice).is_err());
+    assert_eq!(e.score().tracks[1].kit, kit);
+    assert!(e.set_kit(9, kit.clone()).is_err());
+
+    // Setting the kit it already has is not an edit; undo gives the standard kit back.
+    e.set_kit(1, kit).unwrap();
+    e.undo().unwrap();
+    assert!(e.score().tracks[1].kit.is_empty());
+    // The kit is kept when the track becomes another instrument, and saved with it.
+    e.redo().unwrap();
+    e.set_track_info(1, "Kit", Instrument::Drums).unwrap();
+    assert_eq!(e.score().tracks[1].kit.len(), 3);
 }

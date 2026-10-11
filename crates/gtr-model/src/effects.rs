@@ -6,50 +6,68 @@ use crate::NoteValue;
 
 /// Playing techniques attached to a single note. Fields that are off are left out of the
 /// saved file.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default, deny_unknown_fields)]
 pub struct NoteEffects {
     /// Hammer-on or pull-off into the next note on the same string.
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub hammer: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub slide: Option<Slide>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub bend: Option<Bend>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub vibrato: Option<Vibrato>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub harmonic: Option<Harmonic>,
     /// For a harmonic made on a stopped string: how many frets above the note the string
     /// is touched, which decides the overtone that sounds. `None` is the kind's usual place.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub harmonic_touch: Option<u8>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub accent: Option<Accent>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub trill: Option<Trill>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub grace: Option<Grace>,
     /// Fretting-hand finger.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub left_finger: Option<Finger>,
     /// Picking-hand finger.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub right_finger: Option<Finger>,
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub palm_mute: bool,
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub let_ring: bool,
     /// A muted, pitchless note, written as an x.
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub dead: bool,
     /// A quiet note, written in parentheses.
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub ghost: bool,
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub staccato: bool,
     /// Tapped with the picking hand.
     #[serde(skip_serializing_if = "is_false")]
+    #[ts(optional, as = "Option<bool>")]
     pub tapped: bool,
 }
 
@@ -70,7 +88,8 @@ impl NoteEffects {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Slide {
     /// Slide to the next note and pick it.
@@ -84,7 +103,8 @@ pub enum Slide {
 }
 
 /// The common shapes of bend.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum BendKind {
     Bend,
@@ -94,7 +114,8 @@ pub enum BendKind {
 }
 
 /// One point of a [`Bend`] curve.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct CurvePoint {
     /// When the point is reached, from 0 at the start of the note to
     /// [`Bend::LENGTH`] at its end.
@@ -105,7 +126,8 @@ pub struct CurvePoint {
 
 /// A pitch curve over the length of a note, used for string bends and for the whammy bar.
 /// The pitch moves in straight lines from point to point.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Bend {
     pub points: Vec<CurvePoint>,
 }
@@ -193,14 +215,16 @@ pub fn interval_label(quarter_tones: i8) -> String {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Vibrato {
     Slight,
     Wide,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Harmonic {
     Natural,
@@ -257,7 +281,8 @@ impl Harmonic {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Accent {
     Normal,
@@ -265,7 +290,8 @@ pub enum Accent {
 }
 
 /// A rapid alternation between the note and another fret on the same string.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Trill {
     pub fret: u8,
     /// Length of each note of the trill.
@@ -282,7 +308,8 @@ impl Trill {
 }
 
 /// One note of a [`Grace`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct GraceNote {
     /// Index into the staff tuning, like a note's.
     pub string: u8,
@@ -291,7 +318,8 @@ pub struct GraceNote {
 
 /// Quick ornamental notes played one after another just before the main note, on its
 /// string or on others.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Grace {
     /// In the order they are played.
     pub notes: Vec<GraceNote>,
@@ -320,7 +348,8 @@ impl Grace {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Finger {
     Thumb,
@@ -342,7 +371,8 @@ impl Finger {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum PickStroke {
     Down,
@@ -350,7 +380,8 @@ pub enum PickStroke {
 }
 
 /// How the notes of a chord are spread out in time.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Strum {
     /// A quick strum from the lowest string to the highest.
@@ -362,14 +393,18 @@ pub enum Strum {
     Rasgueado,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Slap {
     Slap,
     Pop,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize, ts_rs::TS,
+)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Dynamic {
     Ppp,
@@ -400,7 +435,8 @@ impl Dynamic {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Hairpin {
     Crescendo,
@@ -409,7 +445,8 @@ pub enum Hairpin {
 
 /// The fingering of a chord: for each string from the highest to the lowest, the fret it is
 /// stopped at, zero for an open string or -1 for one that is not played.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 pub struct ChordDiagram {
     pub frets: Vec<i8>,
 }
@@ -434,47 +471,62 @@ impl ChordDiagram {
 }
 
 /// Playing techniques attached to a whole beat.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(default, deny_unknown_fields)]
 pub struct BeatEffects {
     /// Tremolo picking: the beat is re-picked in notes of this value.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub tremolo: Option<NoteValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub stroke: Option<PickStroke>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub strum: Option<Strum>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub slap: Option<Slap>,
     /// Whammy bar movement over the beat.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub whammy: Option<Bend>,
     /// A change of loudness that lasts until the next one.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub dynamic: Option<Dynamic>,
     /// The beat is part of a gradual change of loudness.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub hairpin: Option<Hairpin>,
     /// A pause mark over the beat.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
     pub fermata: bool,
     /// The name of the chord from this beat on, such as `Am7`.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub chord: Option<String>,
     /// How the chord is fingered, drawn as a diagram above the beat.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub diagram: Option<ChordDiagram>,
     /// The track's volume from this beat on, on the scale of the mixer.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub volume: Option<u8>,
     /// The track's pan from this beat on, on the scale of the mixer.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub pan: Option<i8>,
     /// Free text written above the beat.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
     pub text: Option<String>,
     /// The syllable sung on this beat in each line of the lyrics; empty for none.
     #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<String>>")]
     pub lyrics: Vec<String>,
 }
 

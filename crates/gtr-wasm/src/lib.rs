@@ -161,6 +161,12 @@ impl Document {
         self.editor.set_cursor(bar, beat, string, extend);
     }
 
+    /// Moves the cursor to the start of a bar, staying on its string or pitch.
+    #[wasm_bindgen(js_name = goToBar)]
+    pub fn go_to_bar(&mut self, bar: usize) {
+        self.editor.go_to_bar(bar);
+    }
+
     #[wasm_bindgen(js_name = setTrack)]
     pub fn set_track(&mut self, track: usize) {
         self.editor.set_track(track);
@@ -192,13 +198,38 @@ impl Document {
         Ok(self.editor.set_fret(fret)?)
     }
 
-    /// The pieces of the drum kit as JSON `[{ number, name }]`.
+    /// The pieces of the standard drum kit as JSON: `gtr_model::KitPiece` values.
     #[wasm_bindgen(js_name = drumKitJson)]
-    pub fn drum_kit_json() -> String {
-        let kit: Vec<_> = (gtr_model::DRUM_KIT.iter())
-            .map(|p| serde_json::json!({ "number": p.number, "name": p.name }))
-            .collect();
-        serde_json::Value::Array(kit).to_string()
+    pub fn drum_kit_json() -> Result<String, JsError> {
+        Ok(serde_json::to_string(&gtr_model::standard_kit())?)
+    }
+
+    /// Gives a drum track a kit of its own. `kit_json` holds `gtr_model::KitPiece` values;
+    /// an empty list gives the standard kit back.
+    #[wasm_bindgen(js_name = setDrumKit)]
+    pub fn set_drum_kit(&mut self, track: usize, kit_json: &str) -> Result<(), JsError> {
+        let kit: Vec<gtr_model::KitPiece> = serde_json::from_str(kit_json)?;
+        Ok(self.editor.set_kit(track, kit)?)
+    }
+
+    /// On a staff without strings, enters the note named by `letter`, from 0 for C to 6
+    /// for B, in the octave nearest the cursor.
+    #[wasm_bindgen(js_name = enterLetter)]
+    pub fn enter_letter(&mut self, letter: u8) -> Result<(), JsError> {
+        Ok(self.editor.enter_letter(letter)?)
+    }
+
+    /// On a staff without strings, puts a note at the cursor's pitch.
+    #[wasm_bindgen(js_name = enterNote)]
+    pub fn enter_note(&mut self) -> Result<(), JsError> {
+        Ok(self.editor.enter_note()?)
+    }
+
+    /// On a staff without strings, moves the note under the cursor, or just the cursor,
+    /// by `semitones`.
+    #[wasm_bindgen(js_name = shiftPitch)]
+    pub fn shift_pitch(&mut self, semitones: i8) -> Result<(), JsError> {
+        Ok(self.editor.shift_pitch(semitones)?)
     }
 
     pub fn rest(&mut self) -> Result<(), JsError> {

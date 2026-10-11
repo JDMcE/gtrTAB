@@ -88,6 +88,8 @@
   const cursor = $derived(editor.cursor);
   const staff = $derived(score.tracks[cursor.track]?.staves[cursor.staff]);
   const drums = $derived(score.tracks[cursor.track]?.instrument === 'drums');
+  /** A staff without strings, whose notes are pitches. */
+  const pitched = $derived(staff?.tuning.strings.length === 0);
   const beat = $derived(staff?.bars[cursor.bar]?.voices[0]?.beats[cursor.beat]);
   const time = $derived(score.master_bars[cursor.bar]?.time_signature);
   const note = $derived(editor.note);
@@ -105,6 +107,7 @@
   const pitch = $derived.by(() => {
     if (!note || !staff) return '';
     if (drums) return drumKit.find((p) => p.number === note.fret)?.name ?? 'not in the kit';
+    if (pitched) return noteName(note.string);
     return noteName(staff.tuning.strings[note.string] + staff.capo + note.fret);
   });
 
@@ -267,8 +270,13 @@
       <dd>{cursor.bar + 1} of {score.master_bars.length}</dd>
       <dt>Beat</dt>
       <dd>{cursor.beat + 1}</dd>
-      <dt>String</dt>
-      <dd>{cursor.string + 1}{#if staff && !drums}&ensp;({noteName(staff.tuning.strings[cursor.string] + staff.capo)}){/if}</dd>
+      {#if pitched}
+        <dt>Pitch</dt>
+        <dd>{noteName(cursor.string)}</dd>
+      {:else}
+        <dt>String</dt>
+        <dd>{cursor.string + 1}{#if staff && !drums}&ensp;({noteName(staff.tuning.strings[cursor.string] + staff.capo)}){/if}</dd>
+      {/if}
       <dt>Time</dt>
       <dd>
         {#if time}

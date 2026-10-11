@@ -190,7 +190,8 @@ pub struct Click {
 }
 
 /// When a beat of the followed track sounds, for moving the playback cursor.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct BeatTime {
     pub bar: usize,
     pub beat: usize,
@@ -397,7 +398,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
     let gains = beat_gains(staff);
     // Each voice keeps track of its own ties, slurs and ringing strings.
     let voice_count = staff.bars.iter().map(|b| b.voices.len()).max().unwrap_or(1);
-    let mut states = vec![vec![StringState::default(); staff.tuning.strings.len()]; voice_count];
+    let mut states = vec![vec![StringState::default(); staff.places()]; voice_count];
     for (b, this) in played.iter().enumerate() {
         let bar = &staff.bars[this.timing.bar];
         for (v, voice) in bar.voices.iter().enumerate() {
@@ -483,7 +484,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                             false => beat.notes.len() - 1 - order,
                         } as f64;
                     let string = usize::from(note.string);
-                    let Some(pitch) = staff.tuning.pitch(note.string, note.fret, staff.capo) else {
+                    let Some(pitch) = staff.pitch(note.string, note.fret) else {
                         continue;
                     };
                     let previous = strings[string];
@@ -536,11 +537,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         };
                         let mut last_string = None;
                         for (g, grace_note) in grace.notes.iter().enumerate() {
-                            let grace_pitch = (staff.tuning).pitch(
-                                grace_note.string,
-                                grace_note.fret,
-                                staff.capo,
-                            );
+                            let grace_pitch = staff.pitch(grace_note.string, grace_note.fret);
                             let mut ornament = NoteEvent::plain(
                                 first + length * g as f64,
                                 length,
@@ -658,10 +655,7 @@ fn note_event(
             // A natural harmonic sounds an overtone of the open string, chosen by where
             // the string is touched.
             Harmonic::Natural => {
-                let open = staff
-                    .tuning
-                    .pitch(note.string, 0, staff.capo)
-                    .unwrap_or(fretted);
+                let open = staff.pitch(note.string, 0).unwrap_or(fretted);
                 open.saturating_add(Harmonic::overtone(note.fret))
             }
             // The others sound an overtone of the stopped note, chosen by where above it
@@ -975,7 +969,7 @@ mod tests {
         drums.staves[0].bars[0].voices[0].beats[1].effects.pan = Some(50);
         let mut piano = Track::empty("Piano", Instrument::Piano, 1);
         assert_eq!(piano.staves.len(), 2);
-        piano.staves[1].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(5, 0)])];
+        piano.staves[1].bars[0].voices[0].beats = vec![Beat::new(quarter, vec![Note::new(28, 0)])];
         score.tracks.push(drums);
         score.tracks.push(piano);
 
@@ -1231,6 +1225,44 @@ mod tests {
         let tapped = t.notes.last().unwrap();
         assert!(tapped.soft && tapped.time == 0.5);
         assert!(t.notes[..8].iter().all(|n| !n.soft));
+    }
+
+    #[test]
+    fn a_staff_without_strings_plays_its_notes_as_the_pitches_they_are() {
+        use gtr_model::Track;
+
+        let mut score = Score::blank();
+        let mut piano = Track::empty("Piano", Instrument::Piano, 1);
+        let half = Duration::new(NoteValue::Half);
+        // A chord of more notes than a hand has strings to make up, then the top note held.
+        let chord: Vec<Note> = [48, 52, 55, 60, 64, 67, 72].map(|p| Note::new(p, 0)).into();
+        piano.staves[0].bars[0].voices[0].beats = vec![
+            Beat::new(half, chord),
+            Beat::new(
+                half,
+                vec![Note {
+                    tied: true,
+                    ..Note::new(72, 0)
+                }],
+            ),
+        ];
+        score.tracks.push(piano);
+        score.validate().unwrap();
+        let t = compile(&score, 1, &Options::default());
+        let notes: Vec<(u8, f64)> = t.notes.iter().map(|n| (n.pitch, n.duration)).collect();
+        assert_eq!(
+            notes,
+            [
+                (48, 1.0),
+                (52, 1.0),
+                (55, 1.0),
+                (60, 1.0),
+                (64, 1.0),
+                (67, 1.0),
+                (72, 2.0)
+            ]
+        );
+        assert!(t.notes.iter().all(|n| n.channel == 1));
     }
 
     #[test]

@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 5;
+pub const FORMAT_VERSION: u64 = 6;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -67,8 +67,21 @@ pub fn load(bytes: &[u8]) -> Result<Score, NativeError> {
         .unwrap_or_default();
     migrate(version, &mut score_json);
 
-    let score: Score = serde_json::from_value(score_json)?;
+    let mut score: Score = serde_json::from_value(score_json)?;
     score.validate()?;
+    if version < 6 {
+        // Version 6 writes a piano's notes as pitches. Before, each hand had six made-up
+        // strings to hold them.
+        for track in score
+            .tracks
+            .iter_mut()
+            .filter(|t| t.instrument.is_pitched())
+        {
+            for staff in &mut track.staves {
+                *staff = staff.to_pitched();
+            }
+        }
+    }
     Ok(score)
 }
 
@@ -179,6 +192,39 @@ mod tests {
             Some(gtr_model::Grace::single(string, 3, true, true))
         );
         // And what is saved now is read back as it is.
+        assert_eq!(load(&save(&loaded).unwrap()).unwrap(), loaded);
+    }
+
+    #[test]
+    fn version_5_pianos_lose_their_strings() {
+        use gtr_model::{Beat, Duration, Instrument, Note, NoteValue, Staff, Track, Tuning};
+
+        let mut score = demo_score();
+        let bars = score.tracks[0].staves[0].bars.clone();
+        let mut right = Staff {
+            tuning: Tuning::new([76, 71, 67, 62, 57, 52]),
+            capo: 0,
+            bars,
+        };
+        // E5 on the open first string, twice over with the fifth fret of the second, and
+        // middle C on the fourth.
+        right.bars[0].voices[0].beats = vec![Beat::new(
+            Duration::new(NoteValue::Quarter),
+            vec![Note::new(0, 0), Note::new(1, 5), Note::new(4, 3)],
+        )];
+        score
+            .tracks
+            .push(Track::new("Piano", Instrument::Piano, vec![right]));
+        let json = serde_json::json!({ "format_version": 5, "score": score }).to_string();
+        let loaded = load(&archive(&json)).unwrap();
+        let staff = &loaded.tracks[1].staves[0];
+        assert!(staff.is_pitched());
+        let pitches: Vec<(u8, u8)> = (staff.bars[0].voices[0].beats[0].notes.iter())
+            .map(|n| (n.string, n.fret))
+            .collect();
+        assert_eq!(pitches, [(60, 0), (76, 0)]);
+        // The guitar keeps its strings, and what is saved now is read back as it is.
+        assert_eq!(loaded.tracks[0], score.tracks[0]);
         assert_eq!(load(&save(&loaded).unwrap()).unwrap(), loaded);
     }
 

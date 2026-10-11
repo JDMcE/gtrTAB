@@ -36,6 +36,7 @@
   } from './lib/model';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
+  import KitDialog from './lib/KitDialog.svelte';
   import { Player, mixOf } from './lib/player';
   import {
     DEFAULT_SOUNDFONT,
@@ -116,7 +117,9 @@
   let prompt = $state.raw<Prompt | null>(null);
   let chordOpen = $state(false);
   /** The pieces of the drum kit, read from the core once it has loaded. */
-  let drumKit = $state.raw<DrumPiece[]>([]);
+  /** The kit every drum track starts with. */
+  let standardKit = $state.raw<DrumPiece[]>([]);
+  let kitDialog = $state(false);
   let shortcutsOpen = $state(false);
   let zoom = $state(1);
 
@@ -451,7 +454,7 @@
   const pickTrack = (track: number, bar: number | null) =>
     edit((d) => {
       d.setTrack(track);
-      if (bar !== null && editor) d.setCursor(bar, 0, editor.cursor.string, false);
+      if (bar !== null) d.goToBar(bar);
     });
   const setMix = (track: number, mix: Mix) => edit((d) => d.setMix(track, JSON.stringify(mix)));
   const moveTrack = (by: number) => edit((d) => d.moveTrack(trackIndex(), trackIndex() + by));
@@ -473,6 +476,12 @@
     (editor?.cursor.staff ?? 0) >= (score?.tracks[trackIndex()]?.staves.length ?? 1) - 1;
   const onDrums = () => score?.tracks[trackIndex()]?.instrument === 'drums';
 
+  /** The kit of the cursor's track: its own, if it has one. */
+  const drumKit = $derived.by(() => {
+    const own = score?.tracks[editor?.cursor.track ?? 0]?.kit;
+    return own?.length ? own : standardKit;
+  });
+
   /** Entering a piece of the drum kit by name, for those who do not know its number. */
   const drumPieces = $derived(
     drumKit.map((piece): Command => ({
@@ -485,6 +494,10 @@
 
   // --- Bar marks and beat text ---
 
+  /** Whether the cursor is on a staff without strings, where notes are entered by name. */
+  const pitched = $derived(
+    !!score && !!editor && score.tracks[editor.cursor.track]?.staves[editor.cursor.staff]?.tuning.strings.length === 0,
+  );
   const masterBar = $derived(score?.master_bars[editor?.cursor.bar ?? 0]);
   const setBar = (field: string, value: unknown) =>
     edit((d) => d.setBarProperty(field, JSON.stringify(value)));
@@ -767,6 +780,7 @@
 
     addTrack: { label: 'Add a track…', icon: 'addTrack', run: () => (dialog = 'addTrack') },
     trackSettings: { label: 'Instrument, tuning, capo and mix…', icon: 'trackSettings', run: () => (dialog = 'track') },
+    drumKit: { label: 'Drum kit…', disabled: () => !onDrums(), run: () => (kitDialog = true) },
     removeTrack: { label: 'Remove the track', icon: 'removeTrack', disabled: () => trackCount() < 2, run: () => edit((d) => d.removeTrack(trackIndex())) },
     trackUp: { label: 'Move the track up', icon: 'moveUp', disabled: () => trackIndex() === 0, run: () => moveTrack(-1) },
     trackDown: { label: 'Move the track down', icon: 'moveDown', disabled: () => trackIndex() >= trackCount() - 1, run: () => moveTrack(1) },
@@ -979,7 +993,7 @@
           '-',
           cmd.previousTrack, cmd.nextTrack,
           '-',
-          cmd.addTrack, cmd.trackSettings, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
+          cmd.addTrack, cmd.trackSettings, cmd.drumKit, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
           '-',
           cmd.mute, cmd.solo,
         ],
@@ -1006,7 +1020,7 @@
     {
       title: 'Moving',
       rows: [
-        { keys: '← → ↑ ↓', label: 'Move between beats and strings' },
+        { keys: '← → ↑ ↓', label: 'Move between beats and strings, or on a piano the notes of the key' },
         { keys: 'Shift+arrows', label: 'Extend the selection' },
         { keys: 'Ctrl+← / Ctrl+→', label: 'Previous or next bar' },
         { keys: 'Home / End', label: 'First or last bar' },
@@ -1018,6 +1032,9 @@
       title: 'Entering notes',
       rows: [
         { keys: '0–9', label: 'Fret; two digits typed quickly make one number' },
+        { keys: 'A–G', label: 'On a piano: the note of that name nearest the cursor' },
+        { keys: 'Enter', label: 'On a piano: a note where the cursor is' },
+        { keys: 'Alt+↑ / Alt+↓', label: 'On a piano: the note under the cursor a semitone up or down' },
         { keys: '+ / −', label: 'Shorter or longer note value' },
         ...keyRows(cmd.dot, cmd.triplet, cmd.rest, cmd.tie, cmd.insertBeat, cmd.delete, cmd.deleteBeats, cmd.insertBar),
       ],
@@ -1097,8 +1114,18 @@
       return undefined;
     }
     if (event.altKey) {
+      // On a staff without strings, a semitone up or down for the note under the cursor.
+      if (pitched && (key === 'ArrowUp' || key === 'ArrowDown')) {
+        return () => edit((d) => d.shiftPitch(key === 'ArrowUp' ? 1 : -1));
+      }
       const voice = /^Digit([1-4])$/.exec(event.code);
       return voice ? voices[Number(voice[1]) - 1].run : undefined;
+    }
+    if (pitched) {
+      // Notes are entered by name; the letters keep their other meanings on strings.
+      const letter = key.length === 1 ? 'cdefgab'.indexOf(key.toLowerCase()) : -1;
+      if (letter >= 0) return () => edit((d) => d.enterLetter(letter));
+      if (key === 'Enter') return () => edit((d) => d.enterNote());
     }
 
     if (/^[0-9]$/.test(key)) {
@@ -1151,7 +1178,7 @@
   onMount(() => {
     run(async () => {
       await init();
-      drumKit = JSON.parse(Document.drumKitJson());
+      standardKit = JSON.parse(Document.drumKitJson());
       const autosave = readAutosave();
       if (autosave) {
         try {
@@ -1274,6 +1301,7 @@
           getLayout={(pageWidth) => JSON.parse(doc!.layoutJson(pageWidth, viewJson)) as Layout}
           revision={`${editor.revision}:${editor.cursor.track}:${editor.cursor.staff}:${editor.cursor.voice}:${viewJson}:${fileName}`}
           {editor}
+          keys={score.master_bars.map((bar) => bar.key_signature)}
           {playhead}
           {zoom}
           theme={prefs.theme}
@@ -1364,13 +1392,20 @@
         const index = trackIndex();
         const old = score!.tracks[index];
         const staff = old.staves[editor!.cursor.staff] ?? old.staves[0];
-        // The tuning goes first: if notes rule it out, nothing else has changed yet. A piano
-        // and a drum kit have none to set.
+        // A change to or from a piano rewrites the notes for the new instrument, on its
+        // usual strings, so it goes before any tuning; the tuning is then set on those.
+        const piano = (i: string) => i === 'piano';
+        const rewritten = piano(instrument) !== piano(old.instrument);
+        if (rewritten) d.setTrackInfo(index, name, instrument);
+        // Otherwise the tuning goes first: if notes rule it out, nothing else has changed
+        // yet. A piano and a drum kit have none to set.
         const retuned = capo !== staff.capo || strings.join() !== staff.tuning.strings.join();
-        if (strings.length && retuned) {
+        if (strings.length && (retuned || rewritten)) {
           d.setTuning(new Uint8Array(strings), capo);
         }
-        if (name !== old.name || instrument !== old.instrument) d.setTrackInfo(index, name, instrument);
+        if (!rewritten && (name !== old.name || instrument !== old.instrument)) {
+          d.setTrackInfo(index, name, instrument);
+        }
         d.setMix(index, JSON.stringify(mix));
       });
     }}
@@ -1415,6 +1450,18 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if kitDialog && editor}
+  <KitDialog
+    kit={drumKit}
+    standard={standardKit}
+    onapply={(kit) => {
+      kitDialog = false;
+      edit((d) => d.setDrumKit(trackIndex(), JSON.stringify(kit)));
+    }}
+    onclose={() => (kitDialog = false)}
+  />
 {/if}
 
 {#if shortcutsOpen}

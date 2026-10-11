@@ -1,16 +1,24 @@
 use serde::Serialize;
 
 /// A laid-out score. Coordinates are in pixels at 100% zoom, origin top left.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct Layout {
     pub width: f64,
     pub height: f64,
     /// Vertical distance between adjacent string lines.
     pub string_spacing: f64,
-    /// Strings of the track being edited.
+    /// Strings of the staff being edited, or if it has none the number of pitches there are.
     pub string_count: usize,
-    /// Whether tab staves are shown, which is where the cursor picks out a string.
+    /// Whether the staff being edited is shown as tab, which is where the cursor picks
+    /// out a string.
     pub tab: bool,
+    /// Set when the staff being edited has no strings and is shown as notation, where
+    /// the cursor picks out a pitch: the note on the staff's middle line, counted in
+    /// steps of the scale from C in the octave below MIDI's lowest.
+    pub middle: Option<i32>,
+    /// Vertical distance between one step of the scale and the next on a notation staff.
+    pub step: f64,
     pub items: Vec<Item>,
     pub systems: Vec<SystemBox>,
     /// One entry per bar of the score.
@@ -18,12 +26,13 @@ pub struct Layout {
 }
 
 /// One line of music.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct SystemBox {
     /// Top of the system including the space reserved above the staff.
     pub top: f64,
-    /// Y of the first (highest) string line of the track being edited, or of the top line
-    /// of its notation when no tab is shown.
+    /// Y of the first (highest) string line of the staff being edited, or of the top line
+    /// of its notation when no tab is shown, or of the middle line if it has no strings.
     pub y: f64,
     pub bottom: f64,
     /// Top and bottom staff lines of the track being edited, across all its staves.
@@ -34,20 +43,25 @@ pub struct SystemBox {
 }
 
 /// The space one track takes on a line.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct RowBox {
     pub track: usize,
     /// Which of the track's staves this is, counted from the top.
     pub staff: usize,
     pub top: f64,
     pub bottom: f64,
-    /// Y of the track's first string line, or of the top line of its notation.
+    /// Y of the track's first string line, or of the top line of its notation, or of the
+    /// middle line of a staff without strings.
     pub y: f64,
     /// Number of string lines shown; zero without a tab staff.
     pub strings: usize,
+    /// The note on the middle line of a staff without strings; see [`Layout::middle`].
+    pub middle: Option<i32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 pub struct BarBox {
     pub system: usize,
     pub x: f64,
@@ -60,7 +74,8 @@ pub struct BarBox {
 }
 
 /// How a bar's content compares with its time signature.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum BarStatus {
     Empty,
@@ -69,7 +84,8 @@ pub enum BarStatus {
     Overfull,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Color {
     Ink,
@@ -77,7 +93,8 @@ pub enum Color {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Font {
     /// Titles and labels.
@@ -88,7 +105,8 @@ pub enum Font {
     Music,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(rename_all = "snake_case")]
 pub enum Align {
     Left,
@@ -96,7 +114,8 @@ pub enum Align {
     Right,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, ts_rs::TS)]
+#[ts(export)]
 #[serde(tag = "t", rename_all = "snake_case")]
 pub enum Item {
     Line {

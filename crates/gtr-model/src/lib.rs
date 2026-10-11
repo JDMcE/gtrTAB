@@ -10,7 +10,7 @@ mod score;
 mod tuning;
 
 pub use demo::demo_score;
-pub use drums::{DRUM_KIT, DrumHead, DrumPiece, drum_piece};
+pub use drums::{DRUM_KIT, DrumHead, DrumPiece, KitPiece, drum_piece, kit_is_valid, standard_kit};
 pub use duration::{Duration, NoteValue, Rational, Tuplet};
 pub use effects::{
     Accent, BeatEffects, Bend, BendKind, ChordDiagram, CurvePoint, Dynamic, Finger, Grace,

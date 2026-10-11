@@ -2,8 +2,8 @@
 //! accidentals and ledger lines. It can also show rhythm slashes in place of pitches.
 
 use gtr_model::{
-    Beat, Clef, DrumHead, Harmonic, MasterBar, Note, NoteValue, Rational, Slide, Staff,
-    TimeSignature, drum_piece,
+    Bar, Beat, Clef, DrumHead, Duration, Harmonic, KitPiece, MasterBar, Note, NoteValue, Rational,
+    Slide, Staff, TimeSignature, Voice,
 };
 
 use crate::display::r;
@@ -118,7 +118,7 @@ fn key_alters(key: i8) -> [i8; 7] {
 }
 
 /// The diatonic step, counted from C0, on a clef's middle line.
-fn middle_line(clef: Clef) -> i32 {
+pub(crate) fn middle_line(clef: Clef) -> i32 {
     match clef {
         // B4
         Clef::Treble => 4 * 7 + 6,
@@ -137,6 +137,7 @@ pub(crate) fn spell(
     clef: Clef,
     transposition: i8,
     masters: &[MasterBar],
+    kit: &[KitPiece],
 ) -> Vec<SpelledBar> {
     let middle = middle_line(clef);
     (staff.bars.iter().zip(masters))
@@ -158,9 +159,9 @@ pub(crate) fn spell(
                                 .map(|note| {
                                     if clef == Clef::Percussion {
                                         // The fret names a piece of the kit, which has its own place and shape.
-                                        let piece = drum_piece(note.fret);
+                                        let piece = kit.iter().find(|p| p.number == note.fret);
                                         return Spelled {
-                                            position: piece.map_or(0, |p| p.position),
+                                            position: piece.map_or(0, |p| p.position.into()),
                                             accidental: None,
                                             head: piece.and_then(|p| match p.head {
                                                 DrumHead::Normal => None,
@@ -171,10 +172,8 @@ pub(crate) fn spell(
                                             }),
                                         };
                                     }
-                                    let sounding = staff
-                                        .tuning
-                                        .pitch(note.string, note.fret, staff.capo)
-                                        .unwrap_or(60);
+                                    let sounding =
+                                        staff.pitch(note.string, note.fret).unwrap_or(60);
                                     let pitch = i32::from(sounding) + i32::from(transposition);
                                     let (step, alter) = spelling[pitch.rem_euclid(12) as usize];
                                     let diatonic = (pitch.div_euclid(12) - 1) * 7 + step;
@@ -198,6 +197,105 @@ pub(crate) fn spell(
                 .collect()
         })
         .collect()
+}
+
+/// A drum staff redrawn with the feet apart from the hands.
+pub(crate) struct Split {
+    /// The staff with every bar that is to be split in two voices: the hands' and the feet's.
+    pub staff: Staff,
+    /// For each bar that was split, the beat of the bar as written that each beat of the
+    /// feet's voice stands under, or `None` for a rest that is not drawn.
+    pub feet: Vec<Option<Vec<Option<usize>>>>,
+}
+
+/// The note values without a tuplet, with a dot and without, longest first.
+fn plain_durations() -> impl Iterator<Item = Duration> {
+    NoteValue::ALL.into_iter().flat_map(|value| {
+        [1, 0].map(|dots| Duration {
+            dots,
+            ..Duration::new(value)
+        })
+    })
+}
+
+/// Splits the bars of a drum staff that are written in one voice into two: what the hands
+/// play, with stems up, and what the feet play, with stems down, as drum music is read.
+/// The hands keep the rhythm as written. A foot's note lasts until the next one or the end
+/// of its beat, whichever comes first, and the gaps between them are rests that are not
+/// drawn. Returns nothing if no bar has both hands and feet in a single voice.
+pub(crate) fn split_feet(staff: &Staff, kit: &[KitPiece], masters: &[MasterBar]) -> Option<Split> {
+    let foot = |note: &Note| kit.iter().any(|p| p.foot && p.number == note.fret);
+    let zero = Rational::from_integer(0);
+    let mut feet = vec![None; staff.bars.len()];
+    let mut bars = staff.bars.clone();
+    for ((bar, master), source) in bars.iter_mut().zip(masters).zip(&mut feet) {
+        let written = bar.voices.iter().filter(|v| !v.beats.is_empty()).count();
+        let Some(beats) = bar.voices.first().map(|v| v.beats.clone()) else {
+            continue;
+        };
+        let notes = || beats.iter().flat_map(|b| &b.notes);
+        if written != 1 || beats.is_empty() || !notes().any(foot) || notes().all(foot) {
+            continue;
+        }
+        let signature = master.time_signature;
+        let pulse = match signature.denominator == 8 && signature.numerator.is_multiple_of(3) {
+            true => Rational::new(3, 8),
+            false => Rational::new(1, 4),
+        };
+        // Where each beat starts, and where the bar ends.
+        let mut starts = Vec::with_capacity(beats.len());
+        let mut end = zero;
+        for beat in &beats {
+            starts.push(end);
+            end += beat.duration.length();
+        }
+        let end = end.max(signature.bar_length());
+
+        let mut low = Voice::default();
+        let mut under: Vec<Option<usize>> = Vec::new();
+        // Fills a silence with rests, longest first, as far as plain note values can.
+        let rest = |mut length: Rational, low: &mut Voice, under: &mut Vec<Option<usize>>| {
+            while let Some(duration) = plain_durations().find(|d| d.length() <= length) {
+                length -= duration.length();
+                low.beats.push(Beat::rest(duration));
+                under.push(None);
+            }
+        };
+        let kicks: Vec<usize> = (0..beats.len())
+            .filter(|&i| beats[i].notes.iter().any(foot))
+            .collect();
+        rest(starts[kicks[0]], &mut low, &mut under);
+        for (k, &i) in kicks.iter().enumerate() {
+            let until = kicks.get(k + 1).map_or(end, |&next| starts[next]);
+            let gap = until - starts[i];
+            let written = beats[i].duration;
+            // As long as the gap allows, up to a beat; never shorter than it was written.
+            let duration = plain_durations()
+                .find(|d| d.length() <= gap.min(pulse))
+                .filter(|d| d.length() >= written.length())
+                .unwrap_or(written);
+            let notes = beats[i].notes.iter().filter(|n| foot(n)).cloned().collect();
+            low.beats.push(Beat::new(duration, notes));
+            under.push(Some(i));
+            rest(gap - duration.length(), &mut low, &mut under);
+        }
+        let mut high = Voice { beats };
+        for beat in &mut high.beats {
+            beat.notes.retain(|n| !foot(n));
+        }
+        *bar = Bar {
+            voices: vec![high, low],
+        };
+        *source = Some(under);
+    }
+    feet.iter().any(Option::is_some).then_some(Split {
+        staff: Staff {
+            tuning: staff.tuning.clone(),
+            capo: staff.capo,
+            bars,
+        },
+        feet,
+    })
 }
 
 /// Room each beat of a bar needs to its left for its accidentals, as `[voice][beat]`.
@@ -328,6 +426,9 @@ pub(crate) struct Notation<'a> {
     /// First bar of the line and the bar after its last.
     pub first: usize,
     pub end: usize,
+    /// On a drum staff split into hands and feet, where the feet's beats stand; see
+    /// [`Split::feet`].
+    pub feet: Option<&'a [Option<Vec<Option<usize>>>]>,
 }
 
 /// Vertical space a staff's music takes, relative to its middle line.
@@ -375,6 +476,18 @@ impl Notation<'_> {
     }
 
     fn x(&self, bar: usize, voice: usize, beat: usize) -> Option<f64> {
+        // The feet's voice of a split bar was not laid out: its notes stand under the
+        // beats of the bar as written, and its rests nowhere.
+        if let Some(under) = self.feet.and_then(|feet| feet.get(bar)?.as_ref())
+            && voice == 1
+        {
+            return self
+                .xs
+                .first()?
+                .get(bar)?
+                .get((*under.get(beat)?)?)
+                .copied();
+        }
         self.xs.get(voice)?.get(bar)?.get(beat).copied()
     }
 
@@ -854,7 +967,7 @@ mod tests {
     fn spelled_in(key: i8, frets: &[(u8, u8)]) -> Vec<Spelled> {
         let mut master = MasterBar::new(TimeSignature::COMMON);
         master.key_signature = key;
-        let bars = spell(&staff_of(frets), Clef::Treble, 12, &[master]);
+        let bars = spell(&staff_of(frets), Clef::Treble, 12, &[master], &[]);
         bars[0][0].iter().map(|beat| beat[0]).collect()
     }
 
@@ -904,7 +1017,14 @@ mod tests {
         let mut staff = staff_of(&[(4, 36), (0, 38), (2, 42)]);
         staff.tuning = Tuning::new([0; 5]);
         let master = MasterBar::new(TimeSignature::COMMON);
-        let bars = spell(&staff, Clef::Percussion, 0, &[master]);
+        let kit = gtr_model::standard_kit();
+        let bars = spell(
+            &staff,
+            Clef::Percussion,
+            0,
+            std::slice::from_ref(&master),
+            &kit,
+        );
         let notes: Vec<Spelled> = bars[0][0].iter().map(|beat| beat[0]).collect();
         assert_eq!(
             notes.iter().map(|n| n.position).collect::<Vec<_>>(),
@@ -915,6 +1035,121 @@ mod tests {
             [None, None, Some(0xE0A9)]
         );
         assert!(notes.iter().all(|n| n.accidental.is_none()));
+
+        // A kit of the track's own moves a piece and gives it another head.
+        let mut kit = kit;
+        let snare = kit.iter_mut().find(|p| p.number == 38).unwrap();
+        (snare.position, snare.head) = (3, DrumHead::Triangle);
+        let bars = spell(&staff, Clef::Percussion, 0, &[master], &kit);
+        assert_eq!(
+            (bars[0][0][1][0].position, bars[0][0][1][0].head),
+            (3, Some(0xE0BE))
+        );
+        // A number the kit does not have is written on the middle line.
+        assert_eq!(
+            spell(
+                &staff,
+                Clef::Percussion,
+                0,
+                &[MasterBar::new(TimeSignature::COMMON)],
+                &[]
+            )[0][0][0][0]
+                .position,
+            0
+        );
+    }
+
+    #[test]
+    fn hands_and_feet_are_split_into_two_voices() {
+        let eighth = Duration::new(NoteValue::Eighth);
+        let beat = |frets: &[u8]| {
+            let notes = frets
+                .iter()
+                .enumerate()
+                .map(|(s, &f)| Note::new(s as u8, f));
+            Beat::new(eighth, notes.collect())
+        };
+        // Eighth-note hi-hats, with the bass drum on one, the and of two, and three, and
+        // the snare on two and four; then a bar of hi-hats alone, and a bar for the feet.
+        let groove = [
+            &[42, 36][..],
+            &[42],
+            &[42, 38],
+            &[42, 36],
+            &[42, 36],
+            &[42],
+            &[42, 38],
+            &[42],
+        ];
+        let hats = vec![beat(&[42]); 8];
+        let pedal = vec![Beat::new(
+            Duration::new(NoteValue::Whole),
+            vec![Note::new(0, 44)],
+        )];
+        let staff = Staff {
+            tuning: Tuning::new([0; 5]),
+            capo: 0,
+            bars: [groove.iter().map(|f| beat(f)).collect(), hats, pedal]
+                .into_iter()
+                .map(|beats| Bar {
+                    voices: vec![Voice { beats }],
+                })
+                .collect(),
+        };
+        let masters = vec![MasterBar::new(TimeSignature::COMMON); 3];
+        let kit = gtr_model::standard_kit();
+        let split = split_feet(&staff, &kit, &masters).unwrap();
+
+        // Only the bar with both is split; the others are as they were written.
+        assert_eq!(split.staff.bars[1..], staff.bars[1..]);
+        assert!(split.feet[0].is_some() && split.feet[1].is_none() && split.feet[2].is_none());
+        let [hands, feet] = split.staff.bars[0].voices.as_slice() else {
+            panic!("the bar should have two voices");
+        };
+        // The hands keep their eight eighth notes, without the bass drum.
+        assert_eq!(hands.beats.len(), 8);
+        assert!(hands.beats.iter().all(|b| b.duration == eighth));
+        let frets = |b: &Beat| b.notes.iter().map(|n| n.fret).collect::<Vec<_>>();
+        assert_eq!(frets(&hands.beats[0]), [42]);
+        assert_eq!(frets(&hands.beats[2]), [42, 38]);
+        // The feet: a quarter note, a rest that is not drawn, two eighths and a quarter,
+        // and rests to the end of the bar. It still adds up to the bar.
+        let written: Vec<(u32, usize, Option<usize>)> = (feet.beats.iter())
+            .zip(split.feet[0].as_ref().unwrap())
+            .map(|(b, under)| (b.duration.value as u32, b.notes.len(), *under))
+            .collect();
+        let (quarter, eighth) = (2, 3);
+        assert_eq!(
+            written,
+            [
+                (quarter, 1, Some(0)),
+                (eighth, 0, None),
+                (eighth, 1, Some(3)),
+                (quarter, 1, Some(4)),
+                (quarter, 0, None),
+            ]
+        );
+        let length: Rational = feet.beats.iter().map(|b| b.duration.length()).sum();
+        assert_eq!(length, Rational::from_integer(1));
+
+        // Nothing to split where the feet, or the hands, have the bar to themselves, or
+        // where it is already written in two voices.
+        assert!(
+            split_feet(
+                &Staff {
+                    bars: staff.bars[1..].to_vec(),
+                    ..staff.clone()
+                },
+                &kit,
+                &masters
+            )
+            .is_none()
+        );
+        let mut voiced = staff.clone();
+        voiced.bars[0].voices.push(Voice {
+            beats: vec![beat(&[36])],
+        });
+        assert!(split_feet(&voiced, &kit, &masters).is_none());
     }
 
     #[test]
@@ -927,6 +1162,7 @@ mod tests {
             Clef::Bass,
             12,
             &[MasterBar::new(TimeSignature::COMMON)],
+            &[],
         );
         assert_eq!(bars[0][0][0][0].position, 0);
     }
