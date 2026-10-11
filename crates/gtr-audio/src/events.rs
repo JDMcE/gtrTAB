@@ -472,8 +472,11 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         continue;
                     }
                     if let Some(index) = previous.ringing {
+                        // The string rings until it is played again, but not for ever: no
+                        // longer than its limit, or than the note is written if that is more.
                         let event = &mut timeline.notes[index];
-                        event.duration = time - event.time;
+                        let limit = MAX_RING.max(event.duration);
+                        event.duration = (time - event.time).min(limit);
                     }
 
                     let next_bar = played.get(b + 1).map(|next| &staff.bars[next.bar]);
@@ -554,7 +557,8 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
     // Notes still ringing at the end sustain to the end of the passage.
     for index in states.iter().flatten().filter_map(|s| s.ringing) {
         let event = &mut timeline.notes[index];
-        event.duration = (end - event.time).clamp(event.duration, MAX_RING);
+        // To the end, within the limit; a note already written longer keeps its length.
+        event.duration = (end - event.time).min(MAX_RING).max(event.duration);
     }
 }
 
@@ -1081,6 +1085,43 @@ mod tests {
         let ringing = t.notes.iter().find(|n| n.pitch == 40).unwrap();
         // The open low E rings through two beats on the next string, until fret 3 replaces it.
         assert_eq!(ringing.duration, 1.5);
+    }
+
+    #[test]
+    fn a_ringing_note_is_limited_however_long_the_string_is_left_alone() {
+        // Let ring on the low string, then six bars before that string is played again.
+        let mut score = quarters(vec![with(0, |e| e.let_ring = true)]);
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        for _ in 0..6 {
+            score
+                .master_bars
+                .push(MasterBar::new(gtr_model::TimeSignature::COMMON));
+            score.tracks[0].staves[0].bars.push(gtr_model::Bar::empty());
+        }
+        score.tracks[0].staves[0].bars[6] = bar.clone();
+        let t = compile(&score, 0, &Options::default());
+        let lengths: Vec<f64> = t.notes.iter().map(|n| n.duration).collect();
+        // The first stops at the limit; the second rings to the end of its bar.
+        assert_eq!(lengths, [MAX_RING, 2.0]);
+
+        // A ringing note written longer than the limit, by ties, keeps its written length
+        // when the passage ends. This used to stop playback altogether.
+        let whole = Duration::new(NoteValue::Whole);
+        let tied = Note {
+            tied: true,
+            ..with(0, |e| e.let_ring = true)
+        };
+        for bar in &mut score.tracks[0].staves[0].bars {
+            *bar = gtr_model::Bar::empty();
+        }
+        let bars = &mut score.tracks[0].staves[0].bars;
+        bars[0].voices[0].beats = vec![Beat::new(whole, vec![with(0, |e| e.let_ring = true)])];
+        for bar in &mut bars[1..4] {
+            bar.voices[0].beats = vec![Beat::new(whole, vec![tied.clone()])];
+        }
+        let t = compile(&score, 0, &Options::default());
+        assert_eq!(t.notes.len(), 1);
+        assert_eq!(t.notes[0].duration, 8.0);
     }
 
     #[test]
