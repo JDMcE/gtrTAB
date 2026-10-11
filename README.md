@@ -63,8 +63,20 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting.
 | Ctrl+Z / Ctrl+Y | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
+| ? or F1 | List every shortcut |
+| Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
+| Arrow keys in a bar, the palette or a menu | Move between its controls |
+| Esc | Back to the score |
 
-Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord. The toolbar has the rest: other slides, bends and harmonics, wide vibrato, staccato, heavy accent, tremolo picking, pick strokes, trills, grace notes, strums and arpeggios, slap and pop, dynamics, tuplets and fingering.
+Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord.
+
+## Interface
+
+- **Bars** along the top: menus, file and edit buttons, then playback, zoom, panel switches and the theme switch. They share one row in a wide window and stack in a narrow one.
+- **Palette** on the left: what is used while writing, grouped into note values, techniques on the note, techniques on the beat, and bars and score. Each group folds away, and the palette narrows to two columns in a small window or from the View menu.
+- **Menus** hold everything, including the less common techniques: other slides and harmonics, tuplets, arpeggios, rasgueado, slap and pop, and fingering.
+- **Inspector** on the right: everything set on the beat and note under the cursor, each with a button to remove it and, for bends, the whammy bar, trills and grace notes, one to edit it. Fingering is set here too. It opens by default when the window is wide enough to show it beside a full page.
+- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark.
 
 Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp`, `.gp5`) open through Open or by dropping them on the window.
 
@@ -77,3 +89,4 @@ Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp
 ## Third-party assets
 
 - `app/ui/public/fonts/Bravura.woff2`: the Bravura music font by Steinberg, under the SIL Open Font License (`Bravura-OFL.txt` alongside it).
+- Interface icons from [Lucide](https://lucide.dev) (`@lucide/svelte`), under the ISC License. Music symbols in the interface are Bravura glyphs; the guitar technique icons are drawn in `app/ui/src/lib/ui/icons.ts`.

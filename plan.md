@@ -8,7 +8,7 @@ A guitar tablature editor aiming for feature parity with Guitar Pro 8, shipped a
 |---|---|---|
 | 1 | Stack | Rust core + Svelte/TypeScript UI + Tauri 2 |
 | 2 | Licence | Will be open source eventually. Only bundle assets with open licences (e.g. Bravura under OFL, freely licensed SoundFonts). Specific licence still to be chosen |
-| 3 | Guitar Pro import | Simple read-only importer in phase 2, full import and export in phase 5 |
+| 3 | Guitar Pro import | Simple read-only importer in phase 2, full import and export in phase 6 |
 
 ## Stack
 
@@ -52,7 +52,7 @@ tests/
 
 ## Phases
 
-Each phase ends with something usable. Phases 1–3 make a useful riff-writing tool; later phases are the long tail towards parity.
+Each phase ends with something usable. Phases 1–3 make a useful riff-writing tool; phase 4 tidies the interface they left behind; later phases are the long tail towards parity.
 
 ### Phase 1 — Foundations
 
@@ -77,7 +77,7 @@ Each phase ends with something usable. Phases 1–3 make a useful riff-writing t
 - [x] Time signature, tempo and tuning dialogs, including capo and 6/7/8-string guitars and 4/5-string bass
 - [x] Bar validation: highlight incomplete and overfull bars
 - [x] Playback with a moving cursor, from the cursor's bar or over the selected bars
-- [ ] SoundFont synth. Playback currently uses a built-in plucked-string model with no sample files, and renders the passage to a buffer up front instead of streaming from an AudioWorklet. Revisit when other instruments arrive in phase 4
+- [ ] SoundFont synth. Playback currently uses a built-in plucked-string model with no sample files, and renders the passage to a buffer up front instead of streaming from an AudioWorklet. Revisit when other instruments arrive in phase 5
 - [x] Metronome and count-in
 - [x] File open, save, recent files (desktop only), autosave with recovery on start
 - [x] Simple read-only Guitar Pro import (`.gp` and `.gp5`): notes, rests, ties, rhythms, tunings, starting tempo and time signatures for all tracks, with one track shown at a time. Anything else is skipped and listed in the status bar after import
@@ -112,11 +112,40 @@ Known simplifications, to revisit:
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 
-### Phase 4 — Full scores
+### Phase 4 — Interface
+
+The toolbar grew one text button at a time through phases 2 and 3 and is now four crowded rows. This phase redesigns the interface before phase 5 adds the track list, mixer and notation options, so that those arrive into a layout with room for them.
+
+- [x] Layout: a slim top bar for file and edit actions, a transport bar, a tool palette beside the score, and a status bar. The score keeps as much of the window as possible (the two bars share one row when the window is wide enough)
+- [x] Palette grouped by purpose (note values, techniques on the note, techniques on the beat, bars and score), with sections that collapse
+- [x] Icons in place of text labels: music symbols from Bravura for note values, rests, dynamics and articulations; Lucide (ISC) for general actions; guitar technique icons drawn to match in `app/ui/src/lib/ui/icons.ts`
+- [x] Tooltips on every control giving its name and shortcut
+- [x] Inspector panel showing everything set on the note and beat under the cursor, replacing the dropdowns that only exist to show state
+- [x] Menus for the less common actions, so the palette holds only what is used while writing
+- [x] Keyboard shortcut overlay listing every key (`?` or F1)
+- [x] Design tokens for colour, spacing and type in `app/ui/src/app.css`, applied to the bars, palette, dialogs and score; light and dark themes with a manual switch
+- [x] Dialogs restyled to match, and the curve editor made draggable
+- [x] Keyboard access and visible focus for every control; contrast checked in both themes (text and icons at 4.5:1 or better, control outlines and the focus ring at 3:1 or better)
+- [x] Narrow windows: the palette collapses to two columns and the bars stack
+- [x] Space reserved for the track list and mixer that phase 5 adds (an empty dock under the score)
+- [x] Checked in the desktop window as well as in browsers, since the two have differed before (layout, note entry, the bend editor, the inspector and both themes looked the same in each)
+
+Still to check by hand: the desktop title bar stayed dark when the app was switched to the light theme on Windows, so `setTheme` on the window may not be taking effect; and the interface has not been tried with a screen reader.
+
+Every command (name, icon, shortcut, action) is defined once in `App.svelte` and the bars, palette, menus, tooltips and shortcut list are built from that set. Add new features there.
+
+Score area at the same window size, before and after: 1280×618 → 1131×736 at 1280×800; 1024×601 → 875×706 at 1024×800, where the bars stack; 640×129 → 555×306 at 640×400. The old toolbar took 153 to 242 pixels of height; the new bars take 39 to 69. The inspector takes another 216 pixels of width when open, so it only opens by default from 1480 pixels, where a full-width page still fits beside it.
+
+Customisable shortcuts, the command palette and further themes stay in phase 9.
+
+**Done when:** every phase 2 and 3 feature is reachable from the new interface without a text-only button, and the score has more room than it does now at the same window size.
+
+### Phase 5 — Full scores
 
 - [ ] Standard notation staff linked to tab: clefs, key signatures, accidentals, stems, beams, ledger lines
 - [ ] Tab-only, notation-only, combined and slash notation views
-- [ ] Multiple tracks with a track panel; single-track and multitrack views
+- [ ] Multiple tracks; single-track and multitrack views
+- [ ] Track pane along the bottom of the window, in the dock phase 4 left under the score, laid out like Guitar Pro's: one row per track with its instrument icon and name on the left, and to the right a grid with one cell per bar, filled where the track has notes. Clicking a row switches track and clicking a cell jumps to that bar; the current bar and the playback position are marked; the grid scrolls with the score. Adding, removing, renaming and reordering tracks happens here. The pane can be resized and hidden, and replaces the track dropdown in the transport bar
 - [ ] Up to four voices per staff
 - [ ] Drum tracks: percussion notation, drum tab and a drum kit map
 - [ ] Bass, keyboard (grand staff), ukulele, banjo and other fretted instruments
@@ -125,14 +154,14 @@ Known simplifications, to revisit:
 - [ ] Sections, rehearsal marks, free text, timers
 - [ ] Lyrics with multiple lines
 - [ ] Chord diagrams and names with a chord builder
-- [ ] Mixer: volume, pan, mute, solo, instrument selection per track
+- [ ] Mixer: volume, pan, mute, solo, instrument selection per track, with the mute, solo and volume controls on each row of the track pane
 - [ ] Score information and page headers
 
 **Done when:** a full band arrangement can be written and played back.
 
-### Phase 5 — Import and export
+### Phase 6 — Import and export
 
-- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 4
+- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 5
 - [ ] Guitar Pro export: `.gp`
 - [ ] MusicXML import and export
 - [ ] MIDI import and export
@@ -143,7 +172,7 @@ Known simplifications, to revisit:
 
 **Done when:** the import corpus opens without errors and renders recognisably.
 
-### Phase 6 — Practice tools
+### Phase 7 — Practice tools
 
 - [ ] Loop a selection, with optional tempo increase per pass (speed trainer)
 - [ ] Relative playback speed
@@ -153,7 +182,7 @@ Known simplifications, to revisit:
 - [ ] Chord library and scale library with fretboard diagrams
 - [ ] Scale finder from a selection
 
-### Phase 7 — Sound
+### Phase 8 — Sound
 
 - [ ] Per-track effects chain: amp simulation, cabinet, overdrive, distortion, compressor, EQ, chorus, delay, reverb, wah
 - [ ] Pedalboard view and presets
@@ -163,7 +192,7 @@ Known simplifications, to revisit:
 - [ ] Line-in: play a real guitar through the track's effects
 - [ ] Native audio backend on desktop if AudioWorklet latency is not good enough
 
-### Phase 8 — Polish and release
+### Phase 9 — Polish and release
 
 - [ ] Stylesheets: fonts, spacing, symbol sizes, notation conventions
 - [ ] Design mode: manual bar widths, line breaks, system layout
@@ -188,7 +217,7 @@ Known simplifications, to revisit:
 - **Scope:** Guitar Pro 8 is years of work by a commercial team. The phase order front-loads the parts needed for writing riffs and songs.
 - **Engraving quality:** spacing and collision avoidance are open-ended. Budget for ongoing refinement rather than a one-off implementation.
 - **Sound quality:** Guitar Pro's sound comes from proprietary sample banks. Feature parity is achievable; tonal parity depends on the freely licensed SoundFonts available.
-- **Web audio latency:** fine for playback, possibly not for line-in monitoring. Phase 7 has a native fallback for desktop.
+- **Web audio latency:** fine for playback, possibly not for line-in monitoring. Phase 8 has a native fallback for desktop.
 - **File format coverage:** Guitar Pro formats are undocumented and have many edge cases. Coverage will improve with the corpus over time.
 
 ## Reference

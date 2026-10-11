@@ -1,11 +1,12 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Lets the main window open and save score files the user picks in a file dialog.",
+  "description": "Lets the main window open and save score files the user picks in a file dialog, and follow the theme chosen in the app.",
   "windows": ["main"],
   "permissions": [
     "core:default",
     "core:window:allow-set-title",
+    "core:window:allow-set-theme",
     "dialog:allow-open",
     "dialog:allow-save",
     "dialog:allow-ask",

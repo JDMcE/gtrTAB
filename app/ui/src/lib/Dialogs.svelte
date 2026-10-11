@@ -38,6 +38,7 @@
 <script lang="ts">
   import { untrack } from 'svelte';
   import type { Score } from './model';
+  import Dialog from './ui/Dialog.svelte';
 
   interface Props {
     kind: DialogKind;
@@ -74,11 +75,9 @@
     PRESETS.findIndex((p) => [...p.strings].reverse().map(noteName).join(' ') === tuningText),
   );
 
-  let dialog: HTMLDialogElement;
-  $effect(() => dialog.showModal());
+  const TITLES = { score: 'Score', time: 'Time signature', tuning: 'Tuning' };
 
-  function submit(event: SubmitEvent) {
-    event.preventDefault();
+  function submit() {
     if (kind === 'score') {
       onscore({ title: title.trim(), artist: artist.trim(), album: album.trim() }, tempo);
     } else if (kind === 'time') {
@@ -94,141 +93,72 @@
   }
 </script>
 
-<dialog bind:this={dialog} {onclose}>
-  <form onsubmit={submit}>
-    {#if kind === 'score'}
-      <h2>Score</h2>
-      <label>Title <input bind:value={title} /></label>
-      <label>Artist <input bind:value={artist} /></label>
-      <label>Album <input bind:value={album} /></label>
-      <label>
-        Tempo (bpm)
-        <input type="number" min="20" max="400" required bind:value={tempo} />
-      </label>
-    {:else if kind === 'time'}
-      <h2>Time signature</h2>
-      <p>Applies from bar {bar + 1} up to the next time signature change.</p>
-      <div class="row">
-        <input type="number" min="1" max="32" required aria-label="Beats" bind:value={numerator} />
-        <span>/</span>
-        <select aria-label="Beat unit" bind:value={denominator}>
-          {#each [1, 2, 4, 8, 16, 32] as unit}
-            <option value={unit}>{unit}</option>
-          {/each}
-        </select>
-      </div>
-    {:else}
-      <h2>Tuning</h2>
-      <label>
-        Preset
-        <select
-          value={preset}
-          onchange={(e) => {
-            const chosen = PRESETS[Number(e.currentTarget.value)];
-            if (chosen) tuningText = [...chosen.strings].reverse().map(noteName).join(' ');
-          }}
-        >
-          <option value={-1}>Custom</option>
-          {#each PRESETS as p, i}
-            <option value={i}>{p.name}</option>
-          {/each}
-        </select>
-      </label>
-      <label>
-        Strings, lowest first
-        <input bind:value={tuningText} spellcheck="false" />
-      </label>
-      <label>
-        Capo
-        <input type="number" min="0" max="12" required bind:value={capo} />
-      </label>
-      {#if problem}<p class="problem">{problem}</p>{/if}
-    {/if}
-    <footer>
-      <button type="button" onclick={onclose}>Cancel</button>
-      <button type="submit" class="primary">OK</button>
-    </footer>
-  </form>
-</dialog>
+<Dialog
+  title={TITLES[kind]}
+  hint={kind === 'time'
+    ? `Applies from bar ${bar + 1} up to the next time signature change.`
+    : undefined}
+  {onclose}
+  onsubmit={submit}
+>
+  {#if kind === 'score'}
+    <label>Title <input bind:value={title} /></label>
+    <label>Artist <input bind:value={artist} /></label>
+    <label>Album <input bind:value={album} /></label>
+    <label>
+      Tempo (bpm)
+      <input type="number" min="20" max="400" required bind:value={tempo} />
+    </label>
+  {:else if kind === 'time'}
+    <div class="row">
+      <input type="number" min="1" max="32" required aria-label="Beats" bind:value={numerator} />
+      <span>/</span>
+      <select aria-label="Beat unit" bind:value={denominator}>
+        {#each [1, 2, 4, 8, 16, 32] as unit}
+          <option value={unit}>{unit}</option>
+        {/each}
+      </select>
+    </div>
+  {:else}
+    <label>
+      Preset
+      <select
+        value={preset}
+        onchange={(e) => {
+          const chosen = PRESETS[Number(e.currentTarget.value)];
+          if (chosen) tuningText = [...chosen.strings].reverse().map(noteName).join(' ');
+        }}
+      >
+        <option value={-1}>Custom</option>
+        {#each PRESETS as p, i}
+          <option value={i}>{p.name}</option>
+        {/each}
+      </select>
+    </label>
+    <label>
+      Strings, lowest first
+      <input bind:value={tuningText} spellcheck="false" />
+    </label>
+    <label>
+      Capo
+      <input type="number" min="0" max="12" required bind:value={capo} />
+    </label>
+    {#if problem}<p class="problem">{problem}</p>{/if}
+  {/if}
+  {#snippet footer()}
+    <button type="button" class="btn" onclick={onclose}>Cancel</button>
+    <button type="submit" class="btn primary">OK</button>
+  {/snippet}
+</Dialog>
 
 <style>
-  dialog {
-    width: min(360px, 90vw);
-    padding: 20px;
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    background: var(--panel);
-    color: var(--text);
-  }
-
-  dialog::backdrop {
-    background: rgb(0 0 0 / 40%);
-  }
-
-  h2 {
-    margin: 0 0 14px;
-    font-size: 16px;
-  }
-
-  p {
-    margin: 0 0 12px;
-    color: var(--muted);
-  }
-
-  .problem {
-    color: var(--error);
-  }
-
-  label {
-    display: grid;
-    gap: 4px;
-    margin-bottom: 12px;
-    color: var(--muted);
-    font-size: 12px;
-  }
-
-  input,
-  select {
-    font: inherit;
-    font-size: 14px;
-    padding: 5px 8px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-  }
-
   .row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 12px;
+    gap: var(--space-3);
   }
 
   .row input {
     width: 70px;
-  }
-
-  footer {
-    display: flex;
-    justify-content: flex-end;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  button {
-    font: inherit;
-    padding: 5px 14px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    background: var(--bg);
-    color: var(--text);
-    cursor: pointer;
-  }
-
-  button.primary {
-    border-color: var(--accent);
-    background: var(--accent);
-    color: var(--paper);
   }
 </style>
