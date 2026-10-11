@@ -26,6 +26,9 @@
   .icon {
     display: block;
     overflow: visible;
+    /* A music glyph's text box is far taller than the glyph and spills over the
+       neighbouring buttons; the button under the pointer is the one that should answer. */
+    pointer-events: none;
     fill: none;
     stroke: currentColor;
     stroke-width: 1.75;
