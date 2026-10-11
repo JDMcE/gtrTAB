@@ -184,7 +184,7 @@ struct Zone<'a>(&'a [u8]);
 
 impl Zone<'_> {
     fn raw(&self, generator: u16) -> Option<u16> {
-        (self.0.chunks_exact(4))
+        (self.0.as_chunks::<4>().0.iter().map(|c| &c[..]))
             .find(|g| u16_at(g, 0) == generator)
             .map(|g| u16_at(g, 2))
     }
@@ -200,7 +200,7 @@ impl Zone<'_> {
 
     /// The generator a zone ends with says what it is a zone of.
     fn ends_with(&self, generator: u16) -> bool {
-        (self.0.chunks_exact(4).last()).is_some_and(|g| u16_at(g, 0) == generator)
+        (self.0.as_chunks::<4>().0.last()).is_some_and(|g| u16_at(g, 0) == generator)
     }
 }
 
@@ -208,7 +208,10 @@ impl<'a> Zones<'a> {
     fn new(bags: &[u8], generators: &'a [u8]) -> Zones<'a> {
         Zones {
             bags: bags
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|c| &c[..])
                 .map(|b| usize::from(u16_at(b, 0)))
                 .collect(),
             generators,
@@ -277,15 +280,15 @@ impl SoundFont {
         if phdr.len() < 76 || inst.len() < 44 || shdr.len() < 92 {
             return Err(SoundFontError::Malformed("it has no presets"));
         }
-        let samples: Vec<i16> = (samples.chunks_exact(2))
-            .map(|s| i16::from_le_bytes([s[0], s[1]]))
+        let samples: Vec<i16> = (samples.as_chunks::<2>().0.iter())
+            .map(|s| i16::from_le_bytes(*s))
             .collect();
 
         let preset_zones = Zones::new(pbag, pgen);
         let instrument_zones = Zones::new(ibag, igen);
-        let instruments: Vec<&[u8]> = inst.chunks_exact(22).collect();
-        let headers: Vec<&[u8]> = shdr.chunks_exact(46).collect();
-        let records: Vec<&[u8]> = phdr.chunks_exact(38).collect();
+        let instruments: Vec<&[u8]> = inst.as_chunks::<22>().0.iter().map(|c| &c[..]).collect();
+        let headers: Vec<&[u8]> = shdr.as_chunks::<46>().0.iter().map(|c| &c[..]).collect();
+        let records: Vec<&[u8]> = phdr.as_chunks::<38>().0.iter().map(|c| &c[..]).collect();
         let mut presets = Vec::with_capacity(records.len());
         // The last record of each list only marks where the one before it ends.
         for pair in records.windows(2) {
