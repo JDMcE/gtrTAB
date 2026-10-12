@@ -1247,6 +1247,7 @@ dependencies = [
 name = "gtr-io"
 version = "0.1.0"
 dependencies = [
+ "gtr-audio",
  "gtr-model",
  "roxmltree",
  "serde",

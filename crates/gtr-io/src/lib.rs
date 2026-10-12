@@ -1,6 +1,7 @@
 //! Reading and writing scores.
 
 pub mod guitar_pro;
+pub mod midi;
 pub mod musicxml;
 pub mod native;
 mod report;
