@@ -38,6 +38,39 @@ impl Passage {
     }
 }
 
+/// A score being made into sound for a file, a piece at a time so that the page that asked
+/// for it is not held up until the whole of it is done.
+#[wasm_bindgen]
+pub struct AudioExport {
+    engine: gtr_audio::Engine,
+    left: Vec<f32>,
+    right: Vec<f32>,
+    sample_rate: u32,
+}
+
+#[wasm_bindgen]
+impl AudioExport {
+    /// Makes up to `frames` more samples. Returns how much of the piece is done, from 0
+    /// to 1.
+    pub fn step(&mut self, frames: usize) -> f64 {
+        let total = self.engine.length();
+        let from = self.left.len();
+        let to = (from + frames).min(total);
+        self.left.resize(to, 0.0);
+        self.right.resize(to, 0.0);
+        (self.engine).process(&mut self.left[from..], &mut self.right[from..]);
+        match total {
+            0 => 1.0,
+            _ => to as f64 / total as f64,
+        }
+    }
+
+    /// What has been made so far, as the bytes of a WAV file.
+    pub fn wav(&self) -> Vec<u8> {
+        gtr_audio::wav(&self.left, &self.right, self.sample_rate)
+    }
+}
+
 fn tuplet(actual: u8, normal: u8) -> Option<Tuplet> {
     Some(Tuplet {
         actual: actual.try_into().ok()?,
@@ -147,6 +180,36 @@ impl Document {
         })
     }
 
+    /// Starts making the whole score into sound for a file, as it plays: every track
+    /// that is not muted, through the SoundFont whose bytes are given or through the
+    /// built-in models if none is. `options_json` is as for [`Document::compile_audio`].
+    #[wasm_bindgen(js_name = exportAudio)]
+    pub fn export_audio(
+        &self,
+        options_json: &str,
+        sample_rate: u32,
+        soundfont: Option<Vec<u8>>,
+    ) -> Result<AudioExport, JsError> {
+        let options: Options = serde_json::from_str(options_json)?;
+        let font = match soundfont {
+            Some(bytes) => Some(
+                gtr_audio::SoundFont::parse(&bytes)
+                    .map_err(|e| JsError::new(&format!("The SoundFont could not be used: {e}")))?,
+            ),
+            None => None,
+        };
+        let sample_rate = sample_rate.clamp(8_000, 192_000);
+        let mut engine = gtr_audio::Engine::new(sample_rate);
+        engine.set_soundfont(font);
+        engine.load(gtr_audio::compile(self.editor.score(), 0, &options));
+        Ok(AudioExport {
+            engine,
+            left: Vec::new(),
+            right: Vec::new(),
+            sample_rate,
+        })
+    }
+
     // --- Cursor ---
 
     /// `direction` is one of left, right, up, down, prev_bar, next_bar, first, last.
@@ -241,7 +304,8 @@ impl Document {
         Ok(self.editor.toggle_tie()?)
     }
 
-    /// `value` is one of whole, half, quarter, eighth, sixteenth, thirty_second, sixty_fourth.
+    /// `value` is one of whole, half, quarter, eighth, sixteenth, thirty_second, sixty_fourth,
+    /// hundred_twenty_eighth, two_hundred_fifty_sixth.
     #[wasm_bindgen(js_name = setNoteValue)]
     pub fn set_note_value(&mut self, value: &str) -> Result<(), JsError> {
         let value: NoteValue = parse_name(value)?;
@@ -336,7 +400,7 @@ impl Document {
     }
 
     /// Sets one shared property of the cursor's bar, such as `"repeat_start"`,
-    /// `"repeat_count"`, `"alternate_endings"`, `"section"`, `"target"`, `"jump"`,
+    /// `"repeat_count"`, `"alternate_endings"`, `"section"`, `"targets"`, `"jumps"`,
     /// `"tempo"` or `"feel"`. `value_json` is its JSON, with `null` clearing it.
     #[wasm_bindgen(js_name = setBarProperty)]
     pub fn set_bar_property(&mut self, field: &str, value_json: &str) -> Result<(), JsError> {
@@ -352,8 +416,10 @@ impl Document {
 
     /// Changes the tempo from the cursor's beat on; zero takes away the change there.
     #[wasm_bindgen(js_name = setTempoChange)]
-    pub fn set_tempo_change(&mut self, tempo: u32) -> Result<(), JsError> {
-        Ok(self.editor.set_tempo_change((tempo > 0).then_some(tempo))?)
+    pub fn set_tempo_change(&mut self, tempo: u32, gradual: bool) -> Result<(), JsError> {
+        Ok(self
+            .editor
+            .set_tempo_change((tempo > 0).then_some(tempo), gradual)?)
     }
 
     #[wasm_bindgen(js_name = setTempo)]

@@ -11,4 +11,8 @@ position: [number, number],
 /**
  * Quarter notes per minute.
  */
-tempo: number, };
+tempo: number, 
+/**
+ * From here the tempo moves steadily towards the next change, instead of holding.
+ */
+gradual?: boolean, };

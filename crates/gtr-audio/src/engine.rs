@@ -4,6 +4,8 @@
 use std::f32::consts::{FRAC_PI_4, SQRT_2};
 use std::rc::Rc;
 
+use gtr_model::Fade;
+
 use crate::soundfont::{Playing, SampleVoice};
 use crate::voice::{ClickVoice, Voice, shape};
 use crate::{Automation, BeatTime, Channel, SoundFont, Timbre, Timeline};
@@ -99,6 +101,19 @@ struct Sounding {
     channel: usize,
     wait: usize,
     voice: Voice,
+    /// A fade over the voice: its kind, the samples it takes, and how far through it is.
+    fade: Option<(Fade, usize, usize)>,
+}
+
+/// How loud a fading note is, `through` its fade from 0.0 to 1.0. A fade in stays up
+/// once it is there, for as long as the note rings on.
+fn fade_gain(fade: Fade, through: f32) -> f32 {
+    let through = through.clamp(0.0, 1.0);
+    match fade {
+        Fade::In => through,
+        Fade::Out => 1.0 - through,
+        Fade::Swell => 1.0 - (2.0 * through - 1.0).abs(),
+    }
 }
 
 /// Plays a [`Timeline`] block by block.
@@ -115,6 +130,8 @@ pub struct Engine {
     voices: Vec<Sounding>,
     clicks: Vec<(usize, ClickVoice)>,
     click_bus: Vec<f32>,
+    /// Where a fading voice is made before it is added to its track.
+    fade_bus: [Vec<f32>; 3],
     strips: Vec<Strip>,
     /// The samples notes are played from, where the bank has their instrument.
     font: Option<Rc<SoundFont>>,
@@ -134,6 +151,7 @@ impl Engine {
             voices: Vec::new(),
             clicks: Vec::new(),
             click_bus: Vec::new(),
+            fade_bus: Default::default(),
             strips: Vec::new(),
             font: None,
         }
@@ -225,6 +243,11 @@ impl Engine {
         self.position as f64 / f64::from(self.sample_rate)
     }
 
+    /// Samples the passage and its dying notes come to in all.
+    pub fn length(&self) -> usize {
+        self.total
+    }
+
     /// True once the passage and its dying notes have all been played.
     pub fn finished(&self) -> bool {
         self.position >= self.total
@@ -296,24 +319,45 @@ impl Engine {
                         }
                     }
                 }
+                let length = ((note.duration * f64::from(rate)) as usize).max(1);
                 self.voices.push(Sounding {
                     channel: note.channel,
                     wait: start - self.position,
                     voice,
+                    fade: note.fade.map(|fade| (fade, length, 0)),
                 });
             }
         }
         let strips = &mut self.strips;
+        let scratch = &mut self.fade_bus;
         self.voices.retain_mut(|sounding| {
             let from = sounding.wait.min(frames);
             sounding.wait -= from;
             let strip = &mut strips[sounding.channel];
             let (left, right) = (&mut strip.sides.0, &mut strip.sides.1);
-            (sounding.voice).render(
-                &mut strip.bus[from..],
-                &mut left[from..],
-                &mut right[from..],
-            )
+            let Some((fade, length, at)) = &mut sounding.fade else {
+                return (sounding.voice).render(
+                    &mut strip.bus[from..],
+                    &mut left[from..],
+                    &mut right[from..],
+                );
+            };
+            // A fading voice is made by itself, and added at the level it has got to.
+            for side in scratch.iter_mut() {
+                side.clear();
+                side.resize(frames - from, 0.0);
+            }
+            let [bus, own_left, own_right] = scratch;
+            let alive = sounding.voice.render(bus, own_left, own_right);
+            for i in 0..frames - from {
+                let gain = fade_gain(*fade, (*at + i) as f32 / *length as f32);
+                strip.bus[from + i] += bus[i] * gain;
+                left[from + i] += own_left[i] * gain;
+                right[from + i] += own_right[i] * gain;
+            }
+            *at += frames - from;
+            // Once it has faded out there is nothing more to hear of it.
+            alive && !(matches!(fade, Fade::Out | Fade::Swell) && *at >= *length)
         });
 
         // Each track through its amplifier and into its place, which the score can move
@@ -434,6 +478,46 @@ mod tests {
 
     fn energy(samples: &[f32]) -> f32 {
         samples.iter().map(|s| s * s).sum()
+    }
+
+    #[test]
+    fn a_fade_brings_a_note_up_takes_it_down_or_both() {
+        let note = |fade| NoteEvent {
+            fade,
+            ..NoteEvent::plain(0.0, 1.0, 52)
+        };
+        let plain = render_one(note(None));
+        let quarters = |samples: &[f32]| {
+            let quarter = 44_100 / 4;
+            [0, 1, 2, 3].map(|q| energy(&samples[q * quarter..(q + 1) * quarter]))
+        };
+        let as_written = quarters(&plain);
+        // Faded in, the pick is not heard: the first quarter of the note is far under
+        // what it was, and the last is as it was.
+        let faded_in = quarters(&render_one(note(Some(Fade::In))));
+        assert!(faded_in[0] < as_written[0] * 0.1);
+        assert!(faded_in[3] > as_written[3] * 0.5);
+        // Faded out, it starts as it was and is gone by the end.
+        let faded_out = quarters(&render_one(note(Some(Fade::Out))));
+        assert!(faded_out[0] > as_written[0] * 0.5);
+        assert!(faded_out[3] < as_written[3] * 0.1);
+        // A swell is quiet at both ends.
+        let swell = quarters(&render_one(note(Some(Fade::Swell))));
+        assert!(swell[0] < as_written[0] * 0.2 && swell[3] < as_written[3] * 0.2);
+        assert!(swell[1] > swell[0] && swell[1] > swell[3]);
+
+        // It makes no difference how the sound is asked for, in one piece or in blocks.
+        let timeline = timeline_of(vec![note(Some(Fade::Swell))], vec![Channel::default()], 1.0);
+        let whole = render(&timeline, 44_100);
+        let mut engine = Engine::new(44_100);
+        engine.load(timeline);
+        let blocks = play_out(&mut engine, 333);
+        assert_eq!(whole.left[..40_000], blocks.left[..40_000]);
+        assert!(
+            [Fade::In, Fade::Out, Fade::Swell]
+                .iter()
+                .all(|&fade| (0.0..=1.0).contains(&fade_gain(fade, 0.3)))
+        );
     }
 
     /// Plays the engine to the end in blocks of `block` samples.

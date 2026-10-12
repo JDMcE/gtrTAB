@@ -768,7 +768,7 @@ fn a_tempo_change_goes_on_the_beat_under_the_cursor() {
     // On the third quarter of the first bar: half-way through it.
     e.set_cursor(0, 2, 5, false);
     assert_eq!(e.state().tempo_change, None);
-    e.set_tempo_change(Some(90)).unwrap();
+    e.set_tempo_change(Some(90), false).unwrap();
     let changes = &e.score().master_bars[0].tempo_changes;
     assert_eq!(changes.len(), 1);
     assert_eq!(
@@ -778,8 +778,8 @@ fn a_tempo_change_goes_on_the_beat_under_the_cursor() {
     assert_eq!(e.state().tempo_change, Some(90));
     // One before it keeps the two in order; a new value replaces the old.
     e.set_cursor(0, 1, 5, false);
-    e.set_tempo_change(Some(60)).unwrap();
-    e.set_tempo_change(Some(70)).unwrap();
+    e.set_tempo_change(Some(60), false).unwrap();
+    e.set_tempo_change(Some(70), false).unwrap();
     let tempos: Vec<u32> = (e.score().master_bars[0].tempo_changes.iter())
         .map(|c| c.tempo)
         .collect();
@@ -788,13 +788,13 @@ fn a_tempo_change_goes_on_the_beat_under_the_cursor() {
 
     // On the first beat it is the bar's own tempo, as before.
     e.set_cursor(0, 0, 5, false);
-    e.set_tempo_change(Some(100)).unwrap();
+    e.set_tempo_change(Some(100), false).unwrap();
     assert_eq!(e.score().master_bars[0].tempo, Some(100));
     assert_eq!(e.score().master_bars[0].tempo_changes.len(), 2);
 
     // Taking one away, and undoing that.
     e.set_cursor(0, 2, 5, false);
-    e.set_tempo_change(None).unwrap();
+    e.set_tempo_change(None, false).unwrap();
     assert_eq!(e.score().master_bars[0].tempo_changes.len(), 1);
     assert_eq!(e.state().tempo_change, None);
     e.undo().unwrap();

@@ -16,10 +16,12 @@ pub enum NoteValue {
     Sixteenth,
     ThirtySecond,
     SixtyFourth,
+    HundredTwentyEighth,
+    TwoHundredFiftySixth,
 }
 
 impl NoteValue {
-    pub const ALL: [NoteValue; 7] = [
+    pub const ALL: [NoteValue; 9] = [
         NoteValue::Whole,
         NoteValue::Half,
         NoteValue::Quarter,
@@ -27,6 +29,8 @@ impl NoteValue {
         NoteValue::Sixteenth,
         NoteValue::ThirtySecond,
         NoteValue::SixtyFourth,
+        NoteValue::HundredTwentyEighth,
+        NoteValue::TwoHundredFiftySixth,
     ];
 
     pub fn length(self) -> Rational {
@@ -79,7 +83,7 @@ pub struct Duration {
 }
 
 impl Duration {
-    pub const MAX_DOTS: u8 = 2;
+    pub const MAX_DOTS: u8 = 3;
 
     pub fn new(value: NoteValue) -> Self {
         Duration {
@@ -116,6 +120,21 @@ mod tests {
     fn lengths() {
         assert_eq!(NoteValue::Quarter.length(), Rational::new(1, 4));
         assert_eq!(NoteValue::SixtyFourth.length(), Rational::new(1, 64));
+        assert_eq!(
+            NoteValue::TwoHundredFiftySixth.length(),
+            Rational::new(1, 256)
+        );
+        assert_eq!(NoteValue::HundredTwentyEighth.flags(), 5);
+        assert_eq!(
+            NoteValue::SixtyFourth.shorter(),
+            Some(NoteValue::HundredTwentyEighth)
+        );
+        assert_eq!(NoteValue::TwoHundredFiftySixth.shorter(), None);
+        // A third dot adds an eighth of the note again.
+        let mut dotted = Duration::new(NoteValue::Half);
+        dotted.dots = 3;
+        assert_eq!(dotted.length(), Rational::new(15, 16));
+        assert!(dotted.is_valid());
 
         let mut d = Duration::new(NoteValue::Quarter);
         d.dots = 1;

@@ -1,6 +1,8 @@
 //! A timeline as bytes, for handing to the synth on the audio thread. The format is private
 //! to one build of the app: nothing written with it is kept.
 
+use gtr_model::Fade;
+
 use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone};
 
 /// First bytes of an encoded timeline.
@@ -20,6 +22,7 @@ const TIMBRES: [Timbre; 11] = [
     Timbre::Mandolin,
 ];
 const TONES: [Tone; 4] = [Tone::Normal, Tone::PalmMute, Tone::Dead, Tone::Harmonic];
+const FADES: [Fade; 3] = [Fade::In, Fade::Out, Fade::Swell];
 
 /// The place of `value` in `table`, as the byte that stands for it.
 fn code<T: PartialEq>(table: &[T], value: T) -> u8 {
@@ -112,6 +115,7 @@ impl Timeline {
             w.u8(note.soft.into());
             w.f32(note.velocity);
             w.f32(note.vibrato);
+            w.u8(note.fade.map_or(0, |fade| 1 + code(&FADES, fade)));
             w.count(note.pitch_curve.len());
             for &(time, semitones) in &note.pitch_curve {
                 w.f32(time);
@@ -167,6 +171,10 @@ impl Timeline {
                 soft: r.u8()? != 0,
                 velocity: r.f32()?,
                 vibrato: r.f32()?,
+                fade: match r.u8()? {
+                    0 => None,
+                    kind => Some(*FADES.get(usize::from(kind - 1))?),
+                },
                 pitch_curve: r.list(|r| Some((r.f32()?, r.f32()?)))?,
             })
         })?;

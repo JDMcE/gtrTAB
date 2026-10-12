@@ -4,6 +4,7 @@
 // names and the order it shows things in. Do not write a type here that Rust has.
 
 import type { BeatTime } from './generated/BeatTime';
+import type { Fade } from './generated/Fade';
 import type { Feel } from './generated/Feel';
 import type { Instrument } from './generated/Instrument';
 import type { Jump } from './generated/Jump';
@@ -14,6 +15,7 @@ import type { Target } from './generated/Target';
 import type { IconName } from './ui/icons';
 
 export type { Accent } from './generated/Accent';
+export type { Fade } from './generated/Fade';
 export type { Align } from './generated/Align';
 export type { Bar } from './generated/Bar';
 export type { BarBox } from './generated/BarBox';
@@ -137,7 +139,9 @@ export const DEFAULT_TUNINGS: Record<Family, number[]> = {
 
 export const TARGETS: [Target, string][] = [
   ['segno', 'Segno'],
+  ['segno_segno', 'Second segno'],
   ['coda', 'Coda'],
+  ['double_coda', 'Second coda'],
   ['fine', 'Fine'],
 ];
 
@@ -149,12 +153,29 @@ export const JUMPS: [Jump, string][] = [
   ['dal_segno_al_fine', 'D.S. al Fine'],
   ['dal_segno_al_coda', 'D.S. al Coda'],
   ['to_coda', 'To Coda'],
+  ['da_capo_al_double_coda', 'D.C. al Double Coda'],
+  ['dal_segno_al_double_coda', 'D.S. al Double Coda'],
+  ['dal_segno_segno', 'D.S.S. (back to the second segno)'],
+  ['dal_segno_segno_al_fine', 'D.S.S. al Fine'],
+  ['dal_segno_segno_al_coda', 'D.S.S. al Coda'],
+  ['dal_segno_segno_al_double_coda', 'D.S.S. al Double Coda'],
+  ['to_double_coda', 'To Double Coda'],
 ];
 
 export const FEELS: [Feel, string][] = [
   ['straight', 'Straight'],
   ['swing_eighths', 'Swing eighths'],
   ['swing_sixteenths', 'Swing sixteenths'],
+  ['dotted_eighths', 'Dotted eighths'],
+  ['dotted_sixteenths', 'Dotted sixteenths'],
+  ['scottish_eighths', 'Scottish eighths (short, long)'],
+  ['scottish_sixteenths', 'Scottish sixteenths'],
+];
+
+export const FADES: [Fade, string][] = [
+  ['in', 'Fade in'],
+  ['out', 'Fade out'],
+  ['swell', 'Volume swell'],
 ];
 
 /** Key signatures from seven flats to seven sharps, named by their major and minor keys. */
@@ -194,4 +215,6 @@ export const NOTE_VALUES: NoteValue[] = [
   'sixteenth',
   'thirty_second',
   'sixty_fourth',
+  'hundred_twenty_eighth',
+  'two_hundred_fifty_sixth',
 ];

@@ -2,6 +2,7 @@
 import type { Bend } from "./Bend";
 import type { ChordDiagram } from "./ChordDiagram";
 import type { Dynamic } from "./Dynamic";
+import type { Fade } from "./Fade";
 import type { Hairpin } from "./Hairpin";
 import type { NoteValue } from "./NoteValue";
 import type { PickStroke } from "./PickStroke";
@@ -32,6 +33,10 @@ hairpin?: Hairpin,
  * A pause mark over the beat.
  */
 fermata?: boolean, 
+/**
+ * The notes fade in, fade out or swell.
+ */
+fade?: Fade, 
 /**
  * The name of the chord from this beat on, such as `Am7`.
  */

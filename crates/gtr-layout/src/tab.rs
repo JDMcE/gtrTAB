@@ -2,8 +2,8 @@
 //! the rhythm underneath.
 
 use gtr_model::{
-    Accent, Beat, Bend, BendKind, Dynamic, Hairpin, Note, NoteValue, PickStroke, Rational, Slap,
-    Slide, Staff, Strum, TimeSignature, Vibrato, interval_label,
+    Accent, Beat, Bend, BendKind, Dynamic, Fade, Hairpin, Note, NoteValue, PickStroke, Rational,
+    Slap, Slide, Staff, Strum, TimeSignature, Vibrato, interval_label,
 };
 
 use crate::display::r;
@@ -47,6 +47,7 @@ enum Lane {
     Harmonic,
     Tap,
     Accent,
+    Fade,
     Stroke,
     Trill,
     Whammy,
@@ -58,7 +59,7 @@ enum Lane {
 }
 
 /// Lanes from the staff upwards, with their heights.
-const LANES: [(Lane, f64); 15] = [
+const LANES: [(Lane, f64); 16] = [
     (Lane::Bend, 30.0),
     (Lane::Vibrato, 11.0),
     (Lane::PalmMute, 12.0),
@@ -66,6 +67,7 @@ const LANES: [(Lane, f64); 15] = [
     (Lane::Harmonic, 12.0),
     (Lane::Tap, 12.0),
     (Lane::Accent, 12.0),
+    (Lane::Fade, 11.0),
     (Lane::Stroke, 15.0),
     (Lane::Trill, 12.0),
     (Lane::Whammy, 26.0),
@@ -113,6 +115,7 @@ impl Lanes {
             lanes.lyrics = lanes.lyrics.max(beat.effects.lyrics.len());
             let mut mark = |lane: Lane, used: bool| lanes.used[lane as usize] |= used;
             mark(Lane::Fermata, beat.effects.fermata);
+            mark(Lane::Fade, beat.effects.fade.is_some());
             mark(Lane::Chord, beat.effects.chord.is_some());
             mark(Lane::Diagram, beat.effects.diagram.is_some());
             let mixed = beat.effects.volume.is_some() || beat.effects.pan.is_some();
@@ -352,7 +355,7 @@ impl System<'_> {
                 let glyph = char::from_u32(REST_WHOLE + beat.duration.value as u32).unwrap_or(' ');
                 let middle = self.y + self.staff_height / 2.0;
                 items.push(Item::text(x, middle, glyph, REST_SIZE, Font::Music).knockout());
-                for dot in 0..beat.duration.dots.min(2) {
+                for dot in 0..beat.duration.dots.min(3) {
                     items.push(Item::Dot {
                         x: r(x + 9.0 + 4.0 * f64::from(dot)),
                         y: r(middle - 3.0),
@@ -637,6 +640,23 @@ impl System<'_> {
                 let label_y = peak_y + if peak.value < 0 { 7.0 } else { -7.0 };
                 let label = interval_label(peak.value);
                 items.push(Item::text(peak_x, label_y, label, 8.0, Font::Text));
+            }
+        }
+        if let Some(fade) = beat.effects.fade {
+            // A small wedge over the beat, opening as the notes come up and closing as
+            // they die away; a swell is one of each.
+            let y = lane(Lane::Fade);
+            let wedge = |items: &mut Vec<Item>, point: f64, open: f64| {
+                items.push(Item::line(point, y, open, y - 3.0, 1.0, Color::Ink));
+                items.push(Item::line(point, y, open, y + 3.0, 1.0, Color::Ink));
+            };
+            match fade {
+                Fade::In => wedge(items, x - 6.0, x + 6.0),
+                Fade::Out => wedge(items, x + 6.0, x - 6.0),
+                Fade::Swell => {
+                    wedge(items, x - 9.0, x - 0.5);
+                    wedge(items, x + 9.0, x + 0.5);
+                }
             }
         }
         if beat.effects.fermata {
@@ -1072,7 +1092,7 @@ fn draw_rhythm(
         // A rest carries its dots beside the rest symbol instead.
         let dots = match beat.is_rest() {
             true => 0,
-            false => beat.duration.dots.min(2),
+            false => beat.duration.dots.min(3),
         };
         for dot in 0..dots {
             items.push(Item::Dot {

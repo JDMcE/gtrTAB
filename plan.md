@@ -164,7 +164,7 @@ How things stand, for reference:
 
 - Tuning and capo are part of a track's settings (the settings button in the track pane, or double-click the track's name), alongside its instrument and mix. Changing the kind of instrument there switches to that instrument's usual tuning.
 - Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks, key signatures, repeats, alternate endings, sections, swing feel, credits, signs and jumps and, from `.gp`, free text. A bar holds one sign and one jump: where a file has more, or a second segno or coda, the first is kept and the import says so.
-- The native format is at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
+- The native format is at version 7 since phase 7, which made a bar's sign and jump lists and added optional fields. At the end of phase 5 it was at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
 
 Checked in phase 6: each instrument, the drum kit and the stereo mix, by measurement; the track pane and the notation views in the desktop window and in a narrow one; and Guitar Pro files with repeats, jumps and drum tracks, which are now in `tests/corpus/`.
 
@@ -233,13 +233,18 @@ Checks owed from earlier phases:
 
 ### Phase 7 — Import and export
 
-- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 5, including what is skipped today: lyrics, chord names and diagrams, and tempo changes
+- [x] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 5, including what was skipped until now: lyrics, chord names and diagrams, text, and tempo changes. How things stand:
+  - Versions 3 and 4 are read by the reader for version 5, which carries the version as a number and asks it as it goes (`guitar_pro/gp5.rs`): the three are one format that grew. Version 6 keeps the XML score of version 7 in a container of its own, a small file system that is usually compressed (`guitar_pro/gpx.rs`)
+  - Also read: track volume and pan, fermatas and timers from the XML formats, and changes of volume and pan from the binary ones. A change of tempo inside a bar is put at its place in the bar to the nearest sixty-fourth of it. A tempo that version 5 reaches over so many beats becomes a gradual change from the tempo before it, and a change to the new tempo where it arrives
+  - Nothing a file holds is left out for want of a place in the model any more. What the first pass of this item skipped was given one: fades (in, out and swell, on a beat), a tempo that changes by degrees, the dotted and Scottish feels, a second segno and coda with the jumps that use them, any number of signs and jumps on a bar, notes down to a 256th and a third dot, and the drum notes of version 6, which name a piece of its kit and a way of hitting it. Each is drawn, played, saved (the native format is at version 7, with a migration for the signs and jumps, which became lists) and can be written in the app: Beat > Fade, Score > Segno, coda and fine, Jumps at the end of the bar, Feel, and Change tempo by degrees. The exception is dots: the app still enters one, and shows the two or three a file brings
+  - A jump is taken once, in the order a bar lists them, and a way on to a coda is open only after the jump that names that coda. A gradual change runs from one place the tempo is set to the next as the score is written, and is played as steps a sixteenth of a whole note long. Only notes shorter than a 256th and more than three dots are still skipped, and listed after the import
+  - The corpus is alphaTab's test data for every version, 214 files (`tests/corpus/README.md`). Of the 104 pairs of files that are the same bars saved by two versions, 97 read alike and the other 7 are not the same bars. A file cut short or with bytes changed is refused or read as far as it goes, and never panics. Eleven of alphaTab's files are transcriptions of other people's songs and are not in the repository; kept beside it, they import whole, the ten tracks and 216 bars of one in version 4 with every bar adding up
 - [ ] Guitar Pro export: `.gp`
 - [ ] MusicXML import and export
 - [ ] MIDI import and export
 - [ ] ASCII tab import and export
 - [ ] PDF, SVG and PNG export; printing
-- [ ] Audio export: WAV, MP3, FLAC, OGG
+- [x] Audio export: WAV. File > Export audio (WAV)… writes the whole score as it plays, with its repeats, every track that is not muted, through the sound chosen for playback, as 16-bit stereo at 44.1 kHz. It is made four seconds at a time on the page's own thread, which goes on answering and says how far it has got (`Document::export_audio`, `gtr_audio::wav`). MP3 and OGG are not wanted: their encoders would mean bundling a library under another licence, or leaning on what each browser offers. FLAC can be written in Rust without either, and is left until it is asked for
 - [ ] Import test corpus with rendering comparisons against reference output
 
 **Done when:** the import corpus opens without errors and renders recognisably.

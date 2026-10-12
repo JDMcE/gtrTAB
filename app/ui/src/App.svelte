@@ -8,6 +8,7 @@
     EXTENSION,
     addRecentFile,
     confirmDialog,
+    exportFile,
     openFile,
     readAutosave,
     readPath,
@@ -20,6 +21,7 @@
   } from './lib/files';
   import Inspector from './lib/Inspector.svelte';
   import {
+    FADES,
     FEELS,
     JUMPS,
     MAX_VOICES,
@@ -28,6 +30,8 @@
     NOTE_VALUES,
     type DrumPiece,
     type Dynamic,
+    type Jump,
+    type Target,
     type EditorState,
     type Layout,
     type Mix,
@@ -59,7 +63,7 @@
   import init, { Document } from './wasm/gtr_wasm.js';
 
   const UNTITLED = `untitled.${EXTENSION}`;
-  const VALUE_NAMES = ['Whole', 'Half', 'Quarter', 'Eighth', '16th', '32nd', '64th'];
+  const VALUE_NAMES = ['Whole', 'Half', 'Quarter', 'Eighth', '16th', '32nd', '64th', '128th', '256th'];
   const DYNAMICS: [Dynamic, string][] = [
     ['ppp', 'Pianississimo'],
     ['pp', 'Pianissimo'],
@@ -403,6 +407,46 @@
       message = sound === 'default' ? `Playing through ${DEFAULT_SOUNDFONT.name}` : 'Playing through the built-in models';
     });
 
+  /** The bytes of the SoundFont the preferences ask for, or `null` for the built-in models. */
+  async function soundBytes(): Promise<ArrayBuffer | null> {
+    if (prefs.sound === 'custom') return (await storedSoundFont())?.bytes ?? null;
+    return prefs.sound === 'default' ? fetchDefaultSoundFont() : null;
+  }
+
+  /** True while the score is being made into a sound file. */
+  let exporting = $state(false);
+
+  /**
+   * Writes the whole score to a WAV file as it plays: every track that is not muted,
+   * with its repeats, through the sound chosen for playback. The sound is made a few
+   * seconds at a time, so that the window goes on answering and can say how far it is.
+   */
+  const exportAudio = () =>
+    run(async () => {
+      if (!doc || exporting) return;
+      exporting = true;
+      try {
+        const RATE = 44_100;
+        const options = JSON.stringify({ from_bar: 0, to_bar: null, replay_repeats: replayRepeats, speed: 1 });
+        const font = await soundBytes();
+        const making = doc.exportAudio(options, RATE, font ? new Uint8Array(font) : undefined);
+        try {
+          for (let done = 0; done < 1; ) {
+            done = making.step(RATE * 4);
+            message = `Exporting audio: ${Math.round(done * 100)}%`;
+            await new Promise((next) => setTimeout(next));
+          }
+          const name = fileName.replace(/\.[^.]+$/, '') + '.wav';
+          const written = await exportFile(name, making.wav(), 'WAV audio', 'audio/wav');
+          message = written ? `Exported ${written}` : '';
+        } finally {
+          making.free();
+        }
+      } finally {
+        exporting = false;
+      }
+    });
+
   const chooseSound = () =>
     run(async () => {
       const font = await pickSoundFont();
@@ -511,12 +555,33 @@
   const barNumber = () => (editor?.cursor.bar ?? 0) + 1;
 
   /** A command that sets a property of the bar to one of a list of choices, or clears it. */
-  const barChoices = <T extends string>(field: 'target' | 'jump' | 'feel', choices: [T, string][]): Command[] =>
+  const barChoices = <T extends string>(field: 'feel', choices: [T, string][]): Command[] =>
     choices.map(([value, label]) => ({
       label,
       active: () => masterBar?.[field] === value,
       run: () => setBar(field, masterBar?.[field] === value ? null : value),
     }));
+
+  /** A command for each thing a bar can have several of: it is put on the bar, or taken off it. */
+  const barList = <T extends Target | Jump>(field: 'targets' | 'jumps', choices: [T, string][]): Command[] =>
+    choices.map(([value, label]) => {
+      const there = () => ((masterBar?.[field] ?? []) as T[]).includes(value);
+      return {
+        label,
+        active: there,
+        run: () => {
+          const now = (masterBar?.[field] ?? []) as T[];
+          setBar(field, there() ? now.filter((one) => one !== value) : [...now, value]);
+        },
+      };
+    });
+
+  const fades: Command[] = FADES.map(([value, label]) => ({
+    label,
+    active: () => beatEffects.fade === value,
+    disabled: () => !editor?.beat_effects,
+    run: () => setBeatEffect('fade', beatEffects.fade === value ? null : value),
+  }));
 
   /**
    * Where above a stopped note its string can be touched for a harmonic, in frets, and what
@@ -595,6 +660,7 @@
     open: { label: 'Open or import…', icon: 'open', keys: 'Ctrl+O', run: open },
     save: { label: 'Save', icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
     saveAs: { label: 'Save as…', icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
+    exportAudio: { label: 'Export audio (WAV)…', disabled: () => noScore() || exporting, run: () => exportAudio() },
 
     undo: { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
     redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
@@ -714,8 +780,14 @@
           title: 'Tempo change',
           hint: `From the cursor's beat in bar ${barNumber()} on. Leave it empty to carry on at the tempo before.`,
           field: { kind: 'number', label: 'Tempo (bpm)', value: editor?.tempo_change ?? null, min: 20, max: 400 },
-          apply: (tempo: number | null) => edit((d) => d.setTempoChange(tempo || 0)),
+          apply: (tempo: number | null) => edit((d) => d.setTempoChange(tempo || 0, !!editor?.tempo_gradual)),
         }),
+    },
+    tempoGradual: {
+      label: 'Change tempo by degrees, up to the next change',
+      active: () => !!editor?.tempo_gradual,
+      disabled: () => !editor?.tempo_change,
+      run: () => edit((d) => d.setTempoChange(editor?.tempo_change ?? 0, !editor?.tempo_gradual)),
     },
     fermata: {
       label: 'Fermata',
@@ -908,6 +980,8 @@
           '-',
           cmd.save,
           cmd.saveAs,
+          '-',
+          cmd.exportAudio,
         ],
       },
       {
@@ -972,6 +1046,7 @@
           '-',
           cmd.chordName, cmd.beatText, cmd.lyrics, cmd.fermata,
           '-',
+          { label: 'Fade', items: fades },
           cmd.volumeChange, cmd.panChange,
         ],
       },
@@ -981,10 +1056,10 @@
           cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.keySignature,
           '-',
           cmd.repeatStart, cmd.repeatEnd, cmd.endings,
-          { label: 'Segno, coda and fine', items: barChoices('target', TARGETS) },
-          { label: 'Jump at the end of the bar', items: barChoices('jump', JUMPS) },
+          { label: 'Segno, coda and fine', items: barList('targets', TARGETS) },
+          { label: 'Jumps at the end of the bar', items: barList('jumps', JUMPS) },
           '-',
-          cmd.section, cmd.barTempo, cmd.timer,
+          cmd.section, cmd.barTempo, cmd.tempoGradual, cmd.timer,
           { label: 'Feel', items: barChoices('feel', FEELS) },
           '-',
           cmd.scoreInfo,

@@ -3,4 +3,4 @@
 /**
  * A marked place in the score.
  */
-export type Target = "segno" | "coda" | "fine";
+export type Target = "segno" | "coda" | "fine" | "segno_segno" | "double_coda";

@@ -27,7 +27,11 @@ beat_effects: BeatEffects | null,
 /**
  * The tempo that is written to change on the cursor's beat, if one is.
  */
-tempo_change: number | null, can_undo: boolean, can_redo: boolean, can_paste: boolean, dirty: boolean, 
+tempo_change: number | null, 
+/**
+ * Whether that tempo moves steadily on towards the next change.
+ */
+tempo_gradual: boolean, can_undo: boolean, can_redo: boolean, can_paste: boolean, dirty: boolean, 
 /**
  * Changes whenever the score does.
  */

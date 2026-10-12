@@ -1,6 +1,6 @@
 //! The route playback takes through a score, and how long it takes over each bar.
 
-use crate::{Feel, Jump, MasterBar, Rational, Score, Target};
+use crate::{Feel, MasterBar, Rational, Score, Target};
 
 /// How many times its written length a beat under a fermata is held for.
 const FERMATA_HOLD: f64 = 2.0;
@@ -10,7 +10,7 @@ const FERMATA_HOLD: f64 = 2.0;
 /// are passed straight through, on their last ending, as convention has it, unless
 /// `replay_repeats` asks for them to be played again.
 pub fn play_order(masters: &[MasterBar], replay_repeats: bool) -> Vec<usize> {
-    let find = |target: Target| masters.iter().position(|m| m.target == Some(target));
+    let find = |target: Target| masters.iter().position(|m| m.targets.contains(&target));
     // The pass a repeat reached from `bar` starts on: its first, or once a jump has been
     // taken its last, which is the one that leads out of it.
     let first_pass = |bar: usize, jumped: bool| match jumped && !replay_repeats {
@@ -26,11 +26,15 @@ pub fn play_order(masters: &[MasterBar], replay_repeats: bool) -> Vec<usize> {
     let mut pass: u8 = 1;
     // A repeat has just been completed: its last ending may still follow.
     let mut finished = false;
-    let mut jumped = false;
-    let (mut al_fine, mut al_coda) = (false, false);
+    // The jumps back that have been taken, each by its bar and its place among the
+    // bar's jumps: a jump is followed once.
+    let mut taken: Vec<(usize, usize)> = Vec::new();
+    // What the last jump back said to go on until: the fine, or one of the codas.
+    let mut until: Option<Target> = None;
     // Scores that loop for ever are cut short rather than followed for ever.
-    while bar < masters.len() && order.len() < 20_000 {
+    'bars: while bar < masters.len() && order.len() < 20_000 {
         let master = &masters[bar];
+        let jumped = !taken.is_empty();
         if master.repeat_start && repeat_start != bar {
             repeat_start = bar;
             pass = first_pass(bar, jumped);
@@ -46,32 +50,28 @@ pub fn play_order(masters: &[MasterBar], replay_repeats: bool) -> Vec<usize> {
             continue;
         }
         order.push(bar);
-        if al_fine && master.target == Some(Target::Fine) {
+        if until == Some(Target::Fine) && master.targets.contains(&Target::Fine) {
             break;
         }
-        match master.jump {
-            Some(Jump::ToCoda) if al_coda => {
-                if let Some(coda) = find(Target::Coda) {
-                    al_coda = false;
-                    bar = coda;
-                    continue;
+        for (index, &jump) in master.jumps.iter().enumerate() {
+            if let Some(coda) = jump.onward() {
+                // On to a coda, if that is where the last jump back said to go.
+                if until == Some(coda)
+                    && let Some(to) = find(coda)
+                {
+                    until = None;
+                    bar = to;
+                    continue 'bars;
                 }
-            }
-            Some(jump) if !jumped && jump != Jump::ToCoda => {
-                jumped = true;
-                al_fine = matches!(jump, Jump::DaCapoAlFine | Jump::DalSegnoAlFine);
-                al_coda = matches!(jump, Jump::DaCapoAlCoda | Jump::DalSegnoAlCoda);
-                let to_segno = matches!(
-                    jump,
-                    Jump::DalSegno | Jump::DalSegnoAlFine | Jump::DalSegnoAlCoda
-                );
-                bar = to_segno.then(|| find(Target::Segno)).flatten().unwrap_or(0);
+            } else if !taken.contains(&(bar, index)) {
+                taken.push((bar, index));
+                until = jump.until();
+                bar = jump.back_to().and_then(find).unwrap_or(0);
                 repeat_start = bar;
-                pass = first_pass(bar, jumped);
+                pass = first_pass(bar, true);
                 finished = false;
-                continue;
+                continue 'bars;
             }
-            _ => {}
         }
         if master.repeat_count >= 2 {
             if pass < master.repeat_count {
@@ -93,30 +93,29 @@ pub fn range_order(masters: &[MasterBar], from: usize, to: usize) -> Vec<usize> 
     let to = to.min(masters.len());
     let mut range = masters[from.min(to)..to].to_vec();
     for master in &mut range {
-        master.jump = None;
-        master.target = None;
+        master.jumps.clear();
+        master.targets.clear();
     }
     (play_order(&range, true).into_iter())
         .map(|bar| bar + from)
         .collect()
 }
 
-/// Stretches a position within a bar for a swing feel: of each pair of short notes, the
-/// first takes two thirds of the time and the second one third.
+/// Moves a position within a bar for a feel: of each pair of short notes, the first
+/// takes its share of the pair's time, two thirds of it in swing, and the second the rest.
 fn swing(feel: Feel, position: Rational) -> Rational {
-    let unit = match feel {
-        Feel::Straight => return position,
-        Feel::SwingEighths => Rational::new(1, 4),
-        Feel::SwingSixteenths => Rational::new(1, 8),
+    let Some((unit, share)) = feel.pair() else {
+        return position;
     };
     let start = (position / unit).floor() * unit;
     let within = position - start;
     let half = unit / 2;
+    let one = Rational::from_integer(1);
     start
         + if within <= half {
-            within * Rational::new(4, 3)
+            within * share * 2
         } else {
-            unit * Rational::new(2, 3) + (within - half) * Rational::new(2, 3)
+            unit * share + (within - half) * (one - share) * 2
         }
 }
 
@@ -279,21 +278,112 @@ fn held(score: &Score, bar: usize, feel: Feel) -> Vec<(Rational, Rational)> {
     apart
 }
 
+/// A place where the score sets the tempo.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct TempoPoint {
+    pub bar: usize,
+    /// Whole notes from the start of the bar.
+    pub position: Rational,
+    /// Whole notes from the start of the score, as it is written.
+    at: Rational,
+    pub tempo: u32,
+    /// The tempo moves steadily from here to the next point.
+    pub gradual: bool,
+}
+
+/// Every place the score sets the tempo, in the order they are written: the start, each
+/// bar that has a tempo of its own or starts a gradual change, and each change inside a
+/// bar.
+pub fn tempo_points(score: &Score) -> Vec<TempoPoint> {
+    let zero = Rational::from_integer(0);
+    let mut points = Vec::new();
+    let mut start = zero;
+    let mut current = score.tempo;
+    for (bar, master) in score.master_bars.iter().enumerate() {
+        if bar == 0 || master.tempo.is_some() || master.tempo_gradual {
+            current = master.tempo.unwrap_or(current);
+            points.push(TempoPoint {
+                bar,
+                position: zero,
+                at: start,
+                tempo: current,
+                gradual: master.tempo_gradual,
+            });
+        }
+        for change in &master.tempo_changes {
+            current = change.tempo;
+            points.push(TempoPoint {
+                bar,
+                position: change.position,
+                at: start + change.position,
+                tempo: change.tempo,
+                gradual: change.gradual,
+            });
+        }
+        start += master.time_signature.bar_length();
+    }
+    points
+}
+
+/// Whether the tempo set at a point speeds up or slows down from there, if it is the
+/// start of a gradual change that goes anywhere.
+pub fn gradual_change(points: &[TempoPoint], index: usize) -> Option<std::cmp::Ordering> {
+    let (from, to) = (points.get(index)?, points.get(index + 1)?);
+    (from.gradual && from.tempo != to.tempo).then(|| to.tempo.cmp(&from.tempo))
+}
+
+/// How finely a gradual change of tempo is stepped: the tempo is held for this long, in
+/// whole notes, at what it would be half way through.
+const RAMP_STEP: Rational = Rational::new_raw(1, 16);
+
 /// How each bar of `order` is timed, at `speed` times the tempo written.
 pub fn timings(score: &Score, order: &[usize], speed: f64) -> Vec<BarTiming> {
     let in_force = in_force(score);
-    let whole = |tempo: u32| 240.0 / (f64::from(tempo.max(1)) * speed);
+    let whole = |tempo: f64| 240.0 / (tempo.max(1.0) * speed);
+    // Gradual changes run from one place the tempo is set to the next, as the score is
+    // written, whatever order its bars are played in.
+    let points = tempo_points(score);
+    let ramps: Vec<(&TempoPoint, &TempoPoint)> = (points.windows(2))
+        .filter(|pair| pair[0].gradual && pair[0].tempo != pair[1].tempo)
+        .map(|pair| (&pair[0], &pair[1]))
+        .collect();
+    let mut starts = Vec::with_capacity(score.master_bars.len());
+    let mut start = Rational::from_integer(0);
+    for master in &score.master_bars {
+        starts.push(start);
+        start += master.time_signature.bar_length();
+    }
     (order.iter())
         .map(|&bar| {
             let master = &score.master_bars[bar];
             let (tempo, feel) = in_force[bar];
-            let tempos: Vec<(Rational, f64)> = [(Rational::from_integer(0), whole(tempo))]
-                .into_iter()
-                .chain(
-                    (master.tempo_changes.iter())
-                        .map(|c| (swing(feel, c.position), whole(c.tempo))),
-                )
-                .collect();
+            let mut tempos: std::collections::BTreeMap<Rational, f64> =
+                [(Rational::from_integer(0), whole(tempo.into()))]
+                    .into_iter()
+                    .chain(
+                        (master.tempo_changes.iter())
+                            .map(|c| (swing(feel, c.position), whole(c.tempo.into()))),
+                    )
+                    .collect();
+            // Where a gradual change crosses the bar, the tempo is stepped along it.
+            let (from, to) = (
+                starts[bar],
+                starts[bar] + master.time_signature.bar_length(),
+            );
+            for (first, last) in &ramps {
+                let (mut at, end) = (first.at.max(from), last.at.min(to));
+                while at < end {
+                    let next = (at + RAMP_STEP).min(end);
+                    let through = float((at + next) / 2 - first.at) / float(last.at - first.at);
+                    let (slow, fast) = (f64::from(first.tempo), f64::from(last.tempo));
+                    tempos.insert(
+                        swing(feel, at - from),
+                        whole(slow + (fast - slow) * through),
+                    );
+                    at = next;
+                }
+            }
+            let tempos: Vec<(Rational, f64)> = tempos.into_iter().collect();
             let held = held(score, bar, feel);
             BarTiming::new(
                 bar,
@@ -322,7 +412,7 @@ pub fn bar_times(score: &Score) -> Vec<Option<f64>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{TimeSignature, demo_score};
+    use crate::{Jump, TempoChange, TimeSignature, demo_score};
 
     fn masters(count: usize) -> Vec<MasterBar> {
         vec![MasterBar::new(TimeSignature::COMMON); count]
@@ -356,21 +446,21 @@ mod tests {
     fn jumps_are_taken_once() {
         // 0 | segno 1 | 2 to coda | 3 D.S. al Coda | coda 4 | 5
         let mut bars = masters(6);
-        bars[1].target = Some(Target::Segno);
-        bars[2].jump = Some(Jump::ToCoda);
-        bars[3].jump = Some(Jump::DalSegnoAlCoda);
-        bars[4].target = Some(Target::Coda);
+        bars[1].targets = vec![Target::Segno];
+        bars[2].jumps = vec![Jump::ToCoda];
+        bars[3].jumps = vec![Jump::DalSegnoAlCoda];
+        bars[4].targets = vec![Target::Coda];
         assert_eq!(play_order(&bars, false), [0, 1, 2, 3, 1, 2, 4, 5]);
 
         // 0 | 1 fine | 2 D.C. al Fine
         let mut bars = masters(3);
-        bars[1].target = Some(Target::Fine);
-        bars[2].jump = Some(Jump::DaCapoAlFine);
+        bars[1].targets = vec![Target::Fine];
+        bars[2].jumps = vec![Jump::DaCapoAlFine];
         assert_eq!(play_order(&bars, false), [0, 1, 2, 0, 1]);
 
         // A plain D.C. plays the piece twice and then stops.
         let mut bars = masters(2);
-        bars[1].jump = Some(Jump::DaCapo);
+        bars[1].jumps = vec![Jump::DaCapo];
         assert_eq!(play_order(&bars, false), [0, 1, 0, 1]);
     }
 
@@ -384,7 +474,7 @@ mod tests {
         bars[2].alternate_endings = 0b10;
         bars[3].repeat_start = true;
         bars[3].repeat_count = 3;
-        bars[4].jump = Some(Jump::DaCapo);
+        bars[4].jumps = vec![Jump::DaCapo];
         let first = [0, 1, 0, 2, 3, 3, 3, 4];
         // After the D.C. each repeat is played once, by way of its last ending.
         assert_eq!(
@@ -403,7 +493,7 @@ mod tests {
         let mut bars = masters(5);
         bars[1].repeat_start = true;
         bars[2].repeat_count = 2;
-        bars[3].jump = Some(Jump::DaCapo);
+        bars[3].jumps = vec![Jump::DaCapo];
         assert_eq!(range_order(&bars, 1, 4), [1, 2, 1, 2, 3]);
         // A repeat whose start is outside the range goes back to where the range starts.
         assert_eq!(range_order(&bars, 2, 4), [2, 2, 3]);
@@ -435,10 +525,10 @@ mod tests {
         for staff in score.tracks.iter_mut().flat_map(|t| &mut t.staves) {
             staff.bars.resize(4, crate::Bar::empty());
         }
-        score.master_bars[1].jump = Some(Jump::ToCoda);
+        score.master_bars[1].jumps = vec![Jump::ToCoda];
         score.master_bars[2].tempo = Some(60);
-        score.master_bars[2].jump = Some(Jump::DaCapoAlCoda);
-        score.master_bars[3].target = Some(Target::Coda);
+        score.master_bars[2].jumps = vec![Jump::DaCapoAlCoda];
+        score.master_bars[3].targets = vec![Target::Coda];
         let order = play_order(&score.master_bars, false);
         assert_eq!(order, [0, 1, 2, 0, 1, 3]);
         let lengths: Vec<f64> = (timings(&score, &order, 1.0).iter())
@@ -453,12 +543,11 @@ mod tests {
 
     #[test]
     fn a_tempo_change_inside_a_bar_starts_on_its_beat_and_carries_on() {
-        use crate::TempoChange;
-
         let mut score = demo_score();
         let change = |n, d, tempo| TempoChange {
             position: Rational::new(n, d),
             tempo,
+            gradual: false,
         };
         // Half of the first bar at 120, a quarter at 60 and a quarter at 240.
         score.master_bars[0].tempo_changes = vec![change(1, 2, 60), change(3, 4, 240)];
@@ -532,5 +621,119 @@ mod tests {
         // The metronome keeps even time.
         assert_eq!(timing.at(Rational::new(1, 8)), 0.25);
         assert_eq!(timing.whole(), 2.0);
+    }
+
+    #[test]
+    fn second_signs_and_several_jumps_on_a_bar_are_followed() {
+        // A segno, then a second segno in a bar that can also leave for the second coda;
+        // a bar with two jumps, back to the second segno and then back to the first "al
+        // double coda"; and the second coda last.
+        let mut bars = masters(6);
+        bars[1].targets = vec![Target::Segno];
+        bars[2].targets = vec![Target::SegnoSegno];
+        bars[2].jumps = vec![Jump::ToDoubleCoda];
+        bars[4].jumps = vec![Jump::DalSegnoSegno, Jump::DalSegnoAlDoubleCoda];
+        bars[5].targets = vec![Target::DoubleCoda];
+        // Each jump is taken once, in the order written; the way on to the coda is only
+        // open after the jump that says so.
+        assert_eq!(play_order(&bars, false), [0, 1, 2, 3, 4, 2, 3, 4, 1, 2, 5]);
+        // A jump to a sign the score does not have goes back to the start.
+        bars[2].targets.clear();
+        assert_eq!(play_order(&bars, false)[..7], [0, 1, 2, 3, 4, 0, 1]);
+        for jump in [
+            Jump::DaCapoAlDoubleCoda,
+            Jump::DalSegnoSegnoAlFine,
+            Jump::ToDoubleCoda,
+        ] {
+            assert!(jump.label().len() > 3);
+        }
+    }
+
+    #[test]
+    fn dotted_and_scottish_feels_move_the_second_note_of_each_pair() {
+        // At 120 a quarter note is half a second. Where the eighth off the beat falls,
+        // and the sixteenth after it, in each feel.
+        let eighth = Rational::new(1, 8);
+        let sixteenth = Rational::new(1, 16);
+        for (feel, off_beat, after) in [
+            (Feel::Straight, 0.25, 0.125),
+            (Feel::SwingEighths, 1.0 / 3.0, 1.0 / 6.0),
+            (Feel::DottedEighths, 0.375, 0.1875),
+            (Feel::ScottishEighths, 0.125, 0.0625),
+            (Feel::SwingSixteenths, 0.25, 1.0 / 6.0),
+            (Feel::DottedSixteenths, 0.25, 0.1875),
+            (Feel::ScottishSixteenths, 0.25, 0.0625),
+        ] {
+            let mut score = demo_score();
+            score.master_bars[0].feel = Some(feel);
+            let bar = &timings(&score, &[0], 1.0)[0];
+            assert!((bar.seconds(eighth) - off_beat).abs() < 1e-9, "{feel:?}");
+            assert!((bar.seconds(sixteenth) - after).abs() < 1e-9, "{feel:?}");
+            // The beat itself does not move, and the bar is as long as ever.
+            assert!((bar.seconds(Rational::new(1, 4)) - 0.5).abs() < 1e-9);
+            assert!((bar.length - 2.0).abs() < 1e-9);
+            assert!(!feel.label().is_empty());
+        }
+    }
+
+    #[test]
+    fn a_gradual_change_moves_the_tempo_steadily_to_the_next() {
+        let mut score = demo_score();
+        score.tempo = 60;
+        score.master_bars[0].tempo_gradual = true;
+        score.master_bars[1].tempo = Some(120);
+        let timed = timings(&score, &[0, 1], 1.0);
+        // A bar that speeds up evenly from 60 to 120 lasts four seconds times the natural
+        // logarithm of two, where it would last four at 60 and two at 120.
+        let expected = 4.0 * std::f64::consts::LN_2;
+        assert!(
+            (timed[0].length - expected).abs() < 0.02,
+            "{}",
+            timed[0].length
+        );
+        assert!((timed[1].length - 2.0).abs() < 1e-9);
+        // Half way through it is going at about 90, and it starts at about 60.
+        let half_way = 240.0 / timed[0].whole_at(Rational::new(1, 2));
+        assert!((90.0..94.0).contains(&half_way), "{half_way}");
+        assert!((60.0..63.0).contains(&(240.0 / timed[0].whole())));
+
+        // The same change taken over two bars: each is quicker than the last, and they
+        // last twice as long together.
+        score
+            .master_bars
+            .push(MasterBar::new(TimeSignature::COMMON));
+        score.master_bars[1].tempo = None;
+        score.master_bars[2].tempo = Some(120);
+        let timed = timings(&score, &[0, 1, 2], 1.0);
+        assert!(timed[0].length > timed[1].length && timed[1].length > timed[2].length);
+        assert!((timed[0].length + timed[1].length - 2.0 * expected).abs() < 0.04);
+        // And inside a bar, from one change to the next, which holds from there.
+        let mut score = demo_score();
+        score.master_bars[0].tempo_changes = vec![
+            TempoChange {
+                position: Rational::new(1, 4),
+                tempo: 120,
+                gradual: true,
+            },
+            TempoChange {
+                position: Rational::new(3, 4),
+                tempo: 60,
+                gradual: false,
+            },
+        ];
+        let bar = &timings(&score, &[0], 1.0)[0];
+        let slowing = bar.at(Rational::new(3, 4)) - bar.at(Rational::new(1, 4));
+        assert!(
+            (slowing - 2.0 * std::f64::consts::LN_2).abs() < 0.02,
+            "{slowing}"
+        );
+        assert!((bar.at(Rational::new(1, 4)) - 0.5).abs() < 1e-9);
+        assert!((bar.length - bar.at(Rational::new(3, 4)) - 1.0).abs() < 1e-9);
+
+        let points = tempo_points(&score);
+        let moving: Vec<_> = (0..points.len())
+            .map(|i| gradual_change(&points, i))
+            .collect();
+        assert_eq!(moving, [None, Some(std::cmp::Ordering::Less), None]);
     }
 }
