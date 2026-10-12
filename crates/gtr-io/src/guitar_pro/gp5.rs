@@ -3,9 +3,9 @@
 //! ones the importer has no use for.
 
 use gtr_model::{
-    Accent, Beat, BeatEffects, Bend, Dynamic, Feel, Finger, Grace, Harmonic, Instrument, MasterBar,
-    Mix, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap, Staff, Strum,
-    TimeSignature, Track, Trill, Tuning, Vibrato, Voice,
+    Accent, Beat, BeatEffects, Bend, Dynamic, Feel, Finger, Grace, Harmonic, Instrument, Jump,
+    MasterBar, Mix, Note, NoteEffects, NoteValue, PickStroke, Score, ScoreInfo, Slap, Staff, Strum,
+    Target, TimeSignature, Track, Trill, Tuning, Vibrato, Voice,
 };
 
 use super::{ImportError, Skipped, bar, beat, duration, keep_dynamic_changes, tuning};
@@ -92,6 +92,36 @@ struct TrackInfo {
     last_fret: [u8; 7],
 }
 
+#[derive(Clone, Copy)]
+enum Direction {
+    Target(Target),
+    Jump(Jump),
+}
+
+/// The directions a file can hold, in the order it lists their bars. The second segno and
+/// coda Guitar Pro has are read as the first, as from its newer format.
+const DIRECTIONS: [Direction; 19] = [
+    Direction::Target(Target::Coda),
+    Direction::Target(Target::Coda),
+    Direction::Target(Target::Segno),
+    Direction::Target(Target::Segno),
+    Direction::Target(Target::Fine),
+    Direction::Jump(Jump::DaCapo),
+    Direction::Jump(Jump::DaCapoAlCoda),
+    Direction::Jump(Jump::DaCapoAlCoda),
+    Direction::Jump(Jump::DaCapoAlFine),
+    Direction::Jump(Jump::DalSegno),
+    Direction::Jump(Jump::DalSegnoAlCoda),
+    Direction::Jump(Jump::DalSegnoAlCoda),
+    Direction::Jump(Jump::DalSegnoAlFine),
+    Direction::Jump(Jump::DalSegno),
+    Direction::Jump(Jump::DalSegnoAlCoda),
+    Direction::Jump(Jump::DalSegnoAlCoda),
+    Direction::Jump(Jump::DalSegnoAlFine),
+    Direction::Jump(Jump::ToCoda),
+    Direction::Jump(Jump::ToCoda),
+];
+
 pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     let mut r = Reader {
         data: bytes,
@@ -153,7 +183,14 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         r.skip(6)?;
         channels.push((program, volume, balance));
     }
-    r.skip(42)?; // bar numbers of codas, segnos and similar directions
+    // The bar each direction is written on, counted from one, or -1 for none. There is one
+    // of each at most, in a fixed order: the signs first, then the jumps.
+    let mut directions = [None; DIRECTIONS.len()];
+    for bar in &mut directions {
+        let bytes = r.take(2)?;
+        *bar = usize::try_from(i16::from_le_bytes([bytes[0], bytes[1]]) - 1).ok();
+    }
+    r.skip(4)?; // master reverb
 
     let bar_count = r.count("bar count", 100_000)?;
     let track_count = r.count("track count", 1_000)?;
@@ -178,8 +215,9 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         master.key_signature = master_bars.last().map_or(0, |m| m.key_signature);
         master.repeat_start = flags & 0x04 != 0;
         if flags & 0x08 != 0 {
-            // Guitar Pro counts the repeats after the first time through.
-            master.repeat_count = r.byte()?.saturating_add(1).max(2);
+            // How many times the passage is played in all. (Older formats, which are not
+            // read here, count the times after the first.)
+            master.repeat_count = r.byte()?.max(2);
         }
         if flags & 0x20 != 0 {
             let name = r.string()?;
@@ -211,6 +249,21 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         master_bars.push(master);
     }
 
+    for (direction, bar) in DIRECTIONS.iter().zip(directions) {
+        let Some(master) = bar.and_then(|bar| master_bars.get_mut(bar)) else {
+            continue;
+        };
+        // A bar here has one sign and one jump: the first of each.
+        let taken = match *direction {
+            Direction::Target(target) => master
+                .target
+                .replace(master.target.unwrap_or(target))
+                .is_some(),
+            Direction::Jump(jump) => master.jump.replace(master.jump.unwrap_or(jump)).is_some(),
+        };
+        skipped.add_if(taken, "all but the first sign and jump on a bar");
+    }
+
     let mut tracks = Vec::with_capacity(track_count);
     let mut infos = Vec::with_capacity(track_count);
     for index in 0..track_count {
@@ -238,7 +291,8 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
             r.string()?;
             r.string()?;
         }
-        let percussion = flags & 0x01 != 0;
+        // Not every file sets the flag: a track on MIDI channel 10 is drums either way.
+        let percussion = flags & 0x01 != 0 || channel == 10;
         // A drum track's lines have no pitch: its notes say which piece of the kit they are.
         let staff_tuning = match percussion {
             true => Tuning::new(vec![0; strings.len().clamp(1, Tuning::MAX_STRINGS)]),

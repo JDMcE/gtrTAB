@@ -1,6 +1,7 @@
-//! Imports every Guitar Pro file in the directory named by `GTR_GP_SAMPLES` and checks the
-//! results hang together. Does nothing when the variable is not set, because no sample files
-//! are kept in the repository yet. Run with `--nocapture` for a summary of each file.
+//! Imports every Guitar Pro file under `tests/corpus/`, and in the directory named by
+//! `GTR_GP_SAMPLES` if that is set, and checks the results hang together. What each file
+//! of the corpus should hold is checked in `corpus.rs`. Run with `--nocapture` for a
+//! summary of each file.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -56,9 +57,14 @@ fn comparable(beat: &gtr_model::Beat) -> gtr_model::Beat {
 
 #[test]
 fn sample_files_import_cleanly() {
-    let Some(directory) = std::env::var_os("GTR_GP_SAMPLES") else {
-        return;
-    };
+    let corpus = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/corpus/alphatab");
+    check_directory(corpus);
+    if let Some(directory) = std::env::var_os("GTR_GP_SAMPLES") {
+        check_directory(directory.into());
+    }
+}
+
+fn check_directory(directory: PathBuf) {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(directory)
         .unwrap()
         .map(|entry| entry.unwrap().path())
