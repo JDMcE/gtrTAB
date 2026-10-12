@@ -15,6 +15,11 @@ gtr-edit = { path = "crates/gtr-edit" }
 gtr-io = { path = "crates/gtr-io" }
 gtr-layout = { path = "crates/gtr-layout" }
 gtr-audio = { path = "crates/gtr-audio" }
+gtr-render = { path = "crates/gtr-render" }
+
+ab_glyph_rasterizer = "0.1"
+miniz_oxide = "0.8"
+ttf-parser = { version = "0.25", default-features = false, features = ["std"] }
 
 num-rational = { version = "0.4", default-features = false, features = ["std", "serde"] }
 proptest = "1"

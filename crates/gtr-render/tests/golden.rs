@@ -41,6 +41,7 @@ fn check(name: &str, score: &Score, view: View) {
     score.validate().unwrap_or_else(|e| panic!("{name}: {e}"));
     let options = SvgOptions {
         music_font_url: Some("../../app/ui/public/fonts/Bravura.woff2"),
+        ..SvgOptions::default()
     };
     let drawn = svg(&layout(score, &view, WIDTH), options);
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");

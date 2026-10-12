@@ -4,12 +4,18 @@ use std::fmt::Write;
 
 use gtr_layout::{Align, Color, Font, Item, Layout};
 
+use crate::fonts::{Fonts, Segment, patch};
+
 /// How to write a score as SVG.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SvgOptions<'a> {
     /// Where the music font, Bravura, is to be loaded from. Without it the file names the
     /// font and leaves finding it to whatever shows the file.
     pub music_font_url: Option<&'a str>,
+    /// Fonts to draw the text with. Given these, every glyph is written as its outline
+    /// and the file needs no font to be shown; without them text is written as text,
+    /// in whatever fonts the thing that shows it has.
+    pub fonts: Option<&'a Fonts<'a>>,
 }
 
 const INK: &str = "#1b1b1f";
@@ -105,6 +111,23 @@ pub fn svg(layout: &Layout, options: SvgOptions) -> String {
                 knockout,
                 c,
             } => {
+                if let Some(fonts) = options.fonts {
+                    let line = fonts.set(s, *x, *y, *size, *font, *align);
+                    if *knockout {
+                        let (left, top, width, height) = patch(&line, *y, *size);
+                        let _ = writeln!(
+                            out,
+                            r#"<rect x="{left:.1}" y="{top:.1}" width="{width:.1}" height="{height:.1}" fill="{PAPER}"/>"#,
+                        );
+                    }
+                    let _ = writeln!(
+                        out,
+                        r#"<path d="{}" fill="{}"/>"#,
+                        outlines(fonts, &line),
+                        color(*c)
+                    );
+                    continue;
+                }
                 if *knockout {
                     let width = s.chars().count() as f64 * size * CHARACTER_WIDTH;
                     let left = match align {
@@ -145,6 +168,37 @@ pub fn svg(layout: &Layout, options: SvgOptions) -> String {
     out
 }
 
+/// The outlines of a line of text as the data of one path, in the layout's pixels.
+fn outlines(fonts: &Fonts, line: &crate::fonts::Line) -> String {
+    let mut d = String::new();
+    for placed in &line.glyphs {
+        // The font's units go up the page; the layout's pixels go down it.
+        let x = |x: f32| placed.x + f64::from(x) * placed.scale;
+        let y = |y: f32| placed.y - f64::from(y) * placed.scale;
+        for segment in fonts.outline(placed.face, placed.glyph) {
+            let _ = match segment {
+                Segment::Move(px, py) => write!(d, "M{:.2} {:.2}", x(px), y(py)),
+                Segment::Line(px, py) => write!(d, "L{:.2} {:.2}", x(px), y(py)),
+                Segment::Quad(ax, ay, px, py) => {
+                    write!(d, "Q{:.2} {:.2} {:.2} {:.2}", x(ax), y(ay), x(px), y(py))
+                }
+                Segment::Cubic(ax, ay, bx, by, px, py) => write!(
+                    d,
+                    "C{:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
+                    x(ax),
+                    y(ay),
+                    x(bx),
+                    y(by),
+                    x(px),
+                    y(py)
+                ),
+                Segment::Close => write!(d, "Z"),
+            };
+        }
+    }
+    d
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -166,6 +220,7 @@ mod tests {
             &layout,
             SvgOptions {
                 music_font_url: Some("fonts/Bravura.woff2"),
+                ..SvgOptions::default()
             },
         );
         assert!(named.contains(r#"url("fonts/Bravura.woff2")"#));
