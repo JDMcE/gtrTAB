@@ -76,6 +76,7 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy, cut, paste |
 | Ctrl+Z / Ctrl+Y | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
+| [ / ] | Play slower / faster, also while playing |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
 | Ctrl+P | Print |
 | ? or F1 | List every shortcut |
@@ -102,7 +103,7 @@ Repeats, alternate endings, segno, coda and fine, section names, tempo changes, 
 
 On a drum track a note's fret is the number of a piece of the kit, such as 36 for the bass drum, 38 for the snare and 42 for the closed hi-hat; Note > Drum piece lists them by name. A piano track has a staff for each hand, and its notes are entered on tab lines like any other track's.
 
-File > Export audio (WAV)… writes the score to a sound file as it plays.
+Score > Playback speed plays the score at anything from a quarter of its tempo to twice it, without changing the pitch; the speed in the transport bar shows it and asks for another. File > Export audio (WAV)… writes the score to a sound file as it plays, at the tempo written.
 
 Moving right past the end of a full bar starts a new one. Guitar Pro files of every version (`.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`) open through Open or by dropping them on the window.
 

@@ -88,7 +88,11 @@
     [13, 8],
   ];
   const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
-  const SPEEDS = [1, 0.75, 0.5];
+  /** Playback speeds offered by name, as percentages of the tempo written. */
+  const SPEEDS = [25, 50, 75, 100, 125, 150, 200];
+  const [MIN_SPEED, MAX_SPEED] = [25, 200];
+  /** How far the slower and faster keys move the speed. */
+  const SPEED_STEP = 5;
   const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
   const THEME_NAMES: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
   const THEME_ICONS: Record<Theme, IconName> = {
@@ -137,7 +141,8 @@
   let countIn = $state(false);
   /** Play the repeats again after a D.C. or D.S., instead of passing through them. */
   let replayRepeats = $state(false);
-  let speed = $state(1);
+  /** How fast the score is played, as a percentage of the tempo written. */
+  let speed = $state(100);
 
   const prefs = $state(loadPrefs());
   let width = $state(0);
@@ -290,12 +295,14 @@
 
   // --- Playback ---
 
-  /** What is playing: the options it was compiled with and the track being followed. */
-  let passage: { options: string; track: number } | null = null;
+  /** What is playing: the options it was compiled with, but for the speed, and the track being followed. */
+  let passage: { options: object; track: number } | null = null;
 
-  /** Compiles the passage being played from the score as it now stands. */
-  function compilePassage(doc: Document, { options, track }: { options: string; track: number }) {
-    const compiled = doc.compileAudio(options, track);
+  /** Compiles the passage being played from the score as it now stands, at the speed now set. */
+  function compilePassage(doc: Document, { options, track }: { options: object; track: number }) {
+    playedRevision = revision;
+    playedSpeed = speed;
+    const compiled = doc.compileAudio(JSON.stringify({ ...options, speed: speed / 100 }), track);
     const timeline: Timeline = JSON.parse(compiled.timelineJson);
     const events = compiled.events;
     compiled.free();
@@ -306,19 +313,17 @@
     run(async () => {
       if (!doc || !editor) return;
       const selection = editor.selection;
-      const options = JSON.stringify({
+      const options = {
         from_bar: selection ? selection[0][0] : editor.cursor.bar,
         to_bar: selection ? selection[1][0] + 1 : null,
         metronome,
         count_in: countIn,
         replay_repeats: replayRepeats,
-        speed,
         staff: editor.cursor.staff,
         voice: editor.cursor.voice,
-      });
+      };
       passage = { options, track: editor.cursor.track };
       const { events, timeline } = compilePassage(doc, passage);
-      playedRevision = revision;
       await player.play(events, timeline, () => {
         playing = false;
         playhead = null;
@@ -351,19 +356,25 @@
 
   const togglePlay = () => (playing ? stop() : play());
 
+  function setSpeed(percent: number) {
+    speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, Math.round(percent)));
+    message = `Playing at ${speed}% of the tempo`;
+  }
+
   // Volume, pan, mute and solo take effect on what is already playing.
   $effect(() => {
     if (playing && score) player.setMix(mixOf(score.tracks));
   });
 
-  // So does an edit: the synth is handed the passage again and carries on from the beat it
-  // had reached.
+  // So do an edit and a change of speed: the synth is handed the passage again and carries
+  // on from the beat it had reached.
   let playedRevision = -1;
+  let playedSpeed = 100;
   $effect(() => {
-    if (!playing || !score || !doc || !passage || revision === playedRevision) return;
+    if (!playing || !score || !doc || !passage) return;
+    if (revision === playedRevision && speed === playedSpeed) return;
     const timer = setTimeout(() => {
       if (!doc || !passage) return;
-      playedRevision = revision;
       const { events, timeline } = compilePassage(doc, passage);
       void player.update(events, timeline);
     }, EDIT_PLAYBACK_DELAY_MS);
@@ -949,6 +960,19 @@
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
     countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    slower: { label: 'Slower', keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
+    faster: { label: 'Faster', keys: ']', disabled: () => speed >= MAX_SPEED, run: () => setSpeed(speed + SPEED_STEP) },
+    speedOther: {
+      label: 'Other…',
+      active: () => !SPEEDS.includes(speed),
+      run: () =>
+        (prompt = {
+          title: 'Playback speed',
+          hint: 'How fast the score is played, as a percentage of the tempo written. The pitch stays as it is.',
+          field: { kind: 'number', label: 'Speed (%)', value: speed, min: MIN_SPEED, max: MAX_SPEED },
+          apply: (percent: number | null) => setSpeed(percent ?? 100),
+        }),
+    },
     soundDefault: {
       label: `${DEFAULT_SOUNDFONT.name} (comes with gtrTab)`,
       active: () => prefs.sound === 'default',
@@ -979,6 +1003,12 @@
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
   } satisfies Record<string, Command>;
+
+  const speeds: Command[] = SPEEDS.map((percent) => ({
+    label: `${percent}%`,
+    active: () => speed === percent,
+    run: () => setSpeed(percent),
+  }));
 
   const themes: Command[] = THEMES.map((theme) => ({
     label: THEME_NAMES[theme],
@@ -1137,6 +1167,7 @@
           cmd.scoreInfo,
           '-',
           cmd.play, cmd.metronome, cmd.countIn, cmd.replayRepeats,
+          { label: 'Playback speed', items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
           { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
         ],
       },
@@ -1209,7 +1240,13 @@
         ...keyRows(cmd.cut, cmd.copy, cmd.paste),
       ],
     },
-    { title: 'Playback', rows: [{ keys: 'Space', label: 'Play from the cursor or the selection; stop' }] },
+    {
+      title: 'Playback',
+      rows: [
+        { keys: 'Space', label: 'Play from the cursor or the selection; stop' },
+        { keys: '[ / ]', label: 'Slower or faster, also while playing' },
+      ],
+    },
     {
       title: 'Interface',
       rows: [
@@ -1326,6 +1363,8 @@
       case '?':
       case 'F1': return cmd.shortcuts.run;
       case ' ': return togglePlay;
+      case '[': return cmd.slower.run;
+      case ']': return cmd.faster.run;
     }
     return undefined;
   }
@@ -1406,13 +1445,14 @@
         <button
           type="button"
           class="chip"
-          aria-label="Playback speed: {speed * 100}%"
-          use:tip={{ label: 'Playback speed' }}
+          aria-label="Playback speed: {speed}%"
+          aria-keyshortcuts="[ ]"
+          use:tip={{ label: 'Playback speed', keys: '[ / ]' }}
           onmousedown={(e) => e.preventDefault()}
-          onclick={() => (speed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length])}
+          onclick={cmd.speedOther.run}
         >
           <Icon name="speed" size={16} />
-          {speed * 100}%
+          {speed}%
         </button>
         <button
           type="button"

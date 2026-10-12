@@ -227,6 +227,8 @@ pub struct Timeline {
     pub clicks: Vec<Click>,
     /// Beats of the followed track in time order.
     pub beats: Vec<BeatTime>,
+    /// Seconds the count-in lasts, before the first bar starts; zero without one.
+    pub count_in: f64,
     /// Total length in seconds.
     pub duration: f64,
 }
@@ -289,6 +291,7 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         notes: Vec::new(),
         clicks: Vec::new(),
         beats: Vec::new(),
+        count_in: 0.0,
         duration: 0.0,
     };
 
@@ -308,6 +311,7 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
                     accent,
                 }));
             time += seconds(signature.bar_length(), whole);
+            timeline.count_in = time;
         }
         if options.metronome {
             timeline.clicks.extend(pulses.map(|(at, accent)| Click {
@@ -839,6 +843,7 @@ mod tests {
         let t = compile(&score, 0, &options);
         // One count-in bar and one bar of music, each four seconds at half speed.
         assert_eq!(t.duration, 8.0);
+        assert_eq!(t.count_in, 4.0);
         assert_eq!(t.clicks.len(), 8);
         assert!(t.clicks[0].accent && !t.clicks[1].accent);
         assert_eq!(t.clicks[5].time, 5.0);

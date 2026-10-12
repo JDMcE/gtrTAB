@@ -272,7 +272,7 @@ Checks owed, none of which a program here can make: the exported files opened in
 ### Phase 8 — Practice tools
 
 - [ ] Loop a selection, with optional tempo increase per pass (speed trainer)
-- [ ] Relative playback speed
+- [x] Relative playback speed: from a quarter of the tempo written to twice it, with the pitch as it is, since the notes are made afresh and not stretched. Score > Playback speed has the usual steps and any other percentage, `[` and `]` go slower and faster by 5%, and the speed in the transport bar asks for one. A change is heard in what is already playing, which carries on from the same beat, or as far through the count-in. The speed lasts for the session and is not kept with the score; exported audio and MIDI are always at the tempo written. `e2e/speed.spec.ts`
 - [ ] Visual metronome
 - [ ] Tuner using microphone or line-in
 - [ ] Fretboard, keyboard and drum kit views that follow playback and accept input
