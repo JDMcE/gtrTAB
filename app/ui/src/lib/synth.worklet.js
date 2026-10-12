@@ -14,6 +14,10 @@ class SynthProcessor extends AudioWorkletProcessor {
     this.playing = false;
     /** Which passage is playing, as player.ts numbers them. */
     this.id = 0;
+    /** Which passage a loop goes on to the next time round; 0 for none. */
+    this.queued = 0;
+    /** Times the passage playing has gone round its loop. */
+    this.passes = 0;
     this.blocks = 0;
     this.port.onmessage = (event) => this.receive(event.data);
   }
@@ -29,8 +33,26 @@ class SynthProcessor extends AudioWorkletProcessor {
         new Uint8Array(this.wasm.memory.buffer, at, events.length).set(events);
         if (!this.wasm.gtr_load(this.synth, message.type === 'replace' ? 1 : 0)) return;
         this.id = message.id;
+        if (message.type === 'play') {
+          this.queued = 0;
+          this.passes = 0;
+        }
         this.playing = true;
         this.report();
+        break;
+      }
+      case 'queue': {
+        // The passage a loop goes on to, or nothing for the same one again.
+        if (!this.playing) return;
+        if (!message.events) {
+          this.wasm.gtr_queue(this.synth, 1);
+          this.queued = 0;
+          return;
+        }
+        const events = new Uint8Array(message.events);
+        const at = this.wasm.gtr_input(this.synth, events.length);
+        new Uint8Array(this.wasm.memory.buffer, at, events.length).set(events);
+        if (this.wasm.gtr_queue(this.synth, 0)) this.queued = message.id;
         break;
       }
       case 'mix':
@@ -73,6 +95,16 @@ class SynthProcessor extends AudioWorkletProcessor {
     if (!this.playing || !left) return true;
     if (this.blocks++ % REPORT_EVERY === 0) this.report();
     const more = this.wasm.gtr_process(this.synth, left.length);
+    const passes = this.wasm.gtr_passes(this.synth);
+    if (passes !== this.passes) {
+      // Round the loop, and on to the passage queued if there was one.
+      this.passes = passes;
+      if (this.queued && !this.wasm.gtr_queued(this.synth)) this.id = this.queued;
+      this.queued = 0;
+      this.port.postMessage({ type: 'pass', id: this.id });
+      // Say where it has got to before the next block, as playback has gone back.
+      this.blocks = 0;
+    }
     // The module's memory moves when it grows, so look the samples up afresh each time.
     const { buffer } = this.wasm.memory;
     left.set(new Float32Array(buffer, this.wasm.gtr_left(this.synth), left.length));

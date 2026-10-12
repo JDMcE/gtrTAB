@@ -55,6 +55,44 @@ pub unsafe extern "C" fn gtr_load(synth: *mut Synth, keep_place: u32) -> u32 {
     1
 }
 
+/// Has a looped passage go on to the timeline written to [`gtr_input`] the next time it
+/// comes round, or with `clear` set to itself again. Returns 0 if the bytes are not a
+/// timeline, and the queue is then left as it was.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_queue(synth: *mut Synth, clear: u32) -> u32 {
+    let synth = unsafe { &mut *synth };
+    if clear != 0 {
+        synth.engine.queue(None);
+        return 1;
+    }
+    let Some(timeline) = Timeline::from_bytes(&synth.input) else {
+        return 0;
+    };
+    synth.engine.queue(Some(timeline));
+    1
+}
+
+/// Times a looped passage has gone back to its start.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_passes(synth: *const Synth) -> u32 {
+    unsafe { &*synth }.engine.passes()
+}
+
+/// 1 while a passage queued by [`gtr_queue`] waits for the loop to come round.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_queued(synth: *const Synth) -> u32 {
+    unsafe { &*synth }.engine.queued().into()
+}
+
 /// Plays from the SoundFont file written to [`gtr_input`] from the next note on. Returns 0
 /// if it was one, and otherwise 1 for a file of another kind, 2 for a compressed SoundFont
 /// and 3 for a damaged one; the synth then plays as it did before.
@@ -182,6 +220,44 @@ mod tests {
             // A fifth of a second and the time allowed for the last notes to die away.
             assert_eq!(blocks, (0.5f64 * 44_100.0 / 128.0).ceil() as usize - 1);
             assert!((std::slice::from_raw_parts(gtr_left(synth), 128).iter()).all(|&s| s == 0.0));
+            drop(Box::from_raw(synth));
+        }
+    }
+
+    #[test]
+    fn a_looped_passage_goes_on_to_the_one_queued() {
+        let looped = |pitch| {
+            Timeline {
+                notes: vec![NoteEvent::plain(0.0, 0.1, pitch)],
+                duration: 0.1,
+                looped: true,
+                ..Timeline::default()
+            }
+            .to_bytes()
+        };
+        let write = |synth, bytes: &[u8]| unsafe {
+            let input = gtr_input(synth, bytes.len());
+            std::slice::from_raw_parts_mut(input, bytes.len()).copy_from_slice(bytes);
+        };
+        unsafe {
+            let synth = gtr_new(44_100);
+            write(synth, &looped(45));
+            assert_eq!(gtr_load(synth, 0), 1);
+            write(synth, b"not a timeline");
+            assert_eq!(gtr_queue(synth, 0), 0);
+            assert_eq!(gtr_queued(synth), 0);
+            write(synth, &looped(52));
+            assert_eq!(gtr_queue(synth, 0), 1);
+            assert_eq!(gtr_queued(synth), 1);
+            // A tenth of a second is 4410 samples, which 35 blocks pass.
+            for _ in 0..35 {
+                assert_eq!(gtr_process(synth, 128), 1);
+            }
+            assert_eq!((gtr_passes(synth), gtr_queued(synth)), (1, 0));
+            write(synth, &looped(57));
+            gtr_queue(synth, 0);
+            assert_eq!(gtr_queue(synth, 1), 1);
+            assert_eq!(gtr_queued(synth), 0);
             drop(Box::from_raw(synth));
         }
     }

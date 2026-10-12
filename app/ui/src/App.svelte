@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { Command, Menu, MenuEntry, PaletteSection, ShortcutGroup } from './lib/commands';
   import ChordDialog from './lib/ChordDialog.svelte';
   import Dialogs, { type DialogKind } from './lib/Dialogs.svelte';
@@ -41,6 +41,8 @@
   } from './lib/model';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
+  import TrainerDialog from './lib/TrainerDialog.svelte';
+  import { nextSpeed, type Trainer } from './lib/trainer';
   import KitDialog from './lib/KitDialog.svelte';
   import { Player, mixOf } from './lib/player';
   import {
@@ -143,6 +145,12 @@
   let replayRepeats = $state(false);
   /** How fast the score is played, as a percentage of the tempo written. */
   let speed = $state(100);
+  /** Play the passage again and again until stopped. */
+  let loop = $state(false);
+  /** How the speed trainer raises the speed, and whether it is switched on. */
+  let trainer = $state<Trainer>({ step: 5, every: 1, target: 100 });
+  let training = $state(false);
+  let trainerOpen = $state(false);
 
   const prefs = $state(loadPrefs());
   let width = $state(0);
@@ -295,18 +303,55 @@
 
   // --- Playback ---
 
-  /** What is playing: the options it was compiled with, but for the speed, and the track being followed. */
+  /** What is playing: the options it was compiled with, but for the speed and the loop, and the track being followed. */
   let passage: { options: object; track: number } | null = null;
+  /** Times round the loop, counting the one playing. */
+  let pass = 0;
+  /** The speed of the version of the passage queued for the next time round, if any. */
+  let queuedSpeed: number | null = null;
 
-  /** Compiles the passage being played from the score as it now stands, at the speed now set. */
-  function compilePassage(doc: Document, { options, track }: { options: object; track: number }) {
-    playedRevision = revision;
-    playedSpeed = speed;
-    const compiled = doc.compileAudio(JSON.stringify({ ...options, speed: speed / 100 }), track);
+  /** Compiles the passage being played from the score as it now stands, at `percent` of the tempo. */
+  function compileAt(doc: Document, { options, track }: { options: object; track: number }, percent: number) {
+    const compiled = doc.compileAudio(JSON.stringify({ ...options, speed: percent / 100, looped: loop }), track);
     const timeline: Timeline = JSON.parse(compiled.timelineJson);
     const events = compiled.events;
     compiled.free();
     return { events, timeline };
+  }
+
+  /** Compiles the passage being played at the speed now set. */
+  function compilePassage(doc: Document, played: { options: object; track: number }) {
+    playedRevision = revision;
+    playedSpeed = speed;
+    playedLoop = loop;
+    return compileAt(doc, played, speed);
+  }
+
+  /**
+   * Hands the synth the passage to go on to when the loop next comes round: faster if the
+   * speed trainer says so, and otherwise the same again.
+   */
+  function queueNext() {
+    if (!playing || !doc || !passage) return;
+    const next = training && loop ? nextSpeed(trainer, speed, pass) : speed;
+    if (next === speed) {
+      if (queuedSpeed !== null) void player.queue(null);
+      queuedSpeed = null;
+      return;
+    }
+    queuedSpeed = next;
+    void player.queue(compileAt(doc, passage, next));
+  }
+
+  /** The loop has come round, and is played at the speed queued for it if it went on to that. */
+  function onPass(fromQueue: boolean) {
+    pass += 1;
+    if (fromQueue && queuedSpeed !== null) {
+      speed = playedSpeed = queuedSpeed;
+      message = `Time ${pass} round, at ${speed}% of the tempo`;
+    }
+    queuedSpeed = null;
+    queueNext();
   }
 
   const play = () =>
@@ -324,11 +369,15 @@
       };
       passage = { options, track: editor.cursor.track };
       const { events, timeline } = compilePassage(doc, passage);
-      await player.play(events, timeline, () => {
+      pass = 1;
+      queuedSpeed = null;
+      const ended = () => {
         playing = false;
         playhead = null;
-      });
+      };
+      await player.play(events, timeline, ended, onPass);
       playing = true;
+      queueNext();
       follow();
     });
 
@@ -366,20 +415,49 @@
     if (playing && score) player.setMix(mixOf(score.tracks));
   });
 
-  // So do an edit and a change of speed: the synth is handed the passage again and carries
-  // on from the beat it had reached.
+  // So do an edit, a change of speed and the loop switched on or off: the synth is handed
+  // the passage again and carries on from the beat it had reached. What a loop goes on to
+  // next is made again to match.
   let playedRevision = -1;
   let playedSpeed = 100;
+  let playedLoop = false;
   $effect(() => {
     if (!playing || !score || !doc || !passage) return;
-    if (revision === playedRevision && speed === playedSpeed) return;
+    if (revision === playedRevision && speed === playedSpeed && loop === playedLoop) return;
     const timer = setTimeout(() => {
       if (!doc || !passage) return;
       const { events, timeline } = compilePassage(doc, passage);
       void player.update(events, timeline);
+      queueNext();
     }, EDIT_PLAYBACK_DELAY_MS);
     return () => clearTimeout(timer);
   });
+
+  // The speed trainer switched on or off, or set differently, changes what comes next.
+  $effect(() => {
+    void [training, trainer];
+    untrack(queueNext);
+  });
+
+  function setLoop(on: boolean) {
+    loop = on;
+    if (!on) training = false;
+    message = on ? 'Looping' : 'Not looping';
+  }
+
+  function setTrainer(next: Trainer | null) {
+    training = next !== null;
+    if (!next) {
+      message = 'Speed trainer off';
+      return;
+    }
+    trainer = next;
+    loop = true;
+    message =
+      speed >= next.target
+        ? `Already at ${speed}%; the speed trainer goes up to ${next.target}%`
+        : `Speed trainer: from ${speed}% up to ${next.target}%, ${next.step}% faster ${next.every === 1 ? 'each time' : `every ${next.every} times`} round`;
+  }
 
   // --- Sound ---
 
@@ -960,6 +1038,8 @@
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
     countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    loop: { label: 'Loop', icon: 'loop', active: () => loop, run: () => setLoop(!loop) },
+    trainer: { label: 'Speed trainer…', icon: 'trainer', active: () => training, run: () => (trainerOpen = true) },
     slower: { label: 'Slower', keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
     faster: { label: 'Faster', keys: ']', disabled: () => speed >= MAX_SPEED, run: () => setSpeed(speed + SPEED_STEP) },
     speedOther: {
@@ -1166,7 +1246,7 @@
           '-',
           cmd.scoreInfo,
           '-',
-          cmd.play, cmd.metronome, cmd.countIn, cmd.replayRepeats,
+          cmd.play, cmd.metronome, cmd.countIn, cmd.loop, cmd.trainer, cmd.replayRepeats,
           { label: 'Playback speed', items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
           { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
         ],
@@ -1442,6 +1522,8 @@
         </button>
         <ToolButton command={cmd.metronome} />
         <ToolButton command={cmd.countIn} />
+        <ToolButton command={cmd.loop} />
+        <ToolButton command={cmd.trainer} />
         <button
           type="button"
           class="chip"
@@ -1650,6 +1732,18 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if trainerOpen}
+  <TrainerDialog
+    {trainer}
+    {speed}
+    min={MIN_SPEED}
+    max={MAX_SPEED}
+    on={training}
+    onapply={setTrainer}
+    onclose={() => (trainerOpen = false)}
+  />
 {/if}
 
 {#if kitDialog && editor}

@@ -21,6 +21,8 @@ pub struct Options {
     pub voice: usize,
     /// Play the repeats again after a D.C. or D.S., instead of passing through them.
     pub replay_repeats: bool,
+    /// Go back to the first bar after the last, until stopped.
+    pub looped: bool,
 }
 
 impl Default for Options {
@@ -34,6 +36,7 @@ impl Default for Options {
             staff: 0,
             voice: 0,
             replay_repeats: false,
+            looped: false,
         }
     }
 }
@@ -231,6 +234,8 @@ pub struct Timeline {
     pub count_in: f64,
     /// Total length in seconds.
     pub duration: f64,
+    /// Played again from the end of the count-in on reaching `duration`, until stopped.
+    pub looped: bool,
 }
 
 /// Longest a let-ring note is allowed to sustain.
@@ -293,6 +298,7 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         beats: Vec::new(),
         count_in: 0.0,
         duration: 0.0,
+        looped: options.looped,
     };
 
     let mut time = 0.0;
@@ -838,12 +844,14 @@ mod tests {
             metronome: true,
             count_in: true,
             speed: 0.5,
+            looped: true,
             ..Options::default()
         };
         let t = compile(&score, 0, &options);
         // One count-in bar and one bar of music, each four seconds at half speed.
         assert_eq!(t.duration, 8.0);
         assert_eq!(t.count_in, 4.0);
+        assert!(t.looped);
         assert_eq!(t.clicks.len(), 8);
         assert!(t.clicks[0].accent && !t.clicks[1].accent);
         assert_eq!(t.clicks[5].time, 5.0);

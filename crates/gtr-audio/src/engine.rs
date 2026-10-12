@@ -138,6 +138,10 @@ pub struct Engine {
     strips: Vec<Strip>,
     /// The samples notes are played from, where the bank has their instrument.
     font: Option<Rc<SoundFont>>,
+    /// What a looped passage goes on to the next time round, in place of itself.
+    queued: Option<Timeline>,
+    /// Times a looped passage has gone back to its start.
+    passes: u32,
 }
 
 impl Engine {
@@ -157,6 +161,8 @@ impl Engine {
             fade_bus: Default::default(),
             strips: Vec::new(),
             font: None,
+            queued: None,
+            passes: 0,
         }
     }
 
@@ -175,7 +181,42 @@ impl Engine {
         self.voices.clear();
         self.clicks.clear();
         self.strips.clear();
+        self.queued = None;
+        self.passes = 0;
         self.set_timeline(timeline, 0.0);
+    }
+
+    /// Has a looped passage go on to `next` when it goes back to its start, as the speed
+    /// trainer does with the same bars a little faster, or with `None` to itself again.
+    /// Whatever was queued before is dropped.
+    pub fn queue(&mut self, next: Option<Timeline>) {
+        self.queued = next;
+    }
+
+    /// True while a queued passage waits for the loop to come round.
+    pub fn queued(&self) -> bool {
+        self.queued.is_some()
+    }
+
+    /// Times a looped passage has gone back to its start since it was loaded.
+    pub fn passes(&self) -> u32 {
+        self.passes
+    }
+
+    /// The sample at which a looped passage goes back to its start; `None` if it does not,
+    /// or if it has no music to go back to.
+    fn loop_end(&self) -> Option<usize> {
+        let end = self.sample(self.timeline.duration);
+        (self.timeline.looped && end > self.sample(self.timeline.count_in)).then_some(end)
+    }
+
+    /// Goes back to the start of the music, or on to the passage queued, without the
+    /// count-in. Notes still sounding ring on into the next time round.
+    fn wrap(&mut self) {
+        let timeline = (self.queued.take()).unwrap_or_else(|| std::mem::take(&mut self.timeline));
+        let at = timeline.count_in;
+        self.set_timeline(timeline, at);
+        self.passes += 1;
     }
 
     /// Swaps in a newer version of the passage being played and carries on from the same
@@ -262,11 +303,32 @@ impl Engine {
     }
 
     /// Writes the next samples to `left` and `right`, which are filled with silence past
-    /// the end of the passage.
+    /// the end of the passage. A looped passage goes back to its start part-way through,
+    /// on the sample its last bar ends.
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
         left.fill(0.0);
         right.fill(0.0);
-        let frames = (left.len().min(right.len())).min(self.total - self.position);
+        let frames = left.len().min(right.len());
+        let mut done = 0;
+        loop {
+            let until = match self.loop_end() {
+                Some(end) => frames.min(done + end.saturating_sub(self.position)),
+                None => frames,
+            };
+            self.play(&mut left[done..until], &mut right[done..until]);
+            done = until;
+            if self.loop_end().is_some_and(|end| self.position >= end) {
+                self.wrap();
+            }
+            if done == frames {
+                break;
+            }
+        }
+    }
+
+    /// Writes the next samples to `left` and `right` of equal length, which are silent.
+    fn play(&mut self, left: &mut [f32], right: &mut [f32]) {
+        let frames = left.len().min(self.total - self.position);
         if frames == 0 {
             return;
         }
@@ -580,6 +642,7 @@ mod tests {
             beats: Vec::new(),
             count_in: 0.0,
             duration: 1.0,
+            looped: false,
         }
     }
 
@@ -665,6 +728,106 @@ mod tests {
         engine.process(&mut left, &mut right);
         assert!(energy(&left[..4_000]) > 0.1);
         assert!(!engine.finished());
+    }
+
+    /// A short note at the start of a looped passage half a second long, after a count-in
+    /// of `count_in` seconds.
+    fn looped(count_in: f64, pitch: u8) -> Timeline {
+        Timeline {
+            notes: vec![NoteEvent::plain(count_in, 0.1, pitch)],
+            channels: vec![Channel::default()],
+            count_in,
+            duration: count_in + 0.5,
+            looped: true,
+            ..Timeline::default()
+        }
+    }
+
+    /// Plays `seconds` of the engine in blocks of an awkward size.
+    fn play_for(engine: &mut Engine, seconds: f64) -> Vec<f32> {
+        let mut heard = Vec::new();
+        let (mut left, mut right) = (vec![0.0; 333], vec![0.0; 333]);
+        while heard.len() < (seconds * 44_100.0) as usize {
+            engine.process(&mut left, &mut right);
+            heard.extend_from_slice(&left);
+        }
+        heard
+    }
+
+    #[test]
+    fn a_looped_passage_goes_back_to_its_start_on_the_sample_it_ends() {
+        let mut engine = Engine::new(44_100);
+        engine.load(looped(0.0, 57));
+        let heard = play_for(&mut engine, 1.6);
+        assert_eq!(engine.passes(), 3);
+        assert!(!engine.finished());
+        // The note again at every half second, and silence before it each time.
+        for start in [0, 22_050, 44_100, 66_150] {
+            assert!(energy(&heard[start..start + 2_000]) > 1.0, "at {start}");
+            if start > 0 {
+                assert!(
+                    energy(&heard[start - 2_000..start]) < 1e-3,
+                    "before {start}"
+                );
+            }
+        }
+        // Played in blocks, it is the same as the passage played through each time.
+        let once = render(&looped(0.0, 57), 44_100).left;
+        assert_eq!(heard[22_050..22_050 + 20_000], once[..20_000]);
+    }
+
+    #[test]
+    fn a_loop_leaves_out_the_count_in_after_the_first_time() {
+        let mut engine = Engine::new(44_100);
+        engine.load(looped(1.0, 57));
+        play_for(&mut engine, 1.6);
+        // A second of count-in, half a second of music, and a tenth into the second time.
+        assert_eq!(engine.passes(), 1);
+        assert!(
+            (engine.seconds() - 1.1).abs() < 0.01,
+            "{}",
+            engine.seconds()
+        );
+    }
+
+    #[test]
+    fn a_loop_goes_on_to_the_passage_queued_for_it() {
+        let mut engine = Engine::new(44_100);
+        engine.load(looped(0.0, 57));
+        let next = looped(0.5, 64);
+        engine.queue(Some(next.clone()));
+        assert!(engine.queued());
+        let heard = play_for(&mut engine, 0.75);
+        // Into the queued passage after its count-in, and round it again by itself.
+        assert!(!engine.queued());
+        assert_eq!(engine.passes(), 1);
+        assert_eq!(engine.timeline, next);
+        assert!(energy(&heard[22_050..24_000]) > 1.0);
+        play_for(&mut engine, 0.3);
+        assert_eq!(engine.passes(), 2);
+
+        // Taken out of the loop, the passage plays to its end and stops.
+        engine.replace(Timeline {
+            looped: false,
+            ..next
+        });
+        play_for(&mut engine, 1.0);
+        assert!(engine.finished());
+        assert_eq!(engine.passes(), 2);
+    }
+
+    #[test]
+    fn a_loop_with_nothing_in_it_is_played_through_once() {
+        let mut engine = Engine::new(44_100);
+        engine.load(Timeline {
+            count_in: 0.5,
+            duration: 0.5,
+            looped: true,
+            ..Timeline::default()
+        });
+        play_for(&mut engine, 1.0);
+        assert!(engine.finished());
+        assert_eq!(engine.passes(), 0);
     }
 
     #[test]

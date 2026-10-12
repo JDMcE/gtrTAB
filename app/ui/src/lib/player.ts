@@ -27,6 +27,7 @@ export function mixOf(tracks: Track[]): TrackMix[] {
 type Report =
   | { type: 'position'; id: number; seconds: number; at: number }
   | { type: 'ended'; id: number }
+  | { type: 'pass'; id: number }
   | { type: 'soundfont'; id: number; error: number };
 
 /** Why the synth would not take a SoundFont, by the number it answers with. */
@@ -52,9 +53,12 @@ export class Player {
   private beats: BeatTime[] = [];
   /** Beats of a version the synth has been sent but has not started on yet. */
   private next?: { id: number; beats: BeatTime[] };
+  /** Beats of the passage a loop goes on to the next time round, if it has been sent one. */
+  private queued?: { id: number; beats: BeatTime[] };
   /** The last the synth said of how far it had got, and when by the context's clock. */
   private heard?: { seconds: number; at: number };
   private onEnd?: () => void;
+  private onPass?: (fromQueue: boolean) => void;
   /** SoundFonts sent to the synth that it has yet to answer for. */
   private fonts = new Map<number, (error: number) => void>();
 
@@ -86,14 +90,24 @@ export class Player {
       this.fonts.delete(report.id);
       return;
     }
+    const fromQueue = report.id === this.queued?.id;
+    // The synth has started on a version it was sent: a newer one, or the one queued.
     if (report.id === this.next?.id) {
       this.current = report.id;
       this.beats = this.next.beats;
       this.next = undefined;
+    } else if (report.id === this.queued?.id) {
+      this.current = report.id;
+      this.beats = this.queued.beats;
+      this.queued = undefined;
     }
     if (report.id !== this.current) return;
     if (report.type === 'position') {
       this.heard = { seconds: report.seconds, at: report.at };
+      return;
+    }
+    if (report.type === 'pass') {
+      this.onPass?.(fromQueue);
       return;
     }
     const onEnd = this.onEnd;
@@ -103,9 +117,9 @@ export class Player {
 
   private halt(): void {
     this.current = 0;
-    this.next = undefined;
+    this.next = this.queued = undefined;
     this.heard = undefined;
-    this.onEnd = undefined;
+    this.onEnd = this.onPass = undefined;
   }
 
   /**
@@ -125,15 +139,23 @@ export class Player {
 
   /**
    * Starts playback, stopping anything already playing. `events` is the passage for the
-   * synth, as `Passage.events` gives it. `onEnd` fires when the passage runs out.
+   * synth, as `Passage.events` gives it. `onEnd` fires when the passage runs out, and
+   * `onPass` each time a looped one goes back to its start, saying whether it went on to
+   * the version queued for it.
    */
-  async play(events: Uint8Array, timeline: Timeline, onEnd: () => void): Promise<void> {
+  async play(
+    events: Uint8Array,
+    timeline: Timeline,
+    onEnd: () => void,
+    onPass?: (fromQueue: boolean) => void,
+  ): Promise<void> {
     this.stop();
     const context = (this.context ??= new AudioContext());
     const [synth] = await Promise.all([this.start(context), context.resume()]);
     this.current = ++this.sent;
     this.beats = timeline.beats;
     this.onEnd = onEnd;
+    this.onPass = onPass;
     const bytes = events.buffer as ArrayBuffer;
     synth.port.postMessage({ type: 'play', id: this.current, events: bytes }, [bytes]);
   }
@@ -148,6 +170,24 @@ export class Player {
     this.next = { id, beats: timeline.beats };
     const bytes = events.buffer as ArrayBuffer;
     (await this.synth).port.postMessage({ type: 'replace', id, events: bytes }, [bytes]);
+  }
+
+  /**
+   * Has a looped passage go on to another version of itself the next time it comes round,
+   * as when it is to be played faster, or with `null` to the same version again.
+   */
+  async queue(next: { events: Uint8Array; timeline: Timeline } | null): Promise<void> {
+    if (!this.playing || !this.synth) return;
+    const synth = await this.synth;
+    if (!next) {
+      this.queued = undefined;
+      synth.port.postMessage({ type: 'queue', events: null });
+      return;
+    }
+    const id = ++this.sent;
+    this.queued = { id, beats: next.timeline.beats };
+    const bytes = next.events.buffer as ArrayBuffer;
+    synth.port.postMessage({ type: 'queue', id, events: bytes }, [bytes]);
   }
 
   /** Changes the mix of what is playing. */
