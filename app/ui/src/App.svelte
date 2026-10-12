@@ -41,6 +41,8 @@
     type Timeline,
   } from './lib/model';
   import BeatLights from './lib/BeatLights.svelte';
+  import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
+  import { freeLine } from './lib/instrument';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
   import TrainerDialog from './lib/TrainerDialog.svelte';
@@ -696,6 +698,47 @@
     })),
   );
 
+  // --- The instrument view ---
+
+  /** The staff the cursor is on. */
+  const cursorStaff = $derived(score && editor ? score.tracks[editor.cursor.track]?.staves[editor.cursor.staff] : undefined);
+  const instrumentKind = $derived<'strings' | 'keys' | 'drums'>(
+    onDrums() ? 'drums'
+    : cursorStaff?.tuning.strings.length === 0 ? 'keys'
+    : 'strings',
+  );
+  /** The notes of a beat of the cursor's staff and voice. */
+  const notesAt = (bar: number, beat: number) =>
+    cursorStaff?.bars[bar]?.voices[editor?.cursor.voice ?? 0]?.beats[beat]?.notes ?? [];
+  /** The notes the instrument lights: those sounding, or those at the cursor. */
+  const instrumentNotes = $derived(
+    !editor ? []
+    : playhead ? notesAt(playhead.bar, playhead.beat)
+    : notesAt(editor.cursor.bar, editor.cursor.beat),
+  );
+  /** Pitch classes marked on the instrument, such as a scale's. */
+  let marks = $state.raw<Marks | null>(null);
+
+  /** A fret, key or pad clicked: that note goes into the beat at the cursor, or out if it is there. */
+  const pickOnInstrument = (string: number, fret: number) =>
+    edit((d) => {
+      if (!editor || !cursorStaff) return;
+      const { bar, beat } = editor.cursor;
+      const notes = notesAt(bar, beat);
+      if (instrumentKind === 'drums') {
+        const there = notes.find((n) => n.fret === fret);
+        const line = there ? there.string : freeLine(notes.map((n) => n.string), cursorStaff.tuning.strings.length);
+        if (line === null) throw new Error('This beat has a piece of the kit on every line.');
+        d.setCursor(bar, beat, line, false);
+        return there ? d.delete() : d.setFret(fret);
+      }
+      d.setCursor(bar, beat, string, false);
+      if (instrumentKind === 'keys') {
+        return notes.some((n) => n.string === string) ? d.delete() : d.enterNote();
+      }
+      return notes.some((n) => n.string === string && n.fret === fret) ? d.delete() : d.setFret(fret);
+    });
+
   // --- Bar marks and beat text ---
 
   /** Whether the cursor is on a staff without strings, where notes are entered by name. */
@@ -1094,6 +1137,12 @@
     compact: { label: 'Narrow palette', icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
     inspector: { label: 'Inspector', icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
     multitrack: { label: 'Show every track', icon: 'multitrack', active: () => prefs.multitrack, run: () => (prefs.multitrack = !prefs.multitrack) },
+    instrument: {
+      label: 'Fretboard, keyboard or drum kit',
+      icon: 'tuning',
+      active: () => prefs.instrument,
+      run: () => (prefs.instrument = !prefs.instrument),
+    },
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
   } satisfies Record<string, Command>;
@@ -1284,7 +1333,7 @@
           ...notations,
           cmd.multitrack,
           '-',
-          cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
+          cmd.instrument, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: 'Theme', items: themes },
         ],
       },
@@ -1614,6 +1663,23 @@
             })}
           onview={(bar) => (viewBar = bar)}
         />
+        {#if prefs.instrument && cursorStaff}
+          <InstrumentView
+            kind={instrumentKind}
+            tuning={cursorStaff.tuning.strings}
+            capo={cursorStaff.capo}
+            kit={drumKit}
+            notes={instrumentNotes}
+            sounding={!!playhead}
+            cursor={editor.cursor.string}
+            {marks}
+            onpick={pickOnInstrument}
+            onclose={() => {
+              prefs.instrument = false;
+              focusScore();
+            }}
+          />
+        {/if}
         {#if prefs.tracks}
           <TrackPane
             {score}
