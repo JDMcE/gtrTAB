@@ -21,6 +21,8 @@ pub struct Options {
     pub voice: usize,
     /// Play the repeats again after a D.C. or D.S., instead of passing through them.
     pub replay_repeats: bool,
+    /// Go back to the first bar after the last, until stopped.
+    pub looped: bool,
 }
 
 impl Default for Options {
@@ -34,6 +36,7 @@ impl Default for Options {
             staff: 0,
             voice: 0,
             replay_repeats: false,
+            looped: false,
         }
     }
 }
@@ -204,6 +207,19 @@ pub struct BeatTime {
     pub time: f64,
 }
 
+/// A pulse of the bar, as a metronome counts it, for showing the count while it plays.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct Pulse {
+    pub time: f64,
+    /// Which pulse of the bar it is, from 0.
+    pub index: u8,
+    /// Pulses in the bar.
+    pub count: u8,
+    /// One of the count-in's.
+    pub count_in: bool,
+}
+
 /// A change to a track's place in the mix part-way through, written on a beat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Automation {
@@ -227,10 +243,15 @@ pub struct Timeline {
     pub clicks: Vec<Click>,
     /// Beats of the followed track in time order.
     pub beats: Vec<BeatTime>,
+    /// Every pulse of every bar in time order, the count-in's among them, whether the
+    /// metronome is heard or not. The synth has no use for them and they are not sent to it.
+    pub pulses: Vec<Pulse>,
     /// Seconds the count-in lasts, before the first bar starts; zero without one.
     pub count_in: f64,
     /// Total length in seconds.
     pub duration: f64,
+    /// Played again from the end of the count-in on reaching `duration`, until stopped.
+    pub looped: bool,
 }
 
 /// Longest a let-ring note is allowed to sustain.
@@ -248,6 +269,24 @@ struct Played {
     /// Seconds from the start of playback.
     start: f64,
     timing: BarTiming,
+}
+
+/// A few notes to hear on their own, as when a chord or a scale is tried out: `pitches`
+/// played on `instrument` one after another, `gap` seconds apart (0.0 for a chord, or a few
+/// hundredths for a strum), each lasting `length` seconds.
+pub fn audition(instrument: Instrument, pitches: &[u8], gap: f64, length: f64) -> Timeline {
+    let notes: Vec<NoteEvent> = (pitches.iter().enumerate())
+        .map(|(i, &pitch)| NoteEvent::plain(i as f64 * gap, length, pitch.min(127)))
+        .collect();
+    Timeline {
+        channels: vec![Channel {
+            timbre: Timbre::of(instrument),
+            ..Channel::default()
+        }],
+        duration: (notes.iter()).fold(0.0, |end, n| f64::max(end, n.time + n.duration)),
+        notes,
+        ..Timeline::default()
+    }
 }
 
 /// Compiles the score to timed events. Every track's notes are included, and its channel
@@ -291,8 +330,10 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         notes: Vec::new(),
         clicks: Vec::new(),
         beats: Vec::new(),
+        pulses: Vec::new(),
         count_in: 0.0,
         duration: 0.0,
+        looped: options.looped,
     };
 
     let mut time = 0.0;
@@ -301,9 +342,16 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         let signature = masters[timing.bar].time_signature;
         let pulse = Rational::new(1, signature.denominator.into());
         let pulses = (0..signature.numerator).map(|i| (pulse * i64::from(i), i == 0));
+        let count = signature.numerator;
         if position == 0 && options.count_in {
             // The count-in keeps strict time, whatever the bar it leads into holds.
             let whole = timing.whole();
+            timeline.pulses.extend((0..count).map(|index| Pulse {
+                time: seconds(pulse * i64::from(index), whole),
+                index,
+                count,
+                count_in: true,
+            }));
             timeline
                 .clicks
                 .extend(pulses.clone().map(|(at, accent)| Click {
@@ -313,6 +361,12 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
             time += seconds(signature.bar_length(), whole);
             timeline.count_in = time;
         }
+        timeline.pulses.extend((0..count).map(|index| Pulse {
+            time: time + timing.at(pulse * i64::from(index)),
+            index,
+            count,
+            count_in: false,
+        }));
         if options.metronome {
             timeline.clicks.extend(pulses.map(|(at, accent)| Click {
                 time: time + timing.at(at),
@@ -740,6 +794,18 @@ mod tests {
 
     use super::*;
 
+    #[test]
+    fn an_audition_plays_its_notes_in_turn_on_one_instrument() {
+        let strum = audition(Instrument::Piano, &[48, 52, 55, 200], 0.02, 1.0);
+        assert_eq!(strum.channels.len(), 1);
+        assert_eq!(strum.channels[0].timbre, Timbre::of(Instrument::Piano));
+        let times: Vec<f64> = strum.notes.iter().map(|n| n.time).collect();
+        assert_eq!(times, [0.0, 0.02, 0.04, 0.06]);
+        assert_eq!(strum.notes[3].pitch, 127);
+        assert_eq!(strum.duration, 1.06);
+        assert!(audition(Instrument::Bass, &[], 0.3, 0.3).notes.is_empty());
+    }
+
     /// A blank score whose first bar holds quarter notes on the low E string.
     fn quarters(notes: Vec<Note>) -> Score {
         let mut score = Score::blank();
@@ -838,12 +904,28 @@ mod tests {
             metronome: true,
             count_in: true,
             speed: 0.5,
+            looped: true,
             ..Options::default()
         };
         let t = compile(&score, 0, &options);
         // One count-in bar and one bar of music, each four seconds at half speed.
         assert_eq!(t.duration, 8.0);
         assert_eq!(t.count_in, 4.0);
+        assert!(t.looped);
+        // Every pulse is counted, the count-in's first, whether clicked or not.
+        assert_eq!(t.pulses.len(), 8);
+        assert!(t.pulses[..4].iter().all(|p| p.count_in && p.count == 4));
+        assert_eq!((t.pulses[5].time, t.pulses[5].index), (5.0, 1));
+        assert!(!t.pulses[5].count_in);
+        let quiet = compile(
+            &score,
+            0,
+            &Options {
+                metronome: false,
+                ..options
+            },
+        );
+        assert_eq!(quiet.pulses, t.pulses);
         assert_eq!(t.clicks.len(), 8);
         assert!(t.clicks[0].accent && !t.clicks[1].accent);
         assert_eq!(t.clicks[5].time, 5.0);

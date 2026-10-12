@@ -27,6 +27,10 @@ export interface Prefs {
    * picked, or the synth's own models of the instruments.
    */
   sound: 'default' | 'custom' | 'models';
+  /** The visual metronome shown in the transport bar. */
+  beatLights: boolean;
+  /** The fretboard, keyboard or drum kit shown under the score. */
+  instrument: boolean;
 }
 
 const KEY = 'gtrtab.ui';
@@ -40,6 +44,8 @@ const DEFAULTS: Prefs = {
   tracks: true,
   tracksHeight: null,
   sound: 'default',
+  beatLights: false,
+  instrument: false,
 };
 
 export function loadPrefs(): Prefs {

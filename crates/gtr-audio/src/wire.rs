@@ -91,6 +91,7 @@ impl Timeline {
         let mut w = Writer(MAGIC.to_vec());
         w.f64(self.duration);
         w.f64(self.count_in);
+        w.u8(self.looped.into());
         w.count(self.channels.len());
         for channel in &self.channels {
             w.u8(channel.audible.into());
@@ -145,6 +146,7 @@ impl Timeline {
         }
         let duration = r.f64()?;
         let count_in = r.f64()?;
+        let looped = r.u8()? != 0;
         let channels = r.list(|r| {
             Some(Channel {
                 audible: r.u8()? != 0,
@@ -199,8 +201,11 @@ impl Timeline {
             notes,
             clicks,
             beats,
+            // Only the page counts pulses; the synth is not sent them.
+            pulses: Vec::new(),
             count_in,
             duration,
+            looped,
         })
     }
 }
@@ -258,8 +263,10 @@ mod tests {
                 beat: 2,
                 time: 1.5,
             }],
+            pulses: Vec::new(),
             count_in: 0.5,
             duration: 2.0,
+            looped: true,
         };
         let bytes = timeline.to_bytes();
         assert_eq!(Timeline::from_bytes(&bytes), Some(timeline));

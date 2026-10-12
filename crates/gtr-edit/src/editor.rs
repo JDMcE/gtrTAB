@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Clef, Duration, Instrument, KitPiece, MasterBar, Mix, Note, NoteValue,
-    Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
+    Bar, Beat, BeatEffects, ChordDiagram, Clef, Duration, Instrument, KitPiece, MasterBar, Mix,
+    Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
 use gtr_model::{Rational, TempoChange};
 use serde::de::DeserializeOwned;
@@ -366,6 +366,62 @@ impl Editor {
             tied: false,
             ..note.unwrap_or(Note::new(self.cursor.string, 0))
         })
+    }
+
+    /// Puts a chord shape on the beat at the cursor in one edit: on each string the shape
+    /// plays, a note at its fret, keeping the techniques of a note already on that string;
+    /// on the others, no note. `frets` has a fret for each string from the highest, -1 for
+    /// a string not played. With `name`, the beat is also given the chord's name and the
+    /// shape as its diagram.
+    pub fn put_shape(&mut self, frets: &[i8], name: Option<&str>) -> Result<(), EditError> {
+        let drums = self.score.tracks[self.cursor.track].instrument == Instrument::Drums;
+        if self.staff().is_pitched() || drums {
+            return Err(EditError::NoFrets);
+        }
+        if frets.len() != self.string_count() || frets.iter().all(|&f| f < 0) {
+            return Err(EditError::InvalidBeat);
+        }
+        if frets
+            .iter()
+            .any(|&f| i16::from(f) > i16::from(self.max_fret()))
+        {
+            return Err(EditError::FretOutOfRange);
+        }
+        let at = self.at();
+        let existing = self.current_beat().cloned();
+        let mut commands = Vec::new();
+        if existing.is_none() {
+            let beat = Beat::rest(self.duration);
+            commands.push(Command::InsertBeat { at, beat });
+        }
+        // The notes go on before the others come off, so that the beat is never a rest.
+        let mut removals = Vec::new();
+        for (string, &fret) in (0u8..).zip(frets) {
+            let there = existing.as_ref().and_then(|b| b.note_on(string)).cloned();
+            match u8::try_from(fret) {
+                Ok(fret) => commands.push(Command::PutNote {
+                    at,
+                    note: Note {
+                        fret,
+                        tied: false,
+                        ..there.unwrap_or(Note::new(string, 0))
+                    },
+                }),
+                Err(_) if there.is_some() => removals.push(Command::RemoveNote { at, string }),
+                Err(_) => {}
+            }
+        }
+        commands.extend(removals);
+        if let Some(name) = name {
+            let mut effects = existing.map(|b| b.effects).unwrap_or_default();
+            effects.chord = Some(name.to_owned());
+            effects.diagram = Some(ChordDiagram {
+                frets: frets.to_vec(),
+            });
+            commands.push(Command::SetBeatEffects { at, effects });
+        }
+        let command = self.in_voice(commands);
+        self.run(command)
     }
 
     /// On a staff without strings, enters the note with a letter name (0 for C up to 6 for

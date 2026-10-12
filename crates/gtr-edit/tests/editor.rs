@@ -831,3 +831,40 @@ fn a_drum_track_can_have_a_kit_of_its_own() {
     e.set_track_info(1, "Kit", Instrument::Drums).unwrap();
     assert_eq!(e.score().tracks[1].kit.len(), 3);
 }
+
+#[test]
+fn a_chord_shape_goes_on_a_beat_in_one_edit() {
+    let mut e = Editor::new(Score::blank());
+    // A note on the low E string, which the shape takes off, and one on the A string with
+    // a technique, which it keeps.
+    e.type_digit(5, false).unwrap();
+    e.move_cursor(Move::Up, false).unwrap();
+    e.type_digit(7, false).unwrap();
+    e.toggle_technique(Technique::PalmMute).unwrap();
+    // C major in the open position: the low E string is not played, the A string is.
+    let c = [0, 1, 0, 2, 3, -1];
+    e.put_shape(&c, Some("C")).unwrap();
+    let beat = &beats(&e, 0)[0];
+    let frets: Vec<(u8, u8)> = beat.notes.iter().map(|n| (n.string, n.fret)).collect();
+    assert_eq!(frets, [(0, 0), (1, 1), (2, 0), (3, 2), (4, 3)]);
+    assert!(beat.notes[4].effects.palm_mute);
+    assert_eq!(beat.effects.chord.as_deref(), Some("C"));
+    assert_eq!(beat.effects.diagram.as_ref().unwrap().frets, c);
+
+    // Undone in one step, back to the two notes there were.
+    e.undo().unwrap();
+    assert_eq!(beats(&e, 0)[0].notes.len(), 2);
+    assert!(beats(&e, 0)[0].effects.chord.is_none());
+
+    // On an empty slot it makes the beat; with no name it leaves the beat's alone.
+    e.move_cursor(Move::Right, false).unwrap();
+    e.put_shape(&[-1, -1, 2, 2, 0, -1], None).unwrap();
+    assert_eq!(beats(&e, 0)[1].notes.len(), 3);
+    assert!(beats(&e, 0)[1].effects.diagram.is_none());
+    e.score().validate().unwrap();
+
+    // A shape for another number of strings, of no notes, or past the last fret is refused.
+    assert!(e.put_shape(&[0, 1, 0], None).is_err());
+    assert!(e.put_shape(&[-1; 6], None).is_err());
+    assert!(e.put_shape(&[40, -1, -1, -1, -1, -1], None).is_err());
+}

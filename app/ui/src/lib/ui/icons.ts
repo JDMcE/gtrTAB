@@ -33,6 +33,7 @@ import {
   Play,
   Plus,
   Redo2,
+  Repeat,
   Save,
   SaveAll,
   Scissors,
@@ -40,6 +41,7 @@ import {
   Square,
   Sun,
   Trash2,
+  TrendingUp,
   Undo2,
   X,
   ZoomIn,
@@ -86,6 +88,8 @@ export const ICONS = {
   stop: { lucide: Square },
   metronome: { lucide: Metronome },
   speed: { lucide: Gauge },
+  loop: { lucide: Repeat },
+  trainer: { lucide: TrendingUp },
   zoomIn: { lucide: ZoomIn },
   zoomOut: { lucide: ZoomOut },
   palette: { lucide: PanelLeft },
@@ -250,6 +254,7 @@ export const ICONS = {
   // Bars and playback
   insertBar: svg('<path d="M4 4v16M20 4v16"/><path d="M12 8v8M8 12h8"/>'),
   removeBar: svg('<path d="M4 4v16M20 4v16"/><path d="M8 12h8"/>'),
+  beatLights: svg(`<circle cx="5" cy="12" r="3.2" ${FILL}/><circle cx="12.5" cy="12" r="2.2"/><circle cx="19" cy="12" r="2.2"/>`),
   countIn: svg(dot(3.5, 12, 1.7) + dot(8.5, 12, 1.7) + dot(13.5, 12, 1.7) + `<path d="M17.5 7.5l5 4.5-5 4.5z" ${FILL}/>`),
 } satisfies Record<string, IconDef>;
 

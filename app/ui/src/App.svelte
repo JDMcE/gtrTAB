@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import type { Command, Menu, MenuEntry, PaletteSection, ShortcutGroup } from './lib/commands';
   import ChordDialog from './lib/ChordDialog.svelte';
   import Dialogs, { type DialogKind } from './lib/Dialogs.svelte';
@@ -30,6 +30,7 @@
     TARGETS,
     NOTE_VALUES,
     type DrumPiece,
+    type Pulse,
     type Dynamic,
     type Jump,
     type Target,
@@ -39,8 +40,17 @@
     type Score,
     type Timeline,
   } from './lib/model';
+  import BeatLights from './lib/BeatLights.svelte';
+  import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
+  import ChordLibrary from './lib/ChordLibrary.svelte';
+  import ScaleDialog from './lib/ScaleDialog.svelte';
+  import TunerDialog from './lib/TunerDialog.svelte';
+  import { SCALES, findScales, type Fit } from './lib/scales';
+  import { freeLine } from './lib/instrument';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
+  import TrainerDialog from './lib/TrainerDialog.svelte';
+  import { nextSpeed, type Trainer } from './lib/trainer';
   import KitDialog from './lib/KitDialog.svelte';
   import { Player, mixOf } from './lib/player';
   import {
@@ -135,6 +145,8 @@
 
   let playing = $state(false);
   let playhead = $state.raw<{ bar: number; beat: number } | null>(null);
+  /** The pulse of the bar sounding, for the visual metronome. */
+  let pulse = $state.raw<Pulse | null>(null);
   /** First bar visible in the score, which the track pane follows. */
   let viewBar = $state(0);
   let metronome = $state(false);
@@ -143,6 +155,12 @@
   let replayRepeats = $state(false);
   /** How fast the score is played, as a percentage of the tempo written. */
   let speed = $state(100);
+  /** Play the passage again and again until stopped. */
+  let loop = $state(false);
+  /** How the speed trainer raises the speed, and whether it is switched on. */
+  let trainer = $state<Trainer>({ step: 5, every: 1, target: 100 });
+  let training = $state(false);
+  let trainerOpen = $state(false);
 
   const prefs = $state(loadPrefs());
   let width = $state(0);
@@ -295,18 +313,55 @@
 
   // --- Playback ---
 
-  /** What is playing: the options it was compiled with, but for the speed, and the track being followed. */
+  /** What is playing: the options it was compiled with, but for the speed and the loop, and the track being followed. */
   let passage: { options: object; track: number } | null = null;
+  /** Times round the loop, counting the one playing. */
+  let pass = 0;
+  /** The speed of the version of the passage queued for the next time round, if any. */
+  let queuedSpeed: number | null = null;
 
-  /** Compiles the passage being played from the score as it now stands, at the speed now set. */
-  function compilePassage(doc: Document, { options, track }: { options: object; track: number }) {
-    playedRevision = revision;
-    playedSpeed = speed;
-    const compiled = doc.compileAudio(JSON.stringify({ ...options, speed: speed / 100 }), track);
+  /** Compiles the passage being played from the score as it now stands, at `percent` of the tempo. */
+  function compileAt(doc: Document, { options, track }: { options: object; track: number }, percent: number) {
+    const compiled = doc.compileAudio(JSON.stringify({ ...options, speed: percent / 100, looped: loop }), track);
     const timeline: Timeline = JSON.parse(compiled.timelineJson);
     const events = compiled.events;
     compiled.free();
     return { events, timeline };
+  }
+
+  /** Compiles the passage being played at the speed now set. */
+  function compilePassage(doc: Document, played: { options: object; track: number }) {
+    playedRevision = revision;
+    playedSpeed = speed;
+    playedLoop = loop;
+    return compileAt(doc, played, speed);
+  }
+
+  /**
+   * Hands the synth the passage to go on to when the loop next comes round: faster if the
+   * speed trainer says so, and otherwise the same again.
+   */
+  function queueNext() {
+    if (!playing || !doc || !passage) return;
+    const next = training && loop ? nextSpeed(trainer, speed, pass) : speed;
+    if (next === speed) {
+      if (queuedSpeed !== null) void player.queue(null);
+      queuedSpeed = null;
+      return;
+    }
+    queuedSpeed = next;
+    void player.queue(compileAt(doc, passage, next));
+  }
+
+  /** The loop has come round, and is played at the speed queued for it if it went on to that. */
+  function onPass(fromQueue: boolean) {
+    pass += 1;
+    if (fromQueue && queuedSpeed !== null) {
+      speed = playedSpeed = queuedSpeed;
+      message = `Time ${pass} round, at ${speed}% of the tempo`;
+    }
+    queuedSpeed = null;
+    queueNext();
   }
 
   const play = () =>
@@ -324,11 +379,16 @@
       };
       passage = { options, track: editor.cursor.track };
       const { events, timeline } = compilePassage(doc, passage);
-      await player.play(events, timeline, () => {
+      pass = 1;
+      queuedSpeed = null;
+      const ended = () => {
         playing = false;
         playhead = null;
-      });
+        pulse = null;
+      };
+      await player.play(events, timeline, ended, onPass);
       playing = true;
+      queueNext();
       follow();
     });
 
@@ -338,6 +398,8 @@
     if (now && (now.bar !== playhead?.bar || now.beat !== playhead?.beat)) {
       playhead = { bar: now.bar, beat: now.beat };
     }
+    const beat = player.pulse();
+    if (beat?.time !== pulse?.time) pulse = beat;
     requestAnimationFrame(follow);
   }
 
@@ -348,6 +410,7 @@
     playing = false;
     const at = playhead;
     playhead = null;
+    pulse = null;
     if (at && doc && editor) {
       doc.setCursor(at.bar, at.beat, editor.cursor.string, false);
       refresh();
@@ -366,20 +429,49 @@
     if (playing && score) player.setMix(mixOf(score.tracks));
   });
 
-  // So do an edit and a change of speed: the synth is handed the passage again and carries
-  // on from the beat it had reached.
+  // So do an edit, a change of speed and the loop switched on or off: the synth is handed
+  // the passage again and carries on from the beat it had reached. What a loop goes on to
+  // next is made again to match.
   let playedRevision = -1;
   let playedSpeed = 100;
+  let playedLoop = false;
   $effect(() => {
     if (!playing || !score || !doc || !passage) return;
-    if (revision === playedRevision && speed === playedSpeed) return;
+    if (revision === playedRevision && speed === playedSpeed && loop === playedLoop) return;
     const timer = setTimeout(() => {
       if (!doc || !passage) return;
       const { events, timeline } = compilePassage(doc, passage);
       void player.update(events, timeline);
+      queueNext();
     }, EDIT_PLAYBACK_DELAY_MS);
     return () => clearTimeout(timer);
   });
+
+  // The speed trainer switched on or off, or set differently, changes what comes next.
+  $effect(() => {
+    void [training, trainer];
+    untrack(queueNext);
+  });
+
+  function setLoop(on: boolean) {
+    loop = on;
+    if (!on) training = false;
+    message = on ? 'Looping' : 'Not looping';
+  }
+
+  function setTrainer(next: Trainer | null) {
+    training = next !== null;
+    if (!next) {
+      message = 'Speed trainer off';
+      return;
+    }
+    trainer = next;
+    loop = true;
+    message =
+      speed >= next.target
+        ? `Already at ${speed}%; the speed trainer goes up to ${next.target}%`
+        : `Speed trainer: from ${speed}% up to ${next.target}%, ${next.step}% faster ${next.every === 1 ? 'each time' : `every ${next.every} times`} round`;
+  }
 
   // --- Sound ---
 
@@ -609,6 +701,121 @@
       run: () => edit((d) => d.setFret(piece.number)),
     })),
   );
+
+  // --- The instrument view ---
+
+  /** The staff the cursor is on. */
+  const cursorStaff = $derived(score && editor ? score.tracks[editor.cursor.track]?.staves[editor.cursor.staff] : undefined);
+  const instrumentKind = $derived<'strings' | 'keys' | 'drums'>(
+    onDrums() ? 'drums'
+    : cursorStaff?.tuning.strings.length === 0 ? 'keys'
+    : 'strings',
+  );
+  /** The notes of a beat of the cursor's staff and voice. */
+  const notesAt = (bar: number, beat: number) =>
+    cursorStaff?.bars[bar]?.voices[editor?.cursor.voice ?? 0]?.beats[beat]?.notes ?? [];
+  /** The notes the instrument lights: those sounding, or those at the cursor. */
+  const instrumentNotes = $derived(
+    !editor ? []
+    : playhead ? notesAt(playhead.bar, playhead.beat)
+    : notesAt(editor.cursor.bar, editor.cursor.beat),
+  );
+  /** Pitch classes marked on the instrument, such as a scale's. */
+  let marks = $state.raw<Marks | null>(null);
+
+  /** A fret, key or pad clicked: that note goes into the beat at the cursor, or out if it is there. */
+  const pickOnInstrument = (string: number, fret: number) =>
+    edit((d) => {
+      if (!editor || !cursorStaff) return;
+      const { bar, beat } = editor.cursor;
+      const notes = notesAt(bar, beat);
+      if (instrumentKind === 'drums') {
+        const there = notes.find((n) => n.fret === fret);
+        const line = there ? there.string : freeLine(notes.map((n) => n.string), cursorStaff.tuning.strings.length);
+        if (line === null) throw new Error('This beat has a piece of the kit on every line.');
+        d.setCursor(bar, beat, line, false);
+        return there ? d.delete() : d.setFret(fret);
+      }
+      d.setCursor(bar, beat, string, false);
+      if (instrumentKind === 'keys') {
+        return notes.some((n) => n.string === string) ? d.delete() : d.enterNote();
+      }
+      return notes.some((n) => n.string === string && n.fret === fret) ? d.delete() : d.setFret(fret);
+    });
+
+  // --- Chord and scale libraries ---
+
+  /** A guitar in standard tuning, for showing a scale to a track without strings. */
+  const STANDARD_GUITAR = [64, 59, 55, 50, 45, 40];
+  /** The open strings of the cursor's staff as they sound, with the capo on. */
+  const openStrings = $derived(
+    onDrums() ? [] : (cursorStaff?.tuning.strings.map((pitch) => pitch + cursorStaff.capo) ?? []),
+  );
+  let chordLibraryOpen = $state(false);
+  let tunerOpen = $state(false);
+  let scaleLibrary = $state.raw<{ root: number; scale: number; found: { fits: Fit[]; source: string } | null } | null>(
+    null,
+  );
+
+  /** Plays a few notes on the cursor's instrument, as a chord or a scale is tried out. */
+  const audition = (pitches: number[], gap: number, length: number) =>
+    run(async () => {
+      if (!score) return;
+      stop();
+      const instrument = score.tracks[trackIndex()].instrument;
+      const passage = Document.audition(instrument === 'drums' ? 'steel_guitar' : instrument, Uint8Array.from(pitches), gap, length);
+      const timeline: Timeline = JSON.parse(passage.timelineJson);
+      const events = passage.events;
+      passage.free();
+      await player.play(events, timeline, () => {});
+    });
+
+  /** Marks the notes of a chord or a scale on the fretboard or keyboard, and shows it. */
+  function showMarks(next: Marks) {
+    marks = next;
+    prefs.instrument = true;
+    chordLibraryOpen = false;
+    scaleLibrary = null;
+    message = `${next.label} marked on the ${instrumentKind === 'keys' ? 'keyboard' : 'fretboard'}`;
+  }
+
+  /** The pitches of the selected notes, or of the whole track without a selection. */
+  function selectedPitches(): number[] {
+    if (!score || !editor) return [];
+    const track = score.tracks[editor.cursor.track];
+    const selection = editor.selection;
+    const staves = selection ? [track.staves[editor.cursor.staff]] : track.staves;
+    const pitches: number[] = [];
+    for (const staff of staves) {
+      const pitchOf = (string: number, fret: number) =>
+        staff.tuning.strings.length ? staff.tuning.strings[string] + staff.capo + fret : string;
+      staff.bars.forEach((bar, b) => {
+        bar.voices.forEach((voice, v) => {
+          voice.beats.forEach((beat, i) => {
+            if (selection) {
+              const at = [b, i];
+              const within = (a: number[], z: number[]) => a[0] < z[0] || (a[0] === z[0] && a[1] <= z[1]);
+              if (v !== editor!.cursor.voice || !within(selection[0], at) || !within(at, selection[1])) return;
+            }
+            for (const note of beat.notes) pitches.push(pitchOf(note.string, note.fret));
+          });
+        });
+      });
+    }
+    return pitches;
+  }
+
+  /** Opens the scale library on the scales that fit the selected notes, or the track's. */
+  function findScale() {
+    if (!editor) return;
+    const fits = findScales(selectedPitches());
+    const best = fits[0];
+    scaleLibrary = {
+      root: best?.root ?? 0,
+      scale: best ? SCALES.indexOf(best.scale) : 0,
+      found: { fits, source: editor.selection ? 'the selection' : 'the whole track' },
+    };
+  }
 
   // --- Bar marks and beat text ---
 
@@ -960,6 +1167,14 @@
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
     countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    beatLights: {
+      label: 'Visual metronome',
+      icon: 'beatLights',
+      active: () => prefs.beatLights,
+      run: () => (prefs.beatLights = !prefs.beatLights),
+    },
+    loop: { label: 'Loop', icon: 'loop', active: () => loop, run: () => setLoop(!loop) },
+    trainer: { label: 'Speed trainer…', icon: 'trainer', active: () => training, run: () => (trainerOpen = true) },
     slower: { label: 'Slower', keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
     faster: { label: 'Faster', keys: ']', disabled: () => speed >= MAX_SPEED, run: () => setSpeed(speed + SPEED_STEP) },
     speedOther: {
@@ -1000,6 +1215,26 @@
     compact: { label: 'Narrow palette', icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
     inspector: { label: 'Inspector', icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
     multitrack: { label: 'Show every track', icon: 'multitrack', active: () => prefs.multitrack, run: () => (prefs.multitrack = !prefs.multitrack) },
+    instrument: {
+      label: 'Fretboard, keyboard or drum kit',
+      icon: 'tuning',
+      active: () => prefs.instrument,
+      run: () => (prefs.instrument = !prefs.instrument),
+    },
+    tuner: {
+      label: 'Tuner…',
+      run: () => {
+        stop();
+        tunerOpen = true;
+      },
+    },
+    chordLibrary: { label: 'Chord library…', run: () => (chordLibraryOpen = true) },
+    scaleLibrary: { label: 'Scale library…', run: () => (scaleLibrary = { root: 0, scale: 0, found: null }) },
+    findScale: {
+      label: 'Find the scale of the selection…',
+      disabled: () => onDrums(),
+      run: findScale,
+    },
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
   } satisfies Record<string, Command>;
@@ -1166,7 +1401,7 @@
           '-',
           cmd.scoreInfo,
           '-',
-          cmd.play, cmd.metronome, cmd.countIn, cmd.replayRepeats,
+          cmd.play, cmd.metronome, cmd.countIn, cmd.loop, cmd.trainer, cmd.replayRepeats,
           { label: 'Playback speed', items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
           { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
         ],
@@ -1190,10 +1425,11 @@
           ...notations,
           cmd.multitrack,
           '-',
-          cmd.trackPane, cmd.inspector, cmd.compact,
+          cmd.instrument, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: 'Theme', items: themes },
         ],
       },
+      { label: 'Tools', items: [cmd.tuner, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
       { label: 'Help', items: [cmd.shortcuts] },
     ];
   });
@@ -1442,6 +1678,16 @@
         </button>
         <ToolButton command={cmd.metronome} />
         <ToolButton command={cmd.countIn} />
+        <ToolButton command={cmd.beatLights} />
+        {#if prefs.beatLights}
+          <BeatLights
+            count={pulse?.count ?? masterBar?.time_signature.numerator ?? 4}
+            lit={pulse?.index ?? null}
+            countIn={pulse?.count_in ?? false}
+          />
+        {/if}
+        <ToolButton command={cmd.loop} />
+        <ToolButton command={cmd.trainer} />
         <button
           type="button"
           class="chip"
@@ -1510,6 +1756,24 @@
             })}
           onview={(bar) => (viewBar = bar)}
         />
+        {#if prefs.instrument && cursorStaff}
+          <InstrumentView
+            kind={instrumentKind}
+            tuning={cursorStaff.tuning.strings}
+            capo={cursorStaff.capo}
+            kit={drumKit}
+            notes={instrumentNotes}
+            sounding={!!playhead}
+            cursor={editor.cursor.string}
+            {marks}
+            onpick={pickOnInstrument}
+            onclearmarks={() => (marks = null)}
+            onclose={() => {
+              prefs.instrument = false;
+              focusScore();
+            }}
+          />
+        {/if}
         {#if prefs.tracks}
           <TrackPane
             {score}
@@ -1650,6 +1914,48 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if tunerOpen}
+  <TunerDialog strings={openStrings} onclose={() => (tunerOpen = false)} />
+{/if}
+
+{#if chordLibraryOpen}
+  <ChordLibrary
+    open={openStrings}
+    onshow={showMarks}
+    onplay={(pitches) => audition(pitches, 0.03, 2)}
+    onput={(frets, name) => {
+      chordLibraryOpen = false;
+      edit((d) => d.putShape(Int8Array.from(frets), name));
+    }}
+    onclose={() => (chordLibraryOpen = false)}
+  />
+{/if}
+
+{#if scaleLibrary}
+  <ScaleDialog
+    open={openStrings.length ? openStrings : STANDARD_GUITAR}
+    neckNote={openStrings.length ? undefined : 'Shown on a guitar in standard tuning, as this track has no strings.'}
+    root={scaleLibrary.root}
+    scale={scaleLibrary.scale}
+    found={scaleLibrary.found}
+    onshow={showMarks}
+    onplay={(pitches) => audition(pitches, 0.3, 0.35)}
+    onclose={() => (scaleLibrary = null)}
+  />
+{/if}
+
+{#if trainerOpen}
+  <TrainerDialog
+    {trainer}
+    {speed}
+    min={MIN_SPEED}
+    max={MAX_SPEED}
+    on={training}
+    onapply={setTrainer}
+    onclose={() => (trainerOpen = false)}
+  />
 {/if}
 
 {#if kitDialog && editor}
