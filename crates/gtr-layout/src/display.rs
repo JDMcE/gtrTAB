@@ -228,6 +228,19 @@ impl Item {
         }
     }
 
+    /// How far down the page the item starts.
+    pub fn top(&self) -> f64 {
+        match self {
+            Item::Line { y1, y2, .. } | Item::Beam { y1, y2, .. } | Item::Curve { y1, y2, .. } => {
+                y1.min(*y2)
+            }
+            Item::Rect { y, .. }
+            | Item::Dot { y, .. }
+            | Item::Arc { y, .. }
+            | Item::Text { y, .. } => *y,
+        }
+    }
+
     /// Moves the item down the page.
     pub(crate) fn shift_y(&mut self, by: f64) {
         match self {

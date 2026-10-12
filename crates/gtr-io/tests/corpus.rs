@@ -360,7 +360,10 @@ fn the_tempo_changes_where_the_file_says() {
 #[test]
 fn fermatas_timers_and_the_mixing_desk_are_read() {
     // Fermatas are kept with the bar, at a moment in it, and land on the beats there.
-    let score = score("guitarpro7/fermata.gp");
+    // The file ends on a grace note that leads into nothing, which is said and left out.
+    let read = load("guitarpro7/fermata.gp");
+    assert_eq!(read.skipped, ["grace notes with no note after them"]);
+    let score = read.score;
     let held: Vec<Vec<bool>> = (beats(&score, 0).iter())
         .map(|bar| bar.iter().map(|beat| beat.effects.fermata).collect())
         .collect();

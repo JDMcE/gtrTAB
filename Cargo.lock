@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "ab_glyph_rasterizer"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1247,6 +1253,7 @@ dependencies = [
 name = "gtr-io"
 version = "0.1.0"
 dependencies = [
+ "gtr-audio",
  "gtr-model",
  "roxmltree",
  "serde",
@@ -1279,8 +1286,13 @@ dependencies = [
 name = "gtr-render"
 version = "0.1.0"
 dependencies = [
+ "ab_glyph_rasterizer",
+ "gtr-io",
  "gtr-layout",
  "gtr-model",
+ "miniz_oxide 0.8.9",
+ "thiserror 2.0.21",
+ "ttf-parser",
 ]
 
 [[package]]
@@ -1292,6 +1304,7 @@ dependencies = [
  "gtr-io",
  "gtr-layout",
  "gtr-model",
+ "gtr-render",
  "serde",
  "serde_json",
  "wasm-bindgen",
@@ -3964,6 +3977,12 @@ dependencies = [
  "syn 2.0.119",
  "termcolor",
 ]
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "typeid"

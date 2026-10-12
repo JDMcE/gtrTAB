@@ -2,7 +2,7 @@
 
 use gtr_audio::Options;
 use gtr_edit::{Editor, Move, Technique};
-use gtr_io::{guitar_pro, native};
+use gtr_io::native;
 use gtr_model::{
     Instrument, Mix, NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score,
 };
@@ -71,6 +71,49 @@ impl AudioExport {
     }
 }
 
+/// A score written as another program's file.
+#[wasm_bindgen]
+pub struct Exported {
+    bytes: Vec<u8>,
+    extension: &'static str,
+    media_type: &'static str,
+    report: String,
+}
+
+#[wasm_bindgen]
+impl Exported {
+    #[wasm_bindgen(getter)]
+    pub fn bytes(&self) -> Vec<u8> {
+        self.bytes.clone()
+    }
+
+    /// How a file of this kind ends its name, without the dot.
+    #[wasm_bindgen(getter)]
+    pub fn extension(&self) -> String {
+        self.extension.to_owned()
+    }
+
+    #[wasm_bindgen(getter, js_name = mediaType)]
+    pub fn media_type(&self) -> String {
+        self.media_type.to_owned()
+    }
+
+    /// Comma-separated kinds of content the format has no place for; empty if it has a
+    /// place for everything in the score.
+    #[wasm_bindgen(getter)]
+    pub fn report(&self) -> String {
+        self.report.clone()
+    }
+}
+
+/// The paper a name stands for.
+fn page(paper: &str) -> gtr_layout::Page {
+    match paper {
+        "letter" => gtr_layout::Page::LETTER,
+        _ => gtr_layout::Page::A4,
+    }
+}
+
 fn tuplet(actual: u8, normal: u8) -> Option<Tuplet> {
     Some(Tuplet {
         actual: actual.try_into().ok()?,
@@ -103,11 +146,12 @@ impl Document {
         Ok(Document::from_score(native::load(bytes)?))
     }
 
-    /// Imports a file written by another program. Guitar Pro 5 (`.gp5`) and Guitar Pro 7/8
-    /// (`.gp`) are supported; `name` is only used in error messages.
+    /// Imports a file written by another program: Guitar Pro of any version, MusicXML,
+    /// MIDI, or tablature typed as text. What kind it is, is worked out from its
+    /// contents, and from `name` where they do not say.
     #[wasm_bindgen(js_name = importFile)]
     pub fn import_file(name: &str, bytes: &[u8]) -> Result<Document, JsError> {
-        let imported = guitar_pro::import(bytes)
+        let imported = gtr_io::import(name, bytes)
             .map_err(|e| JsError::new(&format!("Could not import {name}: {e}")))?;
         let mut document = Document::from_score(imported.score);
         document.import_report = imported.skipped.join(", ");
@@ -123,6 +167,123 @@ impl Document {
     /// Serialises the score as a native `.gtrtab` file.
     pub fn save(&self) -> Result<Vec<u8>, JsError> {
         Ok(native::save(self.editor.score())?)
+    }
+
+    /// Writes the score as another program's file. `format` is one of `guitar_pro`,
+    /// `musicxml`, `midi` and `ascii`.
+    #[wasm_bindgen(js_name = exportFile)]
+    pub fn export_file(&self, format: &str) -> Result<Exported, JsError> {
+        let format = match format {
+            "guitar_pro" => gtr_io::Format::GuitarPro,
+            "musicxml" => gtr_io::Format::MusicXml,
+            "midi" => gtr_io::Format::Midi,
+            "ascii" => gtr_io::Format::Ascii,
+            other => {
+                return Err(JsError::new(&format!(
+                    "{other} is not a format to export to"
+                )));
+            }
+        };
+        let written = gtr_io::export(self.editor.score(), format)?;
+        Ok(Exported {
+            bytes: written.bytes,
+            extension: format.extension(),
+            media_type: format.media_type(),
+            report: written.skipped.join(", "),
+        })
+    }
+
+    /// The score laid out for paper or a picture, `width` pixels wide, as `view_json`
+    /// asks; see [`Document::layout_json`].
+    fn printed(&self, width: f64, view_json: &str) -> Result<gtr_layout::Layout, JsError> {
+        let cursor = self.editor.cursor();
+        let view = gtr_layout::View {
+            track: cursor.track,
+            staff: cursor.staff,
+            voice: cursor.voice,
+            ..serde_json::from_str(view_json)?
+        };
+        Ok(gtr_layout::layout(self.editor.score(), &view, width).printed())
+    }
+
+    /// The score as a PDF, on paper of the size `paper` names: `letter`, or else A4. The
+    /// fonts are the bytes of the music font and of the two faces of the text font.
+    #[wasm_bindgen(js_name = exportPdf)]
+    pub fn export_pdf(
+        &self,
+        view_json: &str,
+        paper: &str,
+        music: &[u8],
+        text: &[u8],
+        fret: &[u8],
+    ) -> Result<Vec<u8>, JsError> {
+        let fonts = gtr_render::Fonts::parse(music, text, fret)?;
+        let page = page(paper);
+        let pages = self.printed(page.width, view_json)?.pages(page);
+        let title = &self.editor.score().info.title;
+        Ok(gtr_render::pdf(&pages, &fonts, title))
+    }
+
+    /// The pages of the score as SVG documents drawn in outlines, for printing: a JSON
+    /// array of strings.
+    #[wasm_bindgen(js_name = pagesJson)]
+    pub fn pages_json(
+        &self,
+        view_json: &str,
+        paper: &str,
+        music: &[u8],
+        text: &[u8],
+        fret: &[u8],
+    ) -> Result<String, JsError> {
+        let fonts = gtr_render::Fonts::parse(music, text, fret)?;
+        let page = page(paper);
+        let options = gtr_render::SvgOptions {
+            fonts: Some(&fonts),
+            ..gtr_render::SvgOptions::default()
+        };
+        let pages: Vec<String> = (self.printed(page.width, view_json)?.pages(page).iter())
+            .map(|page| gtr_render::svg(page, options))
+            .collect();
+        Ok(serde_json::to_string(&pages)?)
+    }
+
+    /// The whole score as one SVG picture, `width` pixels wide, drawn in outlines so
+    /// that it needs no fonts where it is shown.
+    #[wasm_bindgen(js_name = exportSvg)]
+    pub fn export_svg(
+        &self,
+        view_json: &str,
+        width: f64,
+        music: &[u8],
+        text: &[u8],
+        fret: &[u8],
+    ) -> Result<String, JsError> {
+        let fonts = gtr_render::Fonts::parse(music, text, fret)?;
+        let options = gtr_render::SvgOptions {
+            fonts: Some(&fonts),
+            ..gtr_render::SvgOptions::default()
+        };
+        Ok(gtr_render::svg(&self.printed(width, view_json)?, options))
+    }
+
+    /// The whole score as one PNG picture: a layout `width` pixels wide, drawn with
+    /// `scale` pixels of the picture to each of those.
+    #[wasm_bindgen(js_name = exportPng)]
+    pub fn export_png(
+        &self,
+        view_json: &str,
+        width: f64,
+        scale: f64,
+        music: &[u8],
+        text: &[u8],
+        fret: &[u8],
+    ) -> Result<Vec<u8>, JsError> {
+        let fonts = gtr_render::Fonts::parse(music, text, fret)?;
+        Ok(gtr_render::png(
+            &self.printed(width, view_json)?,
+            &fonts,
+            scale,
+        ))
     }
 
     /// Records that the current state has been written to disk.

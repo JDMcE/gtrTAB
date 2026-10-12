@@ -1,0 +1,84 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="283.5" viewBox="0 0 1000 283.5">
+<style>@font-face { font-family: Bravura; src: url("../../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="283.5" fill="#ffffff"/>
+<line x1="36" y1="202.5" x2="474" y2="202.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="193.5" x2="474" y2="193.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="184.5" x2="474" y2="184.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="175.5" x2="474" y2="175.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="166.5" x2="474" y2="166.5" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Rock beat with a fill (made up to try the importer on)</text>
+<line x1="114.7" y1="157.5" x2="131.3" y2="157.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="123" y="157.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="156.5" x2="127.7" y2="126" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="143" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="147.7" y1="161" x2="147.7" y2="128.2" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="127.1,125.9 148.3,128.3 148.3,132.3 127.1,129.9" fill="#1b1b1f"/>
+<text x="163" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="163" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="167.7" y1="179" x2="167.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="183" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="187.7" y1="161" x2="187.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="167.1,130.5 188.3,130.5 188.3,134.5 167.1,134.5" fill="#1b1b1f"/>
+<text x="203" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="207.7" y1="161" x2="207.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="223" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="227.7" y1="161" x2="227.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="207.1,130.5 228.3,130.5 228.3,134.5 207.1,134.5" fill="#1b1b1f"/>
+<text x="243" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="243" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="247.7" y1="179" x2="247.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="263" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="267.7" y1="161" x2="267.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="247.1,130.5 268.3,130.5 268.3,134.5 247.1,134.5" fill="#1b1b1f"/>
+<text x="123" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="118.3" y1="199" x2="118.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="203" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="198.3" y1="199" x2="198.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="197.7" y="229.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="223" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="218.3" y1="199" x2="218.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="299" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="303.7" y1="161" x2="303.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="319" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="323.7" y1="161" x2="323.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="303.1,130.5 324.3,130.5 324.3,134.5 303.1,134.5" fill="#1b1b1f"/>
+<text x="339" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="339" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="343.7" y1="179" x2="343.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="359" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="363.7" y1="161" x2="363.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="343.1,130.5 364.3,130.5 364.3,134.5 343.1,134.5" fill="#1b1b1f"/>
+<text x="379" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="383.7" y1="161" x2="383.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="399" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="403.7" y1="161" x2="403.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="383.1,130.5 404.3,130.5 404.3,134.5 383.1,134.5" fill="#1b1b1f"/>
+<text x="419" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="419" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="423.7" y1="179" x2="423.7" y2="126" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="439" y="162" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="439" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="443.7" y1="179" x2="443.7" y2="130.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="459" y="180" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="463.7" y1="179" x2="463.7" y2="135" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="423.1,125.9 464.3,135.1 464.3,139.1 423.1,129.9" fill="#1b1b1f"/>
+<polygon points="443.1,136.9 464.3,141.6 464.3,145.6 443.1,140.9" fill="#1b1b1f"/>
+<text x="299" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="294.3" y1="199" x2="294.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="379" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="374.3" y1="199" x2="374.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="373.7" y="229.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="399" y="198" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="394.3" y1="199" x2="394.3" y2="229.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="41" y="184.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="175.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="193.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="278" y1="166.5" x2="278" y2="202.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="474" y1="166.5" x2="474" y2="202.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="469" y1="166.5" x2="469" y2="202.5" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="471" y="166.5" width="3" height="36" fill="#1b1b1f"/>
+<text x="75" y="157.5" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="281" y="157.5" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">2</text>
+<line x1="36" y1="166.5" x2="36" y2="202.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+</svg>

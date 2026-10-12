@@ -160,9 +160,12 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
                         bars: Vec::new(),
                     };
                 }
-                skipped.add_if(pitches.is_empty(), "percussion and untuned tracks");
                 Staff {
-                    tuning: tuning(pitches),
+                    // A staff that names no strings is for an instrument that has none.
+                    tuning: match pitches.is_empty() {
+                        true => gtr_model::Tuning::none(),
+                        false => tuning(pitches),
+                    },
                     capo: property(staff, "CapoFret")
                         .and_then(|p| text(p, "Fret").parse().ok())
                         .unwrap_or(0),
@@ -176,7 +179,26 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             .and_then(|n| n.text()?.trim().parse::<u8>().ok());
         let instrument = match kit {
             Some(_) => Instrument::Drums,
+            // The one instrument here without strings is the piano.
+            None if staves.iter().any(Staff::is_pitched) => {
+                skipped.add_if(
+                    program.is_some_and(|p| p > 7),
+                    "the sounds of instruments without strings, which are played as a piano",
+                );
+                Instrument::Piano
+            }
             None => program.map_or_else(Instrument::default, Instrument::from_midi_program),
+        };
+        // A piano's staves are all without strings.
+        let staves: Vec<Staff> = match instrument {
+            Instrument::Piano => (staves.into_iter())
+                .map(|staff| Staff {
+                    tuning: gtr_model::Tuning::none(),
+                    capo: 0,
+                    ..staff
+                })
+                .collect(),
+            _ => staves,
         };
         // The track's chords, which its beats name by a number, and the lines of its
         // lyrics, each with the bar it starts in.
@@ -217,12 +239,46 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             .filter_map(|value| value.parse().ok())
             .collect();
         if let (Some(balance), Some(volume)) = (desk.get(11), desk.get(12)) {
-            let level = volume / 0.795 * f64::from(Mix::UNITY);
+            let level = volume / super::write::DESK_UNITY * f64::from(Mix::UNITY);
             track.mix.volume = level.round().clamp(0.0, f64::from(Mix::MAX_VOLUME)) as u8;
             track.mix.pan = ((balance - 0.5) * 200.0).round().clamp(-100.0, 100.0) as i8;
         }
+        match text(node, "PlaybackState") {
+            "Mute" => track.mix.mute = true,
+            "Solo" => track.mix.solo = true,
+            _ => {}
+        }
+        // Changes to the same two settings as the piece goes: the bar, how far through
+        // it, and the new value. One at the very start that says what the desk says is
+        // the desk's own.
+        let changes = (node.descendants())
+            .filter(|n| n.has_tag_name("Automation"))
+            .filter_map(|automation| {
+                let pan = match text(automation, "Type") {
+                    "DSPParam_11" => true,
+                    "DSPParam_12" => false,
+                    _ => return None,
+                };
+                let bar: usize = text(automation, "Bar").parse().ok()?;
+                let position: f64 = text(automation, "Position").parse().ok()?;
+                let value: f64 = text(automation, "Value").parse().ok()?;
+                let desk = desk.get(if pan { 11 } else { 12 }).copied();
+                let same = desk.is_some_and(|desk| (desk - value).abs() < 1e-4);
+                (bar > 0 || position > 0.0 || !same).then_some(Change {
+                    bar,
+                    position,
+                    pan,
+                    value,
+                })
+            })
+            .collect();
         tracks.push(track);
-        parts.push(Part { kit, chords, lines });
+        parts.push(Part {
+            kit,
+            chords,
+            lines,
+            changes,
+        });
     }
 
     let mut master_bars = Vec::new();
@@ -375,6 +431,10 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             }
         }
     }
+    for (track, part) in tracks.iter_mut().zip(&parts) {
+        set_mix_changes(track, &part.changes, &master_bars);
+    }
+    super::keep_feel_changes(&mut master_bars);
     if let (Some(&(_, _, _, true)), Some(first)) = (tempos.first(), master_bars.first_mut()) {
         first.tempo_gradual = true;
     }
@@ -382,9 +442,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         let Some(master) = master_bars.get_mut(bar) else {
             continue;
         };
-        // Where in the bar, as a share of it, to the nearest sixty-fourth.
-        let share = gtr_model::Rational::new((position.clamp(0.0, 1.0) * 64.0).round() as i64, 64);
-        let at = share * master.time_signature.bar_length();
+        let at = moment(position, master);
         if bar > 0 || position > 0.0 {
             super::set_tempo(master, at, tempo, gradual);
         }
@@ -437,6 +495,60 @@ struct Part<'a> {
     chords: HashMap<&'a str, (String, Option<ChordDiagram>)>,
     /// The lines of its lyrics: the bar each starts in, and its words.
     lines: Vec<(usize, &'a str)>,
+    /// Changes of the track's volume and pan.
+    changes: Vec<Change>,
+}
+
+/// A change of a track's volume or pan at a moment of a bar, as the mixing desk counts
+/// them: from 0 to 1.
+struct Change {
+    bar: usize,
+    /// How far through the bar, from 0 to 1.
+    position: f64,
+    pan: bool,
+    value: f64,
+}
+
+/// A moment of a bar given as a share of it, in whole notes from its start. Files say it
+/// as a decimal; it is taken to the nearest 1920th of a whole note, which every beat of
+/// a note value or a common tuplet falls on.
+fn moment(share: f64, master: &MasterBar) -> gtr_model::Rational {
+    let length = master.time_signature.bar_length();
+    let whole = share.clamp(0.0, 1.0) * (*length.numer() as f64 / *length.denom() as f64);
+    gtr_model::Rational::new((whole * 1920.0).round() as i64, 1920)
+}
+
+/// Puts a track's changes of volume and pan on the beats they happen at: the beat of the
+/// first staff's first voice that starts there, or the last to start before.
+fn set_mix_changes(track: &mut Track, changes: &[Change], masters: &[MasterBar]) {
+    for change in changes {
+        let (Some(master), Some(bar)) = (
+            masters.get(change.bar),
+            track.staves[0].bars.get_mut(change.bar),
+        ) else {
+            continue;
+        };
+        let at = moment(change.position, master);
+        let mut time = gtr_model::Rational::from_integer(0);
+        let mut found = None;
+        for (index, beat) in bar.voices[0].beats.iter().enumerate() {
+            if time > at {
+                break;
+            }
+            found = Some(index);
+            time += beat.duration.length();
+        }
+        let Some(beat) = found.map(|index| &mut bar.voices[0].beats[index]) else {
+            continue;
+        };
+        if change.pan {
+            let pan = ((change.value - 0.5) * 200.0).round().clamp(-100.0, 100.0);
+            beat.effects.pan = Some(pan as i8);
+        } else {
+            let level = change.value / super::write::DESK_UNITY * f64::from(Mix::UNITY);
+            beat.effects.volume = Some(level.round().clamp(0.0, f64::from(Mix::MAX_VOLUME)) as u8);
+        }
+    }
 }
 
 /// A chord's fingering. The file lists the strings that are stopped or open, counted from
@@ -499,6 +611,7 @@ fn read_voice<'a>(
         }
         beats.push(beat);
     }
+    skipped.add_if(!graces.is_empty(), "grace notes with no note after them");
     Voice { beats }
 }
 
@@ -518,10 +631,22 @@ fn curve(values: [Option<f64>; 3], offsets: [Option<f64>; 4]) -> Option<Bend> {
         }
     }
     points.push((offsets[3].unwrap_or(100.0), destination.unwrap_or(0.0)));
-    bend_from_points(
+    let mut bend = bend_from_points(
         (points.into_iter())
             .map(|(offset, value)| ((offset * 0.6).round() as i32, value.round() as i32)),
-    )
+    )?;
+    // The level a curve ends on is held to the end of the note; saying so keeps the
+    // shapes the editor offers recognisable.
+    if let Some(last) = bend.points.last().copied()
+        && last.position < Bend::LENGTH
+        && bend.points.len() < Bend::MAX_POINTS
+    {
+        bend.points.push(gtr_model::CurvePoint {
+            position: Bend::LENGTH,
+            value: last.value,
+        });
+    }
+    Some(bend)
 }
 
 fn read_beat(
@@ -533,7 +658,7 @@ fn read_beat(
     skipped: &mut Skipped,
 ) -> Beat {
     let kit = part.kit.as_deref();
-    let string_count = staff.tuning.strings.len();
+    let string_count = staff.places();
 
     let rhythm = child(node, "Rhythm")
         .and_then(|r| r.attribute("ref"))
@@ -609,17 +734,42 @@ fn read_beat(
                     effects: read_note_effects(*note),
                 });
             }
+            let mut effects = read_note_effects(*note);
+            if staff.is_pitched() {
+                // A note of an instrument without strings is its pitch: an octave and
+                // a step of it, or the MIDI number.
+                let number = |name, inner| text(property(*note, name)?, inner).parse::<u32>().ok();
+                let pitch = match (number("Octave", "Number"), number("Tone", "Step")) {
+                    (Some(octave), Some(tone)) => octave * 12 + tone,
+                    _ => number("Midi", "Number")?,
+                };
+                return Some(Note {
+                    string: u8::try_from(pitch).ok().filter(|p| *p < 128)?,
+                    fret: 0,
+                    tied: child(*note, "Tie").and_then(|t| t.attribute("destination"))
+                        == Some("true"),
+                    effects,
+                });
+            }
             let fret: u8 = text(property(*note, "Fret")?, "Fret").parse().ok()?;
             // Strings are numbered from the lowest; the model counts from the highest.
             let from_low: usize = text(property(*note, "String")?, "String").parse().ok()?;
             let string = string_count.checked_sub(from_low + 1)? as u8;
-            let mut effects = read_note_effects(*note);
             // A trill names the other note by its MIDI pitch.
             effects.trill = text(*note, "Trill").parse::<u8>().ok().and_then(|pitch| {
                 let open = staff.tuning.pitch(string, 0, staff.capo)?;
+                // How long each of its notes lasts is kept apart, with 480 to the
+                // quarter note.
+                let ticks = (note.descendants())
+                    .find(|n| n.has_tag_name("XProperty") && n.attribute("id") == Some("688062467"))
+                    .and_then(|speed| text(speed, "Int").parse::<u32>().ok());
                 Some(Trill {
                     fret: pitch.checked_sub(open)?,
-                    speed: NoteValue::Sixteenth,
+                    speed: match ticks {
+                        Some(30) => NoteValue::SixtyFourth,
+                        Some(60) => NoteValue::ThirtySecond,
+                        _ => NoteValue::Sixteenth,
+                    },
                 })
             });
             Some(Note {
@@ -757,6 +907,14 @@ fn read_note_effects(note: Node) -> NoteEffects {
         _ => None,
     };
     let accent_bits: u8 = text(note, "Accent").parse().unwrap_or(0);
+    let harmonic = property(note, "HarmonicType").and_then(|p| match text(p, "HType") {
+        "Natural" => Some(Harmonic::Natural),
+        "Artificial" => Some(Harmonic::Artificial),
+        "Pinch" => Some(Harmonic::Pinch),
+        "Tap" => Some(Harmonic::Tapped),
+        "Semi" => Some(Harmonic::Semi),
+        _ => None,
+    });
     NoteEffects {
         hammer: enabled("HopoOrigin"),
         slide: property(note, "Slide")
@@ -785,20 +943,15 @@ fn read_note_effects(note: Node) -> NoteEffects {
             "Wide" => Some(Vibrato::Wide),
             _ => None,
         },
-        harmonic: property(note, "HarmonicType").and_then(|p| match text(p, "HType") {
-            "Natural" => Some(Harmonic::Natural),
-            "Artificial" => Some(Harmonic::Artificial),
-            "Pinch" => Some(Harmonic::Pinch),
-            "Tap" => Some(Harmonic::Tapped),
-            "Semi" => Some(Harmonic::Semi),
-            _ => None,
-        }),
+        harmonic,
         harmonic_touch: property(note, "HarmonicType")
             .filter(|p| matches!(text(*p, "HType"), "Artificial" | "Pinch" | "Tap" | "Semi"))
             .and_then(|_| property(note, "HarmonicFret"))
             .and_then(|p| text(p, "HFret").parse::<f32>().ok())
             .map(|fret| fret.round() as u8)
-            .filter(|fret| (1..=Harmonic::MAX_TOUCH).contains(fret)),
+            .filter(|fret| (1..=Harmonic::MAX_TOUCH).contains(fret))
+            // The usual place for its kind need not be said.
+            .filter(|fret| harmonic.is_none_or(|kind| kind.usual_touch() != *fret)),
         accent: match accent_bits {
             bits if bits & 0x04 != 0 => Some(Accent::Heavy),
             bits if bits & 0x08 != 0 => Some(Accent::Normal),

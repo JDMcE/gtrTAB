@@ -19,6 +19,7 @@
     writeAutosave,
     type OpenedFile,
   } from './lib/files';
+  import { PICTURE_WIDTH, exportFonts, paper, printPages } from './lib/export';
   import Inspector from './lib/Inspector.svelte';
   import {
     FADES,
@@ -447,6 +448,61 @@
       }
     });
 
+  /** The formats of other programs a score can be written in, as the save dialog names them. */
+  const FORMATS = {
+    guitar_pro: 'Guitar Pro file',
+    musicxml: 'MusicXML file',
+    midi: 'MIDI file',
+    ascii: 'Text file',
+  };
+
+  /** The score's file name with another ending. */
+  const named = (extension: string) => fileName.replace(/\.[^.]+$/, '') + '.' + extension;
+
+  /**
+   * Writes the score as another program's file. What the score holds that the format has
+   * no place for is said in the status bar.
+   */
+  const exportAs = (format: keyof typeof FORMATS) =>
+    run(async () => {
+      if (!doc) return;
+      const written = doc.exportFile(format);
+      try {
+        const report = written.report;
+        const saved = await exportFile(named(written.extension), written.bytes, FORMATS[format], written.mediaType);
+        if (saved) message = report ? `Exported ${saved}. Not exported: ${report}.` : `Exported ${saved}`;
+      } finally {
+        written.free();
+      }
+    });
+
+  /**
+   * Writes the score as something to look at, in the view it is shown in: a PDF of its
+   * pages, or the whole of it as one SVG or PNG picture.
+   */
+  const exportPicture = (kind: 'pdf' | 'svg' | 'png') =>
+    run(async () => {
+      if (!doc) return;
+      const fonts = await exportFonts();
+      const [bytes, what, type] =
+        kind === 'pdf'
+          ? [doc.exportPdf(viewJson, paper, ...fonts), 'PDF document', 'application/pdf']
+          : kind === 'svg'
+            ? [new TextEncoder().encode(doc.exportSvg(viewJson, PICTURE_WIDTH, ...fonts)), 'SVG picture', 'image/svg+xml']
+            : [doc.exportPng(viewJson, PICTURE_WIDTH, 2, ...fonts), 'PNG picture', 'image/png'];
+      const saved = await exportFile(named(kind), bytes, what, type);
+      if (saved) message = `Exported ${saved}`;
+    });
+
+  /** Prints the score, in the view it is shown in, on the paper usual where the user is. */
+  const print = () =>
+    run(async () => {
+      if (!doc) return;
+      const fonts = await exportFonts();
+      const pages: string[] = JSON.parse(doc.pagesJson(viewJson, paper, ...fonts));
+      await printPages(pages, paper);
+    });
+
   const chooseSound = () =>
     run(async () => {
       const font = await pickSoundFont();
@@ -660,7 +716,15 @@
     open: { label: 'Open or import…', icon: 'open', keys: 'Ctrl+O', run: open },
     save: { label: 'Save', icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
     saveAs: { label: 'Save as…', icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
-    exportAudio: { label: 'Export audio (WAV)…', disabled: () => noScore() || exporting, run: () => exportAudio() },
+    exportAudio: { label: 'Audio (WAV)…', disabled: () => noScore() || exporting, run: () => exportAudio() },
+    exportPdf: { label: 'PDF…', disabled: noScore, run: () => exportPicture('pdf') },
+    exportPng: { label: 'Picture (PNG)…', disabled: noScore, run: () => exportPicture('png') },
+    exportSvg: { label: 'Picture (SVG)…', disabled: noScore, run: () => exportPicture('svg') },
+    exportGuitarPro: { label: 'Guitar Pro (.gp)…', disabled: noScore, run: () => exportAs('guitar_pro') },
+    exportMusicXml: { label: 'MusicXML…', disabled: noScore, run: () => exportAs('musicxml') },
+    exportMidi: { label: 'MIDI…', disabled: noScore, run: () => exportAs('midi') },
+    exportAscii: { label: 'Text tab…', disabled: noScore, run: () => exportAs('ascii') },
+    print: { label: 'Print…', keys: 'Ctrl+P', disabled: noScore, run: print },
 
     undo: { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
     redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
@@ -981,7 +1045,15 @@
           cmd.save,
           cmd.saveAs,
           '-',
-          cmd.exportAudio,
+          {
+            label: 'Export',
+            items: [
+              cmd.exportPdf, cmd.exportPng, cmd.exportSvg, '-',
+              cmd.exportGuitarPro, cmd.exportMusicXml, cmd.exportMidi, cmd.exportAscii, '-',
+              cmd.exportAudio,
+            ],
+          },
+          cmd.print,
         ],
       },
       {
@@ -1132,7 +1204,7 @@
     {
       title: 'File and edit',
       rows: [
-        ...keyRows(cmd.new, cmd.open, cmd.save, cmd.saveAs, cmd.undo),
+        ...keyRows(cmd.new, cmd.open, cmd.save, cmd.saveAs, cmd.print, cmd.undo),
         { keys: 'Ctrl+Y / Ctrl+Shift+Z', label: 'Redo' },
         ...keyRows(cmd.cut, cmd.copy, cmd.paste),
       ],
@@ -1183,6 +1255,7 @@
         case 'v': return cmd.paste.run;
         case 's': return () => save(shift);
         case 'o': return open;
+        case 'p': return cmd.print.run;
         case 'n': return newScore;
         case 'arrowleft': return move('prev_bar');
         case 'arrowright': return move('next_bar');

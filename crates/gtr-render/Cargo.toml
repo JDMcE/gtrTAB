@@ -6,6 +6,11 @@ publish.workspace = true
 
 [dependencies]
 gtr-layout.workspace = true
+ab_glyph_rasterizer.workspace = true
+miniz_oxide.workspace = true
+thiserror.workspace = true
+ttf-parser.workspace = true
 
 [dev-dependencies]
+gtr-io.workspace = true
 gtr-model.workspace = true

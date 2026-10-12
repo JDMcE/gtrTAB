@@ -1,0 +1,6 @@
+Rock beat with a fill (made up to try the importer on)
+
+C |x---------------|----------------|
+HH|--x-x-x-x-x-x-x-|x-x-x-x-x-x-x-o-|
+SD|----o-------o---|----o-------o-oo|
+BD|o-------o-o-----|o-------o-o-----|

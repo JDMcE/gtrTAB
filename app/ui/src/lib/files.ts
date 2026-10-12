@@ -1,7 +1,13 @@
 // Opening and saving score files: native dialogs inside Tauri, browser fallbacks on the web.
 
 export const EXTENSION = 'gtrtab';
-export const IMPORT_EXTENSIONS = ['gp', 'gpx', 'gp5', 'gp4', 'gp3'];
+/** Files of other programs that can be opened: Guitar Pro, MusicXML, MIDI and plain-text tabs. */
+export const IMPORT_EXTENSIONS = [
+  'gp', 'gpx', 'gp5', 'gp4', 'gp3',
+  'musicxml', 'mxl', 'xml',
+  'mid', 'midi',
+  'txt', 'tab',
+];
 
 export interface OpenedFile {
   name: string;
