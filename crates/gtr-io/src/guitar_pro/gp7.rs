@@ -611,6 +611,7 @@ fn read_voice<'a>(
         }
         beats.push(beat);
     }
+    skipped.add_if(!graces.is_empty(), "grace notes with no note after them");
     Voice { beats }
 }
 

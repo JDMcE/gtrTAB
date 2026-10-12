@@ -2,6 +2,8 @@
 
 A guitar tablature editor for desktop and web. See [plan.md](plan.md) for the roadmap.
 
+Scores are kept in gtrTab's own format. Guitar Pro files of every version, MusicXML, MIDI and tabs typed as plain text open through File > Open; File > Export writes Guitar Pro (`.gp`), MusicXML, MIDI, text, PDF, PNG, SVG and WAV.
+
 ## Requirements
 
 - Rust (stable) with the `wasm32-unknown-unknown` target
@@ -29,6 +31,8 @@ cd ../desktop && npm install
 | Desktop app (installers) | `npm run build` | `app/desktop` |
 
 The end-to-end tests need Playwright's browser once: `npx playwright install chromium` in `app/ui`. The notation is also tested against pictures in `tests/golden`; when a change to the engraving is meant, look at the new pictures in `target/golden`, then run `GTR_BLESS=1 cargo test -p gtr-render` and commit them.
+
+To see what an importer and the layout make of a file without opening the app, draw it: `cargo run -p gtr-render --example draw -- song.gp5 song.png` writes a PNG, a PDF or an SVG by the name it is given, and takes `tab`, `standard`, `both` or `slash` and `all` for the view.
 
 Playback sounds through the GeneralUser GS SoundFont, which is too big for the repository. Fetch it once with `npm run soundfont` in `app/ui`; without it the app plays through its built-in models.
 
@@ -73,6 +77,7 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | Ctrl+Z / Ctrl+Y | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
+| Ctrl+P | Print |
 | ? or F1 | List every shortcut |
 | Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
 | Arrow keys in a bar, the palette or a menu | Move between its controls |

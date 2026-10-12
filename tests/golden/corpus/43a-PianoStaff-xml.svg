@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="288.5" viewBox="0 0 1000 288.5">
+<style>@font-face { font-family: Bravura; src: url("../../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="288.5" fill="#ffffff"/>
+<line x1="36" y1="234.5" x2="178" y2="234.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="225.5" x2="178" y2="225.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="216.5" x2="178" y2="216.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="207.5" x2="178" y2="207.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="198.5" x2="178" y2="198.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="162" x2="178" y2="162" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="153" x2="178" y2="153" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="144" x2="178" y2="144" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="135" x2="178" y2="135" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="126" x2="178" y2="126" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Untitled</text>
+<text x="123" y="157.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="41" y="153" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="135" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="153" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="178" y1="126" x2="178" y2="162" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="173" y1="126" x2="173" y2="162" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="175" y="126" width="3" height="36" fill="#1b1b1f"/>
+<text x="75" y="117" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="123" y="225.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="41" y="207.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="207.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="225.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="178" y1="198.5" x2="178" y2="234.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="173" y1="198.5" x2="173" y2="234.5" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="175" y="198.5" width="3" height="36" fill="#1b1b1f"/>
+<rect x="30" y="126" width="3" height="108.5" fill="#1b1b1f"/>
+<line x1="31.5" y1="126" x2="37" y2="122" stroke="#1b1b1f" stroke-width="1.4"/>
+<line x1="31.5" y1="234.5" x2="37" y2="238.5" stroke="#1b1b1f" stroke-width="1.4"/>
+<line x1="36" y1="126" x2="36" y2="234.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+</svg>

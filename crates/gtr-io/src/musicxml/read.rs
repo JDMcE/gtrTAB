@@ -355,8 +355,6 @@ struct Line {
     beats: Vec<Beat>,
     /// How far through the bar the voice has got, in whole notes.
     cursor: Rational,
-    /// Grace notes waiting for the note they lead into.
-    graces: Vec<(GraceNote, bool, bool)>,
 }
 
 fn read_part(
@@ -393,7 +391,6 @@ fn read_part(
     let mut percussion = channel == Some(10);
     let mut tunings: HashMap<usize, (Vec<u8>, u8)> = HashMap::new();
     let mut fretted = false;
-    let mut transpose = 0i32;
     for node in measures.iter().flat_map(|measure| measure.descendants()) {
         match node.tag_name().name() {
             "staves" => {
@@ -435,10 +432,6 @@ fn read_part(
                     let strings = strings.into_iter().map(|(_, pitch)| pitch).collect();
                     tunings.entry(staff).or_insert((strings, capo));
                 }
-            }
-            "transpose" if transpose == 0 => {
-                transpose = number::<f64>(node, "chromatic").unwrap_or(0.0) as i32
-                    + 12 * number::<i32>(node, "octave-change").unwrap_or(0);
             }
             "technical" => {
                 fretted |= child(node, "fret").is_some() && child(node, "string").is_some()
@@ -571,6 +564,11 @@ fn read_part(
         }
     }
     let mut wedges: Vec<Vec<Wedge>> = vec![Vec::new(); slots.len()];
+    // Grace notes waiting for the note they lead into, in each voice of each staff: the
+    // note may be in the next bar.
+    let mut graces: Vec<Vec<Vec<(GraceNote, bool, bool)>>> =
+        vec![vec![Vec::new(); Bar::MAX_VOICES]; slots.len()];
+    let mut transpose = 0i32;
     let mut ending: u8 = 0;
     for (bar, measure) in measures.iter().enumerate() {
         let mut lines: Vec<Vec<Line>> = (0..slots.len()).map(|_| Vec::new()).collect();
@@ -588,6 +586,11 @@ fn read_part(
                         number::<i64>(node, "divisions").filter(|d| (1..=1 << 20).contains(d))
                     {
                         divisions = new;
+                    }
+                    // An instrument written higher or lower than it sounds, from here on.
+                    if let Some(written) = child(node, "transpose") {
+                        transpose = number::<f64>(written, "chromatic").unwrap_or(0.0) as i32
+                            + 12 * number::<i32>(written, "octave-change").unwrap_or(0);
                     }
                     let master = &mut global.masters[bar];
                     if let Some(key) = child(node, "key")
@@ -614,7 +617,11 @@ fn read_part(
                         }
                     }
                 }
-                "backup" => position -= whole(number(node, "duration").unwrap_or(0), divisions),
+                "backup" => {
+                    // Never to before the bar, whatever the file says.
+                    let back = whole(number(node, "duration").unwrap_or(0), divisions);
+                    position = (position - back).max(Rational::from_integer(0));
+                }
                 "forward" => position += whole(number(node, "duration").unwrap_or(0), divisions),
                 "barline" => {
                     let master = &mut global.masters[bar];
@@ -705,7 +712,7 @@ fn read_part(
                                 string: note.string,
                                 fret: note.fret,
                             };
-                            lines[staff][voice].graces.push((ornament, on_beat, hammer));
+                            graces[staff][voice].push((ornament, on_beat, hammer));
                         }
                         continue;
                     }
@@ -759,6 +766,7 @@ fn read_part(
                         None => durations_for(length),
                     };
                     let Some((first, more)) = durations.split_first() else {
+                        skipped.add_if(child(node, "rest").is_none(), "notes shorter than a 256th");
                         continue;
                     };
                     let mut beat = Beat::rest(*first);
@@ -794,7 +802,12 @@ fn read_part(
                         .map(|wedge| wedge.kind);
                     // And so are the grace notes that came before it.
                     if let Some(note) = beat.notes.first_mut() {
-                        let graces: Vec<_> = line.graces.drain(..).take(Grace::MAX_NOTES).collect();
+                        let waiting = &mut graces[staff][voice];
+                        skipped.add_if(
+                            waiting.len() > Grace::MAX_NOTES,
+                            "more than four grace notes before a note",
+                        );
+                        let graces: Vec<_> = waiting.drain(..).take(Grace::MAX_NOTES).collect();
                         if let Some((_, on_beat, _)) = graces.first() {
                             note.effects.grace = Some(Grace {
                                 notes: graces.iter().map(|g| g.0).collect(),
@@ -803,7 +816,6 @@ fn read_part(
                             });
                         }
                     }
-                    line.graces.clear();
                     line.beats.push(beat);
                     // A length no one note has is the note and rests after it.
                     line.beats.extend(more.iter().map(|rest| Beat::rest(*rest)));
@@ -845,6 +857,10 @@ fn read_part(
             staff.bars.push(Bar { voices });
         }
     }
+    skipped.add_if(
+        graces.iter().flatten().any(|waiting| !waiting.is_empty()),
+        "grace notes with no note after them",
+    );
     for staff in &mut track.staves {
         staff.bars.resize_with(count, Bar::empty);
     }

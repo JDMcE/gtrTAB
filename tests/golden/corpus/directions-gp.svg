@@ -1,0 +1,59 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="522" viewBox="0 0 1000 522">
+<style>@font-face { font-family: Bravura; src: url("../../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="522" fill="#ffffff"/>
+<line x1="36" y1="416" x2="802" y2="416" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="403" x2="802" y2="403" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="390" x2="802" y2="390" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="377" x2="802" y2="377" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="364" x2="802" y2="364" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="351" x2="802" y2="351" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="222" x2="964" y2="222" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="209" x2="964" y2="209" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="196" x2="964" y2="196" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="183" x2="964" y2="183" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="170" x2="964" y2="170" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="157" x2="964" y2="157" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Untitled</text>
+<text x="75" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="95" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="107" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="126" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="146" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="158" y="124.5" font-family="Bravura" font-size="20" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="171" y="118.5" font-family="system-ui, sans-serif" font-size="12" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Fine</text>
+<text x="345.6" y="118.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">D.C.  D.S.  D.S.S.  To Coda  To Double Coda</text>
+<text x="709" y="118.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">D.C. al Coda  D.S. al Coda  D.S.S. al Coda</text>
+<rect x="43.6" y="170.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="176.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="183.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="189.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="196.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="202.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<text x="88" y="173.3" font-family="Bravura" font-size="52" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="88" y="205.8" font-family="Bravura" font-size="52" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="241" y1="157" x2="241" y2="222" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="606.6" y1="157" x2="606.6" y2="222" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="964" y1="157" x2="964" y2="222" stroke="#1b1b1f" stroke-width="1"/>
+<text x="67" y="148" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="244" y="148" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">2</text>
+<text x="609.5" y="148" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">3</text>
+<line x1="36" y1="157" x2="36" y2="222" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+<text x="77" y="312.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">D.C. al Double Coda  D.S. al Double Coda  D.S.S. al Double Coda</text>
+<text x="471" y="312.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">D.C. al Fine  D.S. al Fine  D.S.S. al Fine</text>
+<rect x="43.6" y="364.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="370.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="377.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="383.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="390.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="396.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<line x1="458" y1="351" x2="458" y2="416" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="726" y1="351" x2="726" y2="416" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="802" y1="351" x2="802" y2="416" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="797" y1="351" x2="797" y2="416" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="799" y="351" width="3" height="65" fill="#1b1b1f"/>
+<text x="67" y="342" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">4</text>
+<text x="461" y="342" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">5</text>
+<text x="729" y="342" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">6</text>
+<line x1="36" y1="351" x2="36" y2="416" stroke="#1b1b1f" stroke-width="1"/>
+</svg>
