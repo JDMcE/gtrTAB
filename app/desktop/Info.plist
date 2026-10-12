@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the app's own by Tauri. macOS asks the user before an app may listen,
+       and shows this as the reason. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>gtrTab listens to a microphone or line in only while the tuner is open.</string>
+</dict>
+</plist>

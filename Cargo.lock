@@ -1235,6 +1235,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-fs",
  "tauri-plugin-persisted-scope",
+ "webkit2gtk",
 ]
 
 [[package]]

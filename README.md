@@ -4,6 +4,8 @@ A guitar tablature editor for desktop and web. See [plan.md](plan.md) for the ro
 
 Scores are kept in gtrTab's own format. Guitar Pro files of every version, MusicXML, MIDI and tabs typed as plain text open through File > Open; File > Export writes Guitar Pro (`.gp`), MusicXML, MIDI, text, PDF, PNG, SVG and WAV.
 
+For practice, Score has the loop, the speed trainer and the playback speed; View has the fretboard, keyboard or drum kit under the score and the visual metronome; and Tools has the tuner, the chord and scale libraries and the scale finder.
+
 ## Requirements
 
 - Rust (stable) with the `wasm32-unknown-unknown` target

@@ -44,6 +44,7 @@
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
   import ChordLibrary from './lib/ChordLibrary.svelte';
   import ScaleDialog from './lib/ScaleDialog.svelte';
+  import TunerDialog from './lib/TunerDialog.svelte';
   import { SCALES, findScales, type Fit } from './lib/scales';
   import { freeLine } from './lib/instrument';
   import Palette from './lib/Palette.svelte';
@@ -751,6 +752,7 @@
     onDrums() ? [] : (cursorStaff?.tuning.strings.map((pitch) => pitch + cursorStaff.capo) ?? []),
   );
   let chordLibraryOpen = $state(false);
+  let tunerOpen = $state(false);
   let scaleLibrary = $state.raw<{ root: number; scale: number; found: { fits: Fit[]; source: string } | null } | null>(
     null,
   );
@@ -1219,6 +1221,13 @@
       active: () => prefs.instrument,
       run: () => (prefs.instrument = !prefs.instrument),
     },
+    tuner: {
+      label: 'Tuner…',
+      run: () => {
+        stop();
+        tunerOpen = true;
+      },
+    },
     chordLibrary: { label: 'Chord library…', run: () => (chordLibraryOpen = true) },
     scaleLibrary: { label: 'Scale library…', run: () => (scaleLibrary = { root: 0, scale: 0, found: null }) },
     findScale: {
@@ -1420,7 +1429,7 @@
           { label: 'Theme', items: themes },
         ],
       },
-      { label: 'Tools', items: [cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
+      { label: 'Tools', items: [cmd.tuner, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
       { label: 'Help', items: [cmd.shortcuts] },
     ];
   });
@@ -1905,6 +1914,10 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if tunerOpen}
+  <TunerDialog strings={openStrings} onclose={() => (tunerOpen = false)} />
 {/if}
 
 {#if chordLibraryOpen}
