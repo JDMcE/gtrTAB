@@ -17,6 +17,6 @@ pub use soundfont::{SoundFont, SoundFontError};
 pub use engine::{Engine, Stereo, render};
 pub use events::{
     Automation, BeatTime, Channel, Click, NoteEvent, Options, Pulse, Timbre, Timeline, Tone,
-    compile,
+    audition, compile,
 };
 pub use wav::wav;

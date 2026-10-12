@@ -42,6 +42,9 @@
   } from './lib/model';
   import BeatLights from './lib/BeatLights.svelte';
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
+  import ChordLibrary from './lib/ChordLibrary.svelte';
+  import ScaleDialog from './lib/ScaleDialog.svelte';
+  import { SCALES, findScales, type Fit } from './lib/scales';
   import { freeLine } from './lib/instrument';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
@@ -739,6 +742,79 @@
       return notes.some((n) => n.string === string && n.fret === fret) ? d.delete() : d.setFret(fret);
     });
 
+  // --- Chord and scale libraries ---
+
+  /** A guitar in standard tuning, for showing a scale to a track without strings. */
+  const STANDARD_GUITAR = [64, 59, 55, 50, 45, 40];
+  /** The open strings of the cursor's staff as they sound, with the capo on. */
+  const openStrings = $derived(
+    onDrums() ? [] : (cursorStaff?.tuning.strings.map((pitch) => pitch + cursorStaff.capo) ?? []),
+  );
+  let chordLibraryOpen = $state(false);
+  let scaleLibrary = $state.raw<{ root: number; scale: number; found: { fits: Fit[]; source: string } | null } | null>(
+    null,
+  );
+
+  /** Plays a few notes on the cursor's instrument, as a chord or a scale is tried out. */
+  const audition = (pitches: number[], gap: number, length: number) =>
+    run(async () => {
+      if (!score) return;
+      stop();
+      const instrument = score.tracks[trackIndex()].instrument;
+      const passage = Document.audition(instrument === 'drums' ? 'steel_guitar' : instrument, Uint8Array.from(pitches), gap, length);
+      const timeline: Timeline = JSON.parse(passage.timelineJson);
+      const events = passage.events;
+      passage.free();
+      await player.play(events, timeline, () => {});
+    });
+
+  /** Marks the notes of a chord or a scale on the fretboard or keyboard, and shows it. */
+  function showMarks(next: Marks) {
+    marks = next;
+    prefs.instrument = true;
+    chordLibraryOpen = false;
+    scaleLibrary = null;
+    message = `${next.label} marked on the ${instrumentKind === 'keys' ? 'keyboard' : 'fretboard'}`;
+  }
+
+  /** The pitches of the selected notes, or of the whole track without a selection. */
+  function selectedPitches(): number[] {
+    if (!score || !editor) return [];
+    const track = score.tracks[editor.cursor.track];
+    const selection = editor.selection;
+    const staves = selection ? [track.staves[editor.cursor.staff]] : track.staves;
+    const pitches: number[] = [];
+    for (const staff of staves) {
+      const pitchOf = (string: number, fret: number) =>
+        staff.tuning.strings.length ? staff.tuning.strings[string] + staff.capo + fret : string;
+      staff.bars.forEach((bar, b) => {
+        bar.voices.forEach((voice, v) => {
+          voice.beats.forEach((beat, i) => {
+            if (selection) {
+              const at = [b, i];
+              const within = (a: number[], z: number[]) => a[0] < z[0] || (a[0] === z[0] && a[1] <= z[1]);
+              if (v !== editor!.cursor.voice || !within(selection[0], at) || !within(at, selection[1])) return;
+            }
+            for (const note of beat.notes) pitches.push(pitchOf(note.string, note.fret));
+          });
+        });
+      });
+    }
+    return pitches;
+  }
+
+  /** Opens the scale library on the scales that fit the selected notes, or the track's. */
+  function findScale() {
+    if (!editor) return;
+    const fits = findScales(selectedPitches());
+    const best = fits[0];
+    scaleLibrary = {
+      root: best?.root ?? 0,
+      scale: best ? SCALES.indexOf(best.scale) : 0,
+      found: { fits, source: editor.selection ? 'the selection' : 'the whole track' },
+    };
+  }
+
   // --- Bar marks and beat text ---
 
   /** Whether the cursor is on a staff without strings, where notes are entered by name. */
@@ -1143,6 +1219,13 @@
       active: () => prefs.instrument,
       run: () => (prefs.instrument = !prefs.instrument),
     },
+    chordLibrary: { label: 'Chord library…', run: () => (chordLibraryOpen = true) },
+    scaleLibrary: { label: 'Scale library…', run: () => (scaleLibrary = { root: 0, scale: 0, found: null }) },
+    findScale: {
+      label: 'Find the scale of the selection…',
+      disabled: () => onDrums(),
+      run: findScale,
+    },
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
   } satisfies Record<string, Command>;
@@ -1337,6 +1420,7 @@
           { label: 'Theme', items: themes },
         ],
       },
+      { label: 'Tools', items: [cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
       { label: 'Help', items: [cmd.shortcuts] },
     ];
   });
@@ -1674,6 +1758,7 @@
             cursor={editor.cursor.string}
             {marks}
             onpick={pickOnInstrument}
+            onclearmarks={() => (marks = null)}
             onclose={() => {
               prefs.instrument = false;
               focusScore();
@@ -1820,6 +1905,32 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if chordLibraryOpen}
+  <ChordLibrary
+    open={openStrings}
+    onshow={showMarks}
+    onplay={(pitches) => audition(pitches, 0.03, 2)}
+    onput={(frets, name) => {
+      chordLibraryOpen = false;
+      edit((d) => d.putShape(Int8Array.from(frets), name));
+    }}
+    onclose={() => (chordLibraryOpen = false)}
+  />
+{/if}
+
+{#if scaleLibrary}
+  <ScaleDialog
+    open={openStrings.length ? openStrings : STANDARD_GUITAR}
+    neckNote={openStrings.length ? undefined : 'Shown on a guitar in standard tuning, as this track has no strings.'}
+    root={scaleLibrary.root}
+    scale={scaleLibrary.scale}
+    found={scaleLibrary.found}
+    onshow={showMarks}
+    onplay={(pitches) => audition(pitches, 0.3, 0.35)}
+    onclose={() => (scaleLibrary = null)}
+  />
 {/if}
 
 {#if trainerOpen}

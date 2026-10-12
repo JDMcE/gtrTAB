@@ -271,6 +271,24 @@ struct Played {
     timing: BarTiming,
 }
 
+/// A few notes to hear on their own, as when a chord or a scale is tried out: `pitches`
+/// played on `instrument` one after another, `gap` seconds apart (0.0 for a chord, or a few
+/// hundredths for a strum), each lasting `length` seconds.
+pub fn audition(instrument: Instrument, pitches: &[u8], gap: f64, length: f64) -> Timeline {
+    let notes: Vec<NoteEvent> = (pitches.iter().enumerate())
+        .map(|(i, &pitch)| NoteEvent::plain(i as f64 * gap, length, pitch.min(127)))
+        .collect();
+    Timeline {
+        channels: vec![Channel {
+            timbre: Timbre::of(instrument),
+            ..Channel::default()
+        }],
+        duration: (notes.iter()).fold(0.0, |end, n| f64::max(end, n.time + n.duration)),
+        notes,
+        ..Timeline::default()
+    }
+}
+
 /// Compiles the score to timed events. Every track's notes are included, and its channel
 /// says whether it is audible: not muted, and not left out by another track's solo. `follow`
 /// picks the track whose beats are reported for the playback cursor.
@@ -775,6 +793,18 @@ mod tests {
     use gtr_model::{Feel, MasterBar};
 
     use super::*;
+
+    #[test]
+    fn an_audition_plays_its_notes_in_turn_on_one_instrument() {
+        let strum = audition(Instrument::Piano, &[48, 52, 55, 200], 0.02, 1.0);
+        assert_eq!(strum.channels.len(), 1);
+        assert_eq!(strum.channels[0].timbre, Timbre::of(Instrument::Piano));
+        let times: Vec<f64> = strum.notes.iter().map(|n| n.time).collect();
+        assert_eq!(times, [0.0, 0.02, 0.04, 0.06]);
+        assert_eq!(strum.notes[3].pitch, 127);
+        assert_eq!(strum.duration, 1.06);
+        assert!(audition(Instrument::Bass, &[], 0.3, 0.3).notes.is_empty());
+    }
 
     /// A blank score whose first bar holds quarter notes on the low E string.
     fn quarters(notes: Vec<Note>) -> Score {

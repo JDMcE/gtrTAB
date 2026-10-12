@@ -342,6 +342,27 @@ impl Document {
         })
     }
 
+    /// A few notes to hear on their own, as when a chord or a scale is tried out: `pitches`
+    /// on `instrument`, `gap` seconds apart, each `length` seconds long. See
+    /// [`gtr_audio::audition`].
+    pub fn audition(
+        instrument: &str,
+        pitches: Vec<u8>,
+        gap: f64,
+        length: f64,
+    ) -> Result<Passage, JsError> {
+        let instrument: Instrument = parse_name(instrument)?;
+        let timeline = gtr_audio::audition(instrument, &pitches, gap, length);
+        Ok(Passage {
+            timeline_json: serde_json::to_string(&serde_json::json!({
+                "beats": timeline.beats,
+                "pulses": timeline.pulses,
+                "duration": timeline.duration,
+            }))?,
+            events: timeline.to_bytes(),
+        })
+    }
+
     /// Starts making the whole score into sound for a file, as it plays: every track
     /// that is not muted, through the SoundFont whose bytes are given or through the
     /// built-in models if none is. `options_json` is as for [`Document::compile_audio`].
@@ -424,6 +445,13 @@ impl Document {
     }
 
     /// The pieces of the standard drum kit as JSON: `gtr_model::KitPiece` values.
+    /// Puts a chord shape on the beat at the cursor in one edit; see
+    /// [`gtr_edit::Editor::put_shape`].
+    #[wasm_bindgen(js_name = putShape)]
+    pub fn put_shape(&mut self, frets: Vec<i8>, name: Option<String>) -> Result<(), JsError> {
+        Ok(self.editor.put_shape(&frets, name.as_deref())?)
+    }
+
     #[wasm_bindgen(js_name = drumKitJson)]
     pub fn drum_kit_json() -> Result<String, JsError> {
         Ok(serde_json::to_string(&gtr_model::standard_kit())?)

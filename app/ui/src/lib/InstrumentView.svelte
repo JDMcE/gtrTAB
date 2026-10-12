@@ -41,10 +41,11 @@
     marks: Marks | null;
     /** A string and fret, a key's pitch or a piece's number was clicked. */
     onpick: (string: number, fret: number) => void;
+    onclearmarks: () => void;
     onclose: () => void;
   }
 
-  let { kind, tuning, capo, kit, notes, sounding, cursor, marks, onpick, onclose }: Props = $props();
+  let { kind, tuning, capo, kit, notes, sounding, cursor, marks, onpick, onclearmarks, onclose }: Props = $props();
 
   const marked = (pitch: number) => marks?.classes.includes(((pitch % 12) + 12) % 12) ?? false;
   const isRoot = (pitch: number) => marks !== null && ((pitch % 12) + 12) % 12 === marks.root;
@@ -97,7 +98,12 @@
   <header>
     <h2>{title}</h2>
     {#if kind === 'strings' && capo > 0}<span class="note">Capo {capo}: frets counted from it</span>{/if}
-    {#if marks}<span class="note marks">{marks.label}</span>{/if}
+    {#if marks && kind !== 'drums'}
+      <span class="note marks">Marked: {marks.label}</span>
+      <button type="button" class="tool" aria-label="Clear the marks" onclick={onclearmarks}>
+        <Icon name="remove" size={12} />
+      </button>
+    {/if}
     <span class="rule"></span>
     <button type="button" class="tool" aria-label="Close the {title.toLowerCase()}" onclick={onclose}>
       <Icon name="remove" size={14} />
