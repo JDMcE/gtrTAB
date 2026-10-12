@@ -7,7 +7,7 @@ use std::rc::Rc;
 use gtr_model::Fade;
 
 use crate::soundfont::{Playing, SampleVoice};
-use crate::voice::{ClickVoice, Voice, shape};
+use crate::voice::{ClickVoice, Voice, shape, squeeze};
 use crate::{Automation, BeatTime, Channel, SoundFont, Timbre, Timeline};
 
 /// Seconds of silence after the last bar so the last notes can die away.
@@ -53,6 +53,8 @@ struct Strip {
     current: (f32, f32),
     /// The amplifier's filter, carried from block to block.
     amp: f32,
+    /// How loud its sampled voices have been, for evening out a driven track.
+    level: f32,
     /// The track's samples for the block being made: what its modelled voices make, which
     /// goes through the amplifier, and the two sides of what its sampled voices make.
     bus: Vec<f32>,
@@ -68,6 +70,7 @@ impl Strip {
             target: (0.0, 0.0),
             current: (0.0, 0.0),
             amp: 0.0,
+            level: 0.0,
             bus: Vec::new(),
             sides: (Vec::new(), Vec::new()),
         };
@@ -372,12 +375,10 @@ impl Engine {
         let glide = 1.0 - (-1.0 / (MIX_GLIDE * rate)).exp();
         for (index, strip) in self.strips.iter_mut().enumerate() {
             let timbre = self.timeline.channels.get(index).map(|c| c.timbre);
-            shape(
-                &mut strip.bus,
-                timbre.unwrap_or_default(),
-                rate,
-                &mut strip.amp,
-            );
+            let timbre = timbre.unwrap_or_default();
+            shape(&mut strip.bus, timbre, rate, &mut strip.amp);
+            let (sampled_left, sampled_right) = (&mut strip.sides.0, &mut strip.sides.1);
+            squeeze(sampled_left, sampled_right, timbre, rate, &mut strip.level);
             let mut pending = (changes.iter())
                 .filter(|change| change.channel == index)
                 .map(|change| ((change.time * f64::from(self.sample_rate)) as usize, change))
@@ -762,6 +763,32 @@ mod tests {
                 "the open hi-hat still sounds"
             );
         }
+    }
+
+    #[test]
+    fn a_driven_chord_from_samples_is_hardly_louder_than_one_note() {
+        use crate::soundfont::testing::{looped, sound_font};
+
+        let bytes = sound_font(100, &[(0, 25, vec![looped()]), (0, 30, vec![looped()])]);
+        // How loud one note is and how loud six are together, before the limiter.
+        let peaks = |timbre| {
+            [1, 6].map(|count: u8| {
+                let notes = (0..count).map(|i| NoteEvent::plain(0.0, 1.0, 40 + i * 5));
+                let channel = Channel {
+                    timbre,
+                    ..Channel::default()
+                };
+                let mut engine = Engine::new(44_100);
+                engine.set_soundfont(Some(SoundFont::parse(&bytes).unwrap()));
+                engine.load(timeline_of(notes.collect(), vec![channel], 1.0));
+                let heard = play_out(&mut engine, 512).left;
+                (heard[4_000..40_000].iter()).fold(0.0f32, |m, s| m.max(s.abs().atanh()))
+            })
+        };
+        let [one, six] = peaks(Timbre::Steel);
+        assert!(six > one * 3.0, "{six} against {one}");
+        let [one, six] = peaks(Timbre::Distortion);
+        assert!(one > 0.2 && six < one * 2.0, "{six} against {one}");
     }
 
     #[test]

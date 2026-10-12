@@ -76,6 +76,40 @@ pub(crate) fn shape(bus: &mut [f32], timbre: Timbre, rate: f32, filtered: &mut f
     }
 }
 
+/// Evens out a block of a driven track that is played from samples, as the amplifier the
+/// samples were recorded through would have. A bank has each note recorded alone, and added
+/// up a chord of six is several times as loud as one of them; through an amplifier it is
+/// hardly louder at all, and a muted note is not far under an open one. `level` carries how
+/// loud the track has been from one block to the next.
+pub(crate) fn squeeze(
+    left: &mut [f32],
+    right: &mut [f32],
+    timbre: Timbre,
+    rate: f32,
+    level: &mut f32,
+) {
+    // The level above which the track is held back, by how much, and what it is then
+    // brought up by, so that a single note is as loud as it was.
+    let (threshold, ratio, makeup) = match timbre {
+        Timbre::Overdrive => (0.2, 4.0, 1.0),
+        Timbre::Distortion => (0.12, 8.0, 1.5),
+        _ => return,
+    };
+    let attack = 1.0 - (-1.0 / (0.0005 * rate)).exp();
+    let release = 1.0 - (-1.0 / (0.12 * rate)).exp();
+    for (left, right) in left.iter_mut().zip(right) {
+        let peak = left.abs().max(right.abs());
+        let glide = if peak > *level { attack } else { release };
+        *level += glide * (peak - *level);
+        if *level < 1e-9 {
+            *level = 0.0;
+        }
+        let gain = makeup * (threshold / level.max(threshold)).powf(1.0 - 1.0 / ratio);
+        *left *= gain;
+        *right *= gain;
+    }
+}
+
 /// Pitch offset in semitones at `t` seconds into a note, from its bend or slide curve.
 pub(crate) fn curve_at(curve: &[(f32, f32)], t: f32) -> f32 {
     let Some(&(first_time, first_value)) = curve.first() else {
