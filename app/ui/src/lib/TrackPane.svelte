@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import type { Command } from './commands';
   import { INSTRUMENT_ICONS, type Mix, type Score } from './model';
   import Icon from './ui/Icon.svelte';
@@ -22,6 +23,8 @@
     commands: Command[];
     onpick: (track: number, bar: number | null) => void;
     onmix: (track: number, mix: Mix) => void;
+    /** Puts the track at `from` where the one at `to` is. */
+    onmove: (from: number, to: number) => void;
     onproperties: (track: number) => void;
     onresize: (height: number | null) => void;
   }
@@ -36,6 +39,7 @@
     commands,
     onpick,
     onmix,
+    onmove,
     onproperties,
     onresize,
   }: Props = $props();
@@ -58,9 +62,19 @@
   let infoWidth = $state(0);
   /** Slider positions while they are being dragged, before the change is made. */
   let dragging = $state<{ track: number; mix: Mix } | null>(null);
+  /** Whether the slider in use is being moved with the pointer, not the keyboard. */
+  let pointing = false;
+  /** A track being dragged to a new place: where it came from and the row it is over. */
+  let moving = $state<{ from: number; to: number } | null>(null);
+  /** Set when a drag has just ended, so that the click that follows it is not a pick. */
+  let dragged = false;
+  /** How far the pointer has to travel before a press on a name becomes a drag. */
+  const DRAG_START = 5;
 
   const barCount = $derived(score.master_bars.length);
   const fitted = $derived(HEAD + score.tracks.length * ROW + 14);
+  /** The height the pane has: the one it was dragged to, or enough for the tracks. */
+  const shown = $derived(height ?? Math.min(fitted, 190));
 
   /** For each track, the runs of consecutive bars that hold notes, as `[first, length]`. */
   const runs = $derived(
@@ -123,10 +137,59 @@
     if (commit) {
       dragging = null;
       onmix(index, mix);
-      input.blur();
+      // After the mouse the keys go back to the score; from the keyboard they stay here.
+      if (pointing) input.blur();
+      pointing = false;
     } else {
       dragging = { track: index, mix };
     }
+  }
+
+  // --- Reordering ---
+
+  /** A press on a track's name: dragged up or down, it moves the track to the row it is let go on. */
+  function startMove(event: PointerEvent, index: number) {
+    dragged = false;
+    if (event.button !== 0 || score.tracks.length < 2) return;
+    const handle = event.currentTarget as HTMLElement;
+    const startY = event.clientY;
+    const rowAt = (clientY: number) => {
+      const top = scroller.getBoundingClientRect().top + HEAD - scroller.scrollTop;
+      return Math.max(0, Math.min(score.tracks.length - 1, Math.floor((clientY - top) / ROW)));
+    };
+    const move = (e: PointerEvent) => {
+      if (!moving && Math.abs(e.clientY - startY) < DRAG_START) return;
+      if (!moving) handle.setPointerCapture(e.pointerId);
+      moving = { from: index, to: rowAt(e.clientY) };
+    };
+    const end = (e: PointerEvent) => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', end);
+      handle.removeEventListener('pointercancel', end);
+      const done = moving;
+      moving = null;
+      if (!done) return;
+      dragged = true;
+      if (e.type === 'pointerup' && done.to !== done.from) onmove(done.from, done.to);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+  }
+
+  function pickName(index: number) {
+    if (dragged) dragged = false;
+    else onpick(index, null);
+  }
+
+  /** Alt with the up and down arrows moves a track from the keyboard, and the focus with it. */
+  function moveKey(event: KeyboardEvent, index: number) {
+    const by = event.key === 'ArrowUp' ? -1 : event.key === 'ArrowDown' ? 1 : 0;
+    const to = index + by;
+    if (!event.altKey || !by || to < 0 || to >= score.tracks.length) return;
+    event.preventDefault();
+    onmove(index, to);
+    tick().then(() => scroller.querySelectorAll<HTMLElement>('.name')[to]?.focus());
   }
 
   // --- Resizing ---
@@ -164,7 +227,7 @@
   class="tracks"
   aria-label="Tracks"
   bind:this={pane}
-  style:height="{height ?? Math.min(fitted, 190)}px"
+  style:height="{shown}px"
   style:--cell="{CELL}px"
   style:--row="{ROW}px"
   style:--head="{HEAD}px"
@@ -175,6 +238,10 @@
     role="separator"
     aria-orientation="horizontal"
     aria-label="Resize the track pane"
+    aria-valuenow={shown}
+    aria-valuemin={MIN_HEIGHT}
+    aria-valuemax={Math.round(limit())}
+    aria-valuetext="{shown} pixels high"
     tabindex="0"
     use:tip={{ label: 'Drag to resize; double-click to fit the tracks' }}
     onpointerdown={startResize}
@@ -203,16 +270,28 @@
     {#each score.tracks as t, index}
       {@const mix = mixOf(index)}
       {@const silent = mix.mute || (anySolo && !mix.solo)}
-      <div class="row" class:current={index === track} class:silent>
+      <div
+        class="row"
+        class:current={index === track}
+        class:silent
+        class:moving={moving?.from === index}
+        class:before={moving?.to === index && moving.to < moving.from}
+        class:after={moving?.to === index && moving.to > moving.from}
+      >
         <div class="info">
           <button
             type="button"
             class="name"
             aria-current={index === track ? 'true' : undefined}
-            use:tip={{ label: 'Edit this track; double-click for its settings' }}
+            use:tip={{
+              label: 'Edit this track; double-click for its settings; drag to move it',
+              keys: 'Alt+↑ / Alt+↓ to move',
+            }}
             onmousedown={(e) => e.preventDefault()}
-            onclick={() => onpick(index, null)}
+            onpointerdown={(e) => startMove(e, index)}
+            onclick={() => pickName(index)}
             ondblclick={() => onproperties(index)}
+            onkeydown={(e) => moveKey(e, index)}
           >
             <Icon name={INSTRUMENT_ICONS[t.instrument]} size={16} />
             <span>{t.name || `Track ${index + 1}`}</span>
@@ -235,17 +314,18 @@
             onmousedown={(e) => e.preventDefault()}
             onclick={() => onmix(index, { ...mix, solo: !mix.solo })}
           >S</button>
-          <!-- The sliders are for the mouse; the track's settings hold the same values for
-               the keyboard. -->
+          <!-- From the keyboard the left and right arrows reach the sliders like the
+               buttons beside them, and the up and down arrows set them. -->
           <input
             class="volume"
             type="range"
             min="0"
             max="100"
-            tabindex="-1"
             aria-label="Volume of {t.name}"
             value={mix.volume}
-            use:tip={{ label: `Volume ${mix.volume}` }}
+            use:tip={{ label: `Volume ${mix.volume}`, keys: '↑ / ↓' }}
+            onpointerdown={() => (pointing = true)}
+            onkeydown={() => (pointing = false)}
             oninput={(e) => slide(index, 'volume', e, false)}
             onchange={(e) => slide(index, 'volume', e, true)}
           />
@@ -255,15 +335,18 @@
             min="-100"
             max="100"
             step="5"
-            tabindex="-1"
             aria-label="Pan of {t.name}"
+            aria-valuetext={mix.pan === 0 ? 'centre' : `${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`}
             value={mix.pan}
             style:width="{PAN_WIDTH}px"
             style:--from="{Math.min(panAt(0), panAt(mix.pan))}px"
             style:--to="{Math.max(panAt(0), panAt(mix.pan))}px"
             use:tip={{
               label: mix.pan === 0 ? 'Pan: centre' : `Pan: ${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`,
+              keys: '↑ / ↓',
             }}
+            onpointerdown={() => (pointing = true)}
+            onkeydown={() => (pointing = false)}
             oninput={(e) => slide(index, 'pan', e, false)}
             onchange={(e) => slide(index, 'pan', e, true)}
             ondblclick={() => onmix(index, { ...mix, pan: 0 })}
@@ -405,6 +488,23 @@
   .row {
     height: var(--row);
     border-bottom: 1px solid var(--border);
+  }
+
+  /* A track being dragged fades, and a line shows where it will go. */
+  .row.moving {
+    opacity: 0.5;
+  }
+
+  .row.moving .name {
+    cursor: grabbing;
+  }
+
+  .row.before {
+    box-shadow: inset 0 2px 0 var(--focus);
+  }
+
+  .row.after {
+    box-shadow: inset 0 -2px 0 var(--focus);
   }
 
   /* The corner sets the width of the names column, so the rows follow it. */

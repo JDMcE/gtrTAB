@@ -3,3 +3,9 @@ name = "gtr-render"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+
+[dependencies]
+gtr-layout.workspace = true
+
+[dev-dependencies]
+gtr-model.workspace = true

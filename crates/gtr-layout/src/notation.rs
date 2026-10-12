@@ -19,6 +19,9 @@ const HEAD_HALF: f64 = 5.3;
 const STEM: f64 = 3.5 * SPACE;
 const BEAM_THICKNESS: f64 = 4.0;
 const BEAM_PITCH: f64 = 6.5;
+/// The steepest a beam gets, as rise over run, and the furthest it rises or falls.
+const BEAM_SLOPE: f64 = 0.3;
+const BEAM_SLANT: f64 = 1.25 * SPACE;
 
 /// SMuFL code points.
 const G_CLEF: char = '\u{E050}';
@@ -72,35 +75,12 @@ pub(crate) type SpelledBar = Vec<Vec<Vec<Spelled>>>;
 const SHARP_ORDER: [usize; 7] = [3, 0, 4, 1, 5, 2, 6];
 const FLAT_ORDER: [usize; 7] = [6, 2, 5, 1, 4, 0, 3];
 
-/// Step and alteration of each pitch class, spelled with sharps or with flats.
-const SHARP_SPELLING: [(i32, i8); 12] = [
-    (0, 0),
-    (0, 1),
-    (1, 0),
-    (1, 1),
-    (2, 0),
-    (3, 0),
-    (3, 1),
-    (4, 0),
-    (4, 1),
-    (5, 0),
-    (5, 1),
-    (6, 0),
-];
-const FLAT_SPELLING: [(i32, i8); 12] = [
-    (0, 0),
-    (1, -1),
-    (1, 0),
-    (2, -1),
-    (2, 0),
-    (3, 0),
-    (4, -1),
-    (4, 0),
-    (5, -1),
-    (5, 0),
-    (6, -1),
-    (6, 0),
-];
+/// Pitch class of each step of the scale, counted from C.
+const NATURAL: [i32; 7] = [0, 2, 4, 5, 7, 9, 11];
+
+/// A way of writing a pitch: the step of the scale it is written on, counted from C, and
+/// whether that step is lowered or raised.
+type Name = (i32, i8);
 
 /// The alteration a key signature gives each step of the scale.
 fn key_alters(key: i8) -> [i8; 7] {
@@ -129,9 +109,94 @@ pub(crate) fn middle_line(clef: Clef) -> i32 {
     }
 }
 
-/// Works out where every note of a staff goes in standard notation. Sharp keys spell the
-/// notes outside the key with sharps and flat keys with flats; a sign lasts to the end of
-/// its bar.
+/// The names a pitch can go by in a key. A pitch of the key has the name the key gives it,
+/// and any other white key is a natural. Only the five that are left have two names: a
+/// sharp, given first, and a flat.
+fn names(pitch: i32, in_key: &[i8; 7]) -> (Name, Option<Name>) {
+    let class = pitch.rem_euclid(12);
+    let named = |alters: &[i8; 7]| {
+        (0..7)
+            .find(|&step| (NATURAL[step] + i32::from(alters[step])).rem_euclid(12) == class)
+            .map(|step| (step as i32, alters[step]))
+    };
+    match named(in_key).or_else(|| named(&[0; 7])) {
+        Some(name) => (name, None),
+        None => (named(&[1; 7]).unwrap_or((0, 0)), named(&[-1; 7])),
+    }
+}
+
+/// The diatonic step, counted from C0, that a pitch is written on under a name.
+fn step_of(pitch: i32, (step, alter): Name) -> i32 {
+    ((pitch - i32::from(alter)).div_euclid(12) - 1) * 7 + step
+}
+
+/// Whether two notes of a chord, each a pitch and the step it is written on, are as far
+/// apart on the staff as they sound: a third written as a third, not as an augmented second.
+fn fits(a: (i32, i32), b: (i32, i32)) -> bool {
+    const STEPS: [i32; 12] = [0, 1, 1, 2, 2, 3, 3, 4, 5, 5, 6, 6];
+    let (low, high) = if a.0 <= b.0 { (a, b) } else { (b, a) };
+    let semitones = (high.0 - low.0).rem_euclid(12) as usize;
+    let steps = (high.1 - low.1).rem_euclid(7);
+    // A tritone is as good a fourth as a fifth.
+    steps == STEPS[semitones] || (semitones == 6 && steps == 4)
+}
+
+/// A note outside the key that can be written as a sharp or as a flat.
+struct Open {
+    pitch: i32,
+    sharp: Name,
+    flat: Name,
+    /// Which of the two the line it is in asks for.
+    prefers_sharp: bool,
+}
+
+/// The most notes of one chord whose names are weighed against each other; beyond that
+/// each goes by its own line.
+const MOST_WEIGHED: usize = 6;
+
+/// Chooses between sharp and flat for the notes of a chord that could be either, given
+/// the pitches and steps of its other notes. The names that keep the chord's intervals
+/// what they sound like win, and never two different pitches on one step; between names
+/// that do that equally well, each note takes the one its own line asks for. Returns
+/// whether each is a sharp.
+fn weigh(open: &[Open], fixed: &[(i32, i32)]) -> Vec<bool> {
+    let wanted: Vec<bool> = open.iter().map(|o| o.prefers_sharp).collect();
+    if open.len() > MOST_WEIGHED || open.len() + fixed.len() < 2 {
+        return wanted;
+    }
+    let mut best = (i32::MIN, wanted);
+    for mask in 0..1u32 << open.len() {
+        let sharps: Vec<bool> = (0..open.len()).map(|k| mask & (1 << k) == 0).collect();
+        let mut placed = fixed.to_vec();
+        let mut score = 0;
+        for (o, &sharp) in open.iter().zip(&sharps) {
+            let name = if sharp { o.sharp } else { o.flat };
+            placed.push((o.pitch, step_of(o.pitch, name)));
+            score += i32::from(sharp == o.prefers_sharp);
+        }
+        for (i, &a) in placed.iter().enumerate() {
+            for &b in &placed[i + 1..] {
+                score += match (a.0 == b.0, a.1 == b.1) {
+                    (true, _) => 0,
+                    (false, true) => -160,
+                    (false, false) if fits(a, b) => 16,
+                    _ => 0,
+                };
+            }
+        }
+        if score > best.0 {
+            best = (score, sharps);
+        }
+    }
+    best.1
+}
+
+/// Works out where every note of a staff goes in standard notation. A note of the key is
+/// written as the key has it. One outside it that could be a sharp or a flat is spelled
+/// by what is around it: by the chord it is in, so that a third reads as a third; then by
+/// where its line goes, a sharp if it rises a semitone and a flat if it falls one; then
+/// as it was last written in the bar; and failing all that with sharps in sharp keys and
+/// flats in flat keys. A sign lasts to the end of its bar.
 pub(crate) fn spell(
     staff: &Staff,
     clef: Clef,
@@ -139,64 +204,159 @@ pub(crate) fn spell(
     masters: &[MasterBar],
     kit: &[KitPiece],
 ) -> Vec<SpelledBar> {
+    if clef == Clef::Percussion {
+        // The fret names a piece of the kit, which has its own place and shape.
+        let placed = |note: &Note| {
+            let piece = kit.iter().find(|p| p.number == note.fret);
+            Spelled {
+                position: piece.map_or(0, |p| p.position.into()),
+                accidental: None,
+                head: piece.and_then(|p| match p.head {
+                    DrumHead::Normal => None,
+                    DrumHead::Cross => Some(0xE0A9),
+                    DrumHead::CircledCross => Some(0xE0B3),
+                    DrumHead::Diamond => Some(0xE0DB),
+                    DrumHead::Triangle => Some(0xE0BE),
+                }),
+            }
+        };
+        let beat = |beat: &Beat| beat.notes.iter().map(placed).collect();
+        let voice = |voice: &Voice| voice.beats.iter().map(beat).collect();
+        return (staff.bars.iter())
+            .map(|bar| bar.voices.iter().map(voice).collect())
+            .collect();
+    }
+
     let middle = middle_line(clef);
-    (staff.bars.iter().zip(masters))
-        .map(|(bar, master)| {
-            let key = master.key_signature;
-            let in_key = key_alters(key);
-            let spelling = if key >= 0 {
-                SHARP_SPELLING
+    let pitch_of = |note: &Note| {
+        let sounding = staff.pitch(note.string, note.fret).unwrap_or(60);
+        i32::from(sounding) + i32::from(transposition)
+    };
+    let beats_of = |bar: usize, voice: usize| -> &[Beat] {
+        (staff.bars.get(bar))
+            .and_then(|b| b.voices.get(voice))
+            .map_or(&[], |v| &v.beats)
+    };
+    // The pitches a line moves to from a note, or came from: those of the nearest beat of
+    // its voice that does not just repeat the note. Nothing if a rest comes first.
+    let beside = |pitch: i32, voice: usize, mut bar: usize, mut beat: usize, forward: bool| {
+        for _ in 0..16 {
+            if forward && beat + 1 < beats_of(bar, voice).len() {
+                beat += 1;
+            } else if forward {
+                (bar, beat) = (bar + 1, 0);
+            } else if beat > 0 {
+                beat -= 1;
             } else {
-                FLAT_SPELLING
+                let Some(before) = bar.checked_sub(1) else {
+                    break;
+                };
+                (bar, beat) = (before, beats_of(before, voice).len().saturating_sub(1));
+            }
+            let Some(found) = beats_of(bar, voice).get(beat) else {
+                break;
             };
-            // Signs already written in this bar, by diatonic step.
-            let mut written: Vec<(i32, i8)> = Vec::new();
-            (bar.voices.iter())
-                .map(|voice| {
-                    (voice.beats.iter())
-                        .map(|beat| {
-                            (beat.notes.iter())
-                                .map(|note| {
-                                    if clef == Clef::Percussion {
-                                        // The fret names a piece of the kit, which has its own place and shape.
-                                        let piece = kit.iter().find(|p| p.number == note.fret);
-                                        return Spelled {
-                                            position: piece.map_or(0, |p| p.position.into()),
-                                            accidental: None,
-                                            head: piece.and_then(|p| match p.head {
-                                                DrumHead::Normal => None,
-                                                DrumHead::Cross => Some(0xE0A9),
-                                                DrumHead::CircledCross => Some(0xE0B3),
-                                                DrumHead::Diamond => Some(0xE0DB),
-                                                DrumHead::Triangle => Some(0xE0BE),
-                                            }),
-                                        };
-                                    }
-                                    let sounding =
-                                        staff.pitch(note.string, note.fret).unwrap_or(60);
-                                    let pitch = i32::from(sounding) + i32::from(transposition);
-                                    let (step, alter) = spelling[pitch.rem_euclid(12) as usize];
-                                    let diatonic = (pitch.div_euclid(12) - 1) * 7 + step;
-                                    let current = (written.iter().rev())
-                                        .find(|(d, _)| *d == diatonic)
-                                        .map_or(in_key[step as usize], |(_, a)| *a);
-                                    let changed = alter != current && !note.tied;
-                                    if changed {
-                                        written.push((diatonic, alter));
-                                    }
-                                    Spelled {
-                                        position: diatonic - middle,
-                                        accidental: changed.then(|| Accidental::of(alter)),
-                                        head: None,
-                                    }
+            let pitches: Vec<i32> = found.notes.iter().map(pitch_of).collect();
+            if !pitches.contains(&pitch) {
+                return pitches;
+            }
+        }
+        Vec::new()
+    };
+
+    let voices = staff.bars.iter().map(|b| b.voices.len()).max().unwrap_or(0);
+    // How the last beat of each voice was written, for the notes tied to it.
+    let mut held: Vec<Vec<(i32, Name)>> = vec![Vec::new(); voices];
+    let mut bars = Vec::with_capacity(staff.bars.len());
+    for (b, (bar, master)) in staff.bars.iter().zip(masters).enumerate() {
+        let key = master.key_signature;
+        let in_key = key_alters(key);
+        // Signs already written in this bar, by diatonic step.
+        let mut written: Vec<(i32, i8)> = Vec::new();
+        let mut spelled_bar = Vec::with_capacity(bar.voices.len());
+        for (v, voice) in bar.voices.iter().enumerate() {
+            let mut spelled_voice = Vec::with_capacity(voice.beats.len());
+            for (i, beat) in voice.beats.iter().enumerate() {
+                let pitches: Vec<i32> = beat.notes.iter().map(pitch_of).collect();
+                let mut chosen: Vec<Option<Name>> = Vec::with_capacity(pitches.len());
+                let mut open: Vec<Open> = Vec::new();
+                for (note, &pitch) in beat.notes.iter().zip(&pitches) {
+                    // A tied note is the note it is tied to, however that was written.
+                    let tied = (held[v].iter().filter(|_| note.tied))
+                        .find(|(p, _)| *p == pitch)
+                        .map(|(_, name)| *name);
+                    chosen.push(tied.or_else(|| match names(pitch, &in_key) {
+                        (name, None) => Some(name),
+                        (_, Some(_)) if open.iter().any(|o| o.pitch == pitch) => None,
+                        (sharp, Some(flat)) => {
+                            let towards = |up: bool, down: bool| (up != down).then_some(up);
+                            let next = beside(pitch, v, b, i, true);
+                            let last = beside(pitch, v, b, i, false);
+                            let before = || {
+                                written.iter().rev().find_map(|&(step, alter)| match alter {
+                                    1 if step == step_of(pitch, sharp) => Some(true),
+                                    -1 if step == step_of(pitch, flat) => Some(false),
+                                    _ => None,
                                 })
-                                .collect()
-                        })
-                        .collect()
-                })
-                .collect()
-        })
-        .collect()
+                            };
+                            let prefers_sharp =
+                                towards(next.contains(&(pitch + 1)), next.contains(&(pitch - 1)))
+                                    .or_else(|| {
+                                        let rose = last.contains(&(pitch - 1));
+                                        towards(rose, last.contains(&(pitch + 1)))
+                                    })
+                                    .or_else(before)
+                                    .unwrap_or(key >= 0);
+                            open.push(Open {
+                                pitch,
+                                sharp,
+                                flat,
+                                prefers_sharp,
+                            });
+                            None
+                        }
+                    }));
+                }
+                let fixed: Vec<(i32, i32)> = (pitches.iter().zip(&chosen))
+                    .filter_map(|(&pitch, name)| Some((pitch, step_of(pitch, (*name)?))))
+                    .collect();
+                let sharps = weigh(&open, &fixed);
+
+                let mut names = Vec::with_capacity(pitches.len());
+                let mut spelled_beat = Vec::with_capacity(pitches.len());
+                for ((note, &pitch), name) in beat.notes.iter().zip(&pitches).zip(chosen) {
+                    let name = name.unwrap_or_else(|| {
+                        let found = open.iter().zip(&sharps).find(|(o, _)| o.pitch == pitch);
+                        match found {
+                            Some((o, true)) => o.sharp,
+                            Some((o, false)) => o.flat,
+                            None => (0, 0),
+                        }
+                    });
+                    let (step, alter) = name;
+                    let diatonic = step_of(pitch, name);
+                    let current = (written.iter().rev())
+                        .find(|(d, _)| *d == diatonic)
+                        .map_or(in_key[step as usize], |(_, a)| *a);
+                    let changed = alter != current && !note.tied;
+                    if changed {
+                        written.push((diatonic, alter));
+                    }
+                    names.push((pitch, name));
+                    spelled_beat.push(Spelled {
+                        position: diatonic - middle,
+                        accidental: changed.then(|| Accidental::of(alter)),
+                        head: None,
+                    });
+                }
+                held[v] = names;
+                spelled_voice.push(spelled_beat);
+            }
+            spelled_bar.push(spelled_voice);
+        }
+        bars.push(spelled_bar);
+    }
+    bars
 }
 
 /// A drum staff redrawn with the feet apart from the hands.
@@ -315,6 +475,31 @@ pub(crate) fn accidental_leads(bar: &SpelledBar) -> Vec<Vec<f64>> {
         .collect()
 }
 
+/// How far a beam falls from its first stem to its last, given the staff position of the
+/// note each stem ends beyond and how far apart the two stems are. A beam leans the way
+/// its notes go, a quarter of a space for each step between the first and the last. It
+/// stays level when they are on the same step, and when a note between them reaches
+/// further towards the beam than either, so that the group has no one direction.
+fn beam_fall(ends: &[i32], stem: Stem, run: f64) -> f64 {
+    let (Some(&first), Some(&last)) = (ends.first(), ends.last()) else {
+        return 0.0;
+    };
+    let inner = &ends[1..ends.len() - 1];
+    let beyond = match stem {
+        Stem::Up => inner.iter().any(|&p| p > first.max(last)),
+        Stem::Down => inner.iter().any(|&p| p < first.min(last)),
+    };
+    if beyond {
+        return 0.0;
+    }
+    let steps = f64::from(last - first);
+    let slant = (steps.abs() * SPACE / 4.0)
+        .min(BEAM_SLANT)
+        .min(run * BEAM_SLOPE);
+    // Higher on the staff is further up the page.
+    -steps.signum() * slant
+}
+
 fn y_of(position: i32) -> f64 {
     -f64::from(position) * SPACE / 2.0
 }
@@ -391,7 +576,7 @@ pub(crate) fn draw_time(ts: TimeSignature, x: f64, mid: f64, items: &mut Vec<Ite
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Stem {
     Up,
     Down,
@@ -429,6 +614,9 @@ pub(crate) struct Notation<'a> {
     /// On a drum staff split into hands and feet, where the feet's beats stand; see
     /// [`Split::feet`].
     pub feet: Option<&'a [Option<Vec<Option<usize>>>]>,
+    /// Whether to draw here what a tab staff would write on its strings, because the
+    /// track has none in this view: slides, and bends with [`Notation::draw_bends`].
+    pub string_marks: bool,
 }
 
 /// Vertical space a staff's music takes, relative to its middle line.
@@ -473,6 +661,56 @@ impl Notation<'_> {
         (self.staff.bars.get(bar))
             .and_then(|b| b.voices.get(voice))
             .map_or(&[], |v| &v.beats)
+    }
+
+    /// Draws the bends of the line, each from its notehead up into the lane centred on
+    /// `lane`, as the tab staff would from its fret number.
+    pub fn draw_bends(&self, lane: f64, items: &mut Vec<Item>) {
+        let Some(spelled) = self.spelled.filter(|_| self.string_marks) else {
+            return;
+        };
+        let bars = (spelled.iter().enumerate()).take(self.end).skip(self.first);
+        for (bar, voices) in bars {
+            for (voice, placed) in voices.iter().enumerate() {
+                for (index, (beat, placed)) in self.beats(bar, voice).iter().zip(placed).enumerate()
+                {
+                    let Some(x) = self.x(bar, voice, index) else {
+                        continue;
+                    };
+                    let room = match self.x(bar, voice, index + 1) {
+                        Some(next) if next > x => next - x,
+                        _ => self.bars[bar].x + self.bars[bar].w - x,
+                    };
+                    for (note, placed) in beat.notes.iter().zip(placed) {
+                        if let Some(bend) = &note.effects.bend {
+                            let y = y_of(placed.position);
+                            crate::tab::draw_bend(bend, x, y, HEAD_HALF, lane, room, items);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// The note a slide from `note` arrives at: the one on the same string in the next
+    /// beat. Returns its place on the staff, whether it has a sign before it, and its x
+    /// if it is on this line.
+    fn slide_target(
+        &self,
+        bar: usize,
+        voice: usize,
+        index: usize,
+        note: &Note,
+    ) -> Option<(i32, bool, Option<f64>)> {
+        let (bar, index) = match index + 1 < self.beats(bar, voice).len() {
+            true => (bar, index + 1),
+            false => (bar + 1, 0),
+        };
+        let n = (self.beats(bar, voice).get(index)?.notes.iter())
+            .position(|other| other.string == note.string)?;
+        let placed = self.spelled?.get(bar)?.get(voice)?.get(index)?.get(n)?;
+        let x = self.x(bar, voice, index).filter(|_| bar < self.end);
+        Some((placed.position, placed.accidental.is_some(), x))
     }
 
     fn x(&self, bar: usize, voice: usize, beat: usize) -> Option<f64> {
@@ -563,9 +801,9 @@ impl Notation<'_> {
                         end += 1;
                     }
                 }
-                let (edge, stem) = self.draw_group(bar, voice, start..end, forced, items, extent);
-                for slot in &mut edges[start..end] {
-                    *slot = edge.map(|y| (y, stem));
+                let (ends, stem) = self.draw_group(bar, voice, start..end, forced, items, extent);
+                for (slot, y) in edges[start..end].iter_mut().zip(ends) {
+                    *slot = Some((y, stem));
                 }
             }
             start = end;
@@ -648,7 +886,7 @@ impl Notation<'_> {
     }
 
     /// Draws a run of notes that share a beam, or a single note. Returns the y at which
-    /// the stems end, if they have stems, and the way they point.
+    /// each stem ends, if they have stems, and the way they point.
     fn draw_group(
         &self,
         bar: usize,
@@ -657,7 +895,7 @@ impl Notation<'_> {
         forced: Option<Stem>,
         items: &mut Vec<Item>,
         extent: &mut Extent,
-    ) -> (Option<f64>, Stem) {
+    ) -> (Vec<f64>, Stem) {
         let beats = &self.beats(bar, voice)[range.clone()];
         let chords: Vec<Chord> = range.clone().map(|i| self.chord(bar, voice, i)).collect();
 
@@ -675,16 +913,37 @@ impl Notation<'_> {
             .max()
             .unwrap_or(0);
         let length = STEM + f64::from(deepest.saturating_sub(2)) * BEAM_PITCH;
-        // Every stem in the group ends on the same level, and reaches the middle line.
-        let edge = match stem {
-            Stem::Up => (y_of(highest) - length).min(0.0),
-            Stem::Down => (y_of(lowest) + length).max(0.0),
-        };
         let stemmed = beats[0].duration.value != NoteValue::Whole;
         let stem_x = |chord: &Chord| match stem {
             Stem::Up => chord.x + HEAD_HALF - 0.6,
             Stem::Down => chord.x - HEAD_HALF + 0.6,
         };
+
+        // The stems end on one line, the beam's, which leans the way the notes go. It is
+        // placed so that no stem is shorter than it should be and all of them reach the
+        // middle line of the staff.
+        let xs: Vec<f64> = chords.iter().map(stem_x).collect();
+        let ends: Vec<i32> = (chords.iter())
+            .map(|chord| match stem {
+                Stem::Up => chord.highest(),
+                Stem::Down => chord.lowest(),
+            })
+            .collect();
+        let run = xs[xs.len() - 1] - xs[0];
+        let slope = match run > 0.0 {
+            true => beam_fall(&ends, stem, run) / run,
+            false => 0.0,
+        };
+        let lean = |x: f64| slope * (x - xs[0]);
+        let reach = (xs.iter().zip(&ends)).map(|(&x, &end)| match stem {
+            Stem::Up => (y_of(end) - length).min(0.0) - lean(x),
+            Stem::Down => (y_of(end) + length).max(0.0) - lean(x),
+        });
+        let start = match stem {
+            Stem::Up => reach.fold(f64::INFINITY, f64::min),
+            Stem::Down => reach.fold(f64::NEG_INFINITY, f64::max),
+        };
+        let edge = |x: f64| start + lean(x);
 
         for (offset, (chord, beat)) in chords.iter().zip(beats).enumerate() {
             self.draw_chord(
@@ -702,11 +961,13 @@ impl Notation<'_> {
                     Stem::Up => y_of(chord.lowest()) - 1.0,
                     Stem::Down => y_of(chord.highest()) + 1.0,
                 };
-                let x = stem_x(chord);
-                items.push(Item::line(x, from, x, edge, 1.2, Color::Ink));
+                let x = xs[offset];
+                let to = edge(x);
+                items.push(Item::line(x, from, x, to, 1.2, Color::Ink));
+                extent.include(to);
                 // Tremolo picking: slashes across the stem.
                 let slashes = beat.effects.tremolo.map_or(0, |v| v.flags());
-                let middle = (from + edge) / 2.0;
+                let middle = (from + to) / 2.0;
                 for slash in 0..slashes {
                     let y = middle + 4.0 * (f64::from(slash) - f64::from(slashes - 1) / 2.0);
                     items.push(Item::line(
@@ -721,25 +982,26 @@ impl Notation<'_> {
             }
         }
         if !stemmed {
-            return (None, stem);
+            return (Vec::new(), stem);
         }
-        extent.include(edge);
+        let stem_ends = xs.iter().map(|&x| edge(x)).collect();
 
-        if let [chord] = chords.as_slice() {
+        if chords.len() == 1 {
             // A note on its own carries flags instead of a beam.
             let count = beats[0].duration.value.flags();
             if count > 0 {
                 let code = FLAG_8TH_UP + 2 * (count - 1) + u32::from(stem == Stem::Down);
-                items.push(left(glyph(stem_x(chord) - 0.6, edge, code)));
+                items.push(left(glyph(xs[0] - 0.6, edge(xs[0]), code)));
             }
-            return (Some(edge), stem);
+            return (stem_ends, stem);
         }
         for level in 1..=deepest {
             let reaches = |i: usize| beats[i].duration.value.flags() >= level;
             let step = f64::from(level - 1) * BEAM_PITCH;
-            let y = match stem {
-                Stem::Up => edge + step,
-                Stem::Down => edge - BEAM_THICKNESS - step,
+            // Top edge of this level's beam where the stem at `x` meets it.
+            let top = |x: f64| match stem {
+                Stem::Up => edge(x) + step,
+                Stem::Down => edge(x) - BEAM_THICKNESS - step,
             };
             let mut start = 0;
             while start < beats.len() {
@@ -751,18 +1013,18 @@ impl Notation<'_> {
                 while end < beats.len() && reaches(end) {
                     end += 1;
                 }
-                let first = stem_x(&chords[start]);
-                let (x, w) = match end - start {
+                let (from, to) = match end - start {
                     // A lone short note gets a stub pointing into the group.
-                    1 if start == 0 => (first, 7.0),
-                    1 => (first - 7.0, 7.0),
-                    _ => (first, stem_x(&chords[end - 1]) - first),
+                    1 if start == 0 => (xs[start], xs[start] + 7.0),
+                    1 => (xs[start] - 7.0, xs[start]),
+                    _ => (xs[start], xs[end - 1]),
                 };
-                items.push(Item::rect(x - 0.6, y, w + 1.2, BEAM_THICKNESS, Color::Ink));
+                let (from, to) = (from - 0.6, to + 0.6);
+                items.push(Item::beam(from, top(from), to, top(to), BEAM_THICKNESS));
                 start = end;
             }
         }
-        (Some(edge), stem)
+        (stem_ends, stem)
     }
 
     /// Draws a chord's noteheads and everything attached to them: ledger lines,
@@ -921,6 +1183,46 @@ impl Notation<'_> {
                 });
                 extent.include(curve_y - bulge * 2.0);
             }
+            if let (Some(slide), true) = (effects.slide, self.string_marks && !slash) {
+                // Slides, as the tab has them: a line to the note slid to, or a short one
+                // into or out of this note. They start clear of the dots and stop clear
+                // of the signs.
+                let dots = f64::from(beat.duration.dots.min(2));
+                let after = right + if dots > 0.0 { 5.0 + 4.0 * dots } else { 2.0 };
+                let before = left_edge
+                    - if spelled.accidental.is_some() {
+                        13.0
+                    } else {
+                        2.0
+                    };
+                let (from, to) = match slide {
+                    Slide::Shift | Slide::Legato => {
+                        let target = self.slide_target(bar, voice, index, note);
+                        match target {
+                            Some((position, sign, Some(to_x))) => {
+                                // Along the line from one head to the other.
+                                let stop = to_x - HEAD_HALF - if sign { 13.0 } else { 2.0 };
+                                let stop = stop.max(after + 4.0);
+                                let slope = (y_of(position) - y) / (to_x - x).max(1.0);
+                                let along = |at: f64| (at, y + slope * (at - x));
+                                (along(after), along(stop))
+                            }
+                            // The note slid to is on the next line, or there is none.
+                            Some((position, ..)) => {
+                                let lean = f64::from((position - spelled.position).signum());
+                                let stop = self.bars[bar].x + self.bars[bar].w - 3.0;
+                                ((after, y), (stop.max(after + 4.0), y - 3.0 * lean))
+                            }
+                            None => ((after, y), (after + 14.0, y)),
+                        }
+                    }
+                    Slide::InFromBelow => ((before - 8.0, y + 4.0), (before, y)),
+                    Slide::InFromAbove => ((before - 8.0, y - 4.0), (before, y)),
+                    Slide::OutDown => ((after, y), (after + 8.0, y + 4.0)),
+                    Slide::OutUp => ((after, y), (after + 8.0, y - 4.0)),
+                };
+                items.push(Item::line(from.0, from.1, to.0, to.1, 1.1, Color::Ink));
+            }
             if (effects.hammer || effects.slide == Some(Slide::Legato)) && !slash {
                 let next = match self.x(bar, voice, index + 1) {
                     Some(next) => Some(next),
@@ -984,19 +1286,24 @@ mod tests {
 
     #[test]
     fn accidentals_follow_the_key_and_last_for_the_bar() {
-        // F sharp, F sharp again, F natural, then F natural again, in C major.
-        let notes = spelled_in(0, &[(0, 2), (0, 2), (0, 1), (0, 1)]);
+        // F sharp, F sharp again, G, F natural, then F natural again, in C major.
+        let notes = spelled_in(0, &[(0, 2), (0, 2), (0, 3), (0, 1), (0, 1)]);
         let signs: Vec<_> = notes.iter().map(|n| n.accidental).collect();
         assert_eq!(
             signs,
             [
                 Some(Accidental::Sharp),
                 None,
+                None,
                 Some(Accidental::Natural),
                 None
             ]
         );
-        assert!(notes.iter().all(|n| n.position == notes[0].position));
+        let on_f = [0, 1, 3, 4].map(|i| notes[i].position);
+        assert!(
+            on_f.iter()
+                .all(|p| *p == on_f[0] && *p + 1 == notes[2].position)
+        );
 
         // In G major the F sharp is in the key and it is the natural that needs a sign.
         let notes = spelled_in(1, &[(0, 2), (0, 1)]);
@@ -1009,6 +1316,88 @@ mod tests {
         assert_eq!(flat[0].position, sharp[0].position + 1);
         assert_eq!(flat[0].accidental, None);
         assert_eq!(sharp[0].accidental, Some(Accidental::Sharp));
+    }
+
+    /// The notes of one bar in C major as letters, each beat a chord of `(string, fret)`.
+    fn letters(beats: &[&[(u8, u8)]], tied: &[usize]) -> Vec<String> {
+        let mut staff = staff_of(&[]);
+        staff.bars[0].voices[0].beats = (beats.iter().enumerate())
+            .map(|(i, notes)| {
+                let mut notes: Vec<Note> = notes.iter().map(|&(s, f)| Note::new(s, f)).collect();
+                notes.iter_mut().for_each(|n| n.tied = tied.contains(&i));
+                Beat::new(Duration::new(NoteValue::Eighth), notes)
+            })
+            .collect();
+        let master = MasterBar::new(TimeSignature::COMMON);
+        let bars = spell(&staff, Clef::Treble, 12, &[master], &[]);
+        // Steps are counted from the B on the middle line.
+        let letter = |n: &Spelled| {
+            let name = b"CDEFGAB"[(n.position + 6).rem_euclid(7) as usize] as char;
+            match n.accidental {
+                Some(Accidental::Sharp) => format!("{name}#"),
+                Some(Accidental::Flat) => format!("{name}b"),
+                Some(Accidental::Natural) => format!("{name}n"),
+                None => name.to_string(),
+            }
+        };
+        (bars[0][0].iter())
+            .map(|beat| beat.iter().map(letter).collect::<Vec<_>>().join(" "))
+            .collect()
+    }
+
+    #[test]
+    fn accidentals_follow_the_line_and_the_chord() {
+        // Up the B string by semitones and down again: sharps going up, flats coming down.
+        let line: Vec<&[(u8, u8)]> = vec![
+            &[(1, 1)],
+            &[(1, 2)],
+            &[(1, 3)],
+            &[(1, 4)],
+            &[(1, 5)],
+            &[(1, 4)],
+            &[(1, 3)],
+            &[(1, 2)],
+            &[(1, 1)],
+        ];
+        assert_eq!(
+            letters(&line, &[]),
+            ["C", "C#", "D", "D#", "E", "Eb", "Dn", "Db", "Cn"]
+        );
+        // A note that is repeated before it moves is spelled by where it goes in the end,
+        // and one that ends the line by where it came from.
+        assert_eq!(
+            letters(&[&[(2, 3)], &[(2, 3)], &[(2, 2)], &[(2, 1)]], &[]),
+            ["Bb", "B", "A", "Ab"]
+        );
+        // A leap says nothing, so the key decides, and the note stays as it was written.
+        assert_eq!(
+            letters(&[&[(2, 3)], &[(0, 0)], &[(2, 3)], &[(1, 3)]], &[]),
+            ["A#", "E", "A", "D"]
+        );
+
+        // E major, then A flat major, on the top three strings: the same pitch is a G
+        // sharp over an E and an A flat under a C, and the chord outweighs the line.
+        let chords: Vec<&[(u8, u8)]> = vec![&[(0, 0), (1, 0), (2, 1)], &[(0, 4), (1, 1), (2, 8)]];
+        assert_eq!(letters(&chords, &[]), ["E B G#", "Ab C Eb"]);
+        // Two notes a semitone apart never share a line: C sharp against a C is a D flat.
+        assert_eq!(letters(&[&[(1, 1), (2, 6)]], &[]), ["C Db"]);
+        // A tied note keeps the name of the note it is tied to, and needs no sign: a G
+        // sharp held over from an E is still one when a C comes in under it.
+        assert_eq!(
+            letters(&[&[(0, 4), (1, 5)], &[(0, 4), (1, 1)]], &[1]),
+            ["G# E", "G C"]
+        );
+    }
+
+    #[test]
+    fn sharp_keys_have_their_own_names_for_the_white_keys() {
+        // F sharp major: the F on the top string is the key's E sharp, written without a
+        // sign on the E's space, a step under the F sharp. The open E is what needs one.
+        let notes = spelled_in(6, &[(0, 1), (0, 2), (0, 0)]);
+        assert_eq!(notes[1].position, notes[0].position + 1);
+        assert_eq!(notes[2].position, notes[0].position);
+        let signs: Vec<_> = notes.iter().map(|n| n.accidental).collect();
+        assert_eq!(signs, [None, None, Some(Accidental::Natural)]);
     }
 
     #[test]

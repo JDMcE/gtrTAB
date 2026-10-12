@@ -100,10 +100,21 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
     });
 
     let mut tracks = Vec::new();
+    // For each track that is a drum kit, the General MIDI number each of its articulations
+    // sounds: a note on such a track says which articulation it is by its place in this list.
+    let mut kits: Vec<Option<Vec<u8>>> = Vec::new();
     for node in child(root, "Tracks").into_iter().flat_map(|t| t.children()) {
         if !node.has_tag_name("Track") {
             continue;
         }
+        let kit = child(node, "InstrumentSet")
+            .filter(|set| text(*set, "Type") == "drumKit")
+            .map(|set| {
+                (set.descendants())
+                    .filter(|n| n.has_tag_name("Articulation"))
+                    .map(|a| text(a, "OutputMidiNumber").parse().unwrap_or(0))
+                    .collect::<Vec<u8>>()
+            });
         // Guitar Pro 7 nests properties in <Staff> elements; older files put one set of
         // properties on the track itself.
         let staff_nodes: Vec<Node> = match child(node, "Staves") {
@@ -124,6 +135,14 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
                     .filter_map(|p| p.parse().ok())
                     .rev()
                     .collect::<Vec<u8>>();
+                if kit.is_some() {
+                    // A drum track's lines have no pitch, as in the older format.
+                    return Staff {
+                        tuning: gtr_model::Tuning::new(vec![0; DRUM_LINES]),
+                        capo: 0,
+                        bars: Vec::new(),
+                    };
+                }
                 skipped.add_if(pitches.is_empty(), "percussion and untuned tracks");
                 Staff {
                     tuning: tuning(pitches),
@@ -138,11 +157,12 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         let program = (node.descendants())
             .find(|n| n.has_tag_name("Program"))
             .and_then(|n| n.text()?.trim().parse::<u8>().ok());
-        tracks.push(Track::new(
-            text(node, "Name"),
-            program.map_or_else(Instrument::default, Instrument::from_midi_program),
-            staves,
-        ));
+        let instrument = match kit {
+            Some(_) => Instrument::Drums,
+            None => program.map_or_else(Instrument::default, Instrument::from_midi_program),
+        };
+        tracks.push(Track::new(text(node, "Name"), instrument, staves));
+        kits.push(kit);
     }
 
     let mut master_bars = Vec::new();
@@ -188,6 +208,18 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             .filter(|name| !name.is_empty())
             .map(|name| name.chars().take(120).collect());
         if let Some(directions) = child(node, "Directions") {
+            // A bar here has one sign and one jump: the first of each.
+            let several = |name| {
+                directions
+                    .children()
+                    .filter(|n| n.has_tag_name(name))
+                    .count()
+                    > 1
+            };
+            skipped.add_if(
+                several("Target") || several("Jump"),
+                "all but the first sign and jump on a bar",
+            );
             master.target = match text(directions, "Target") {
                 "Segno" | "SegnoSegno" => Some(Target::Segno),
                 "Coda" | "DoubleCoda" => Some(Target::Coda),
@@ -221,7 +253,9 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
 
         // One bar id per staff, in track order.
         let mut ids = text(node, "Bars").split_whitespace();
-        for staff in tracks.iter_mut().flat_map(|t| &mut t.staves) {
+        let staves = (tracks.iter_mut().zip(&kits))
+            .flat_map(|(track, kit)| track.staves.iter_mut().map(move |s| (s, kit.as_deref())));
+        for (staff, kit) in staves {
             let voice_ids = ids
                 .next()
                 .and_then(|id| bars.get(id))
@@ -234,7 +268,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
                     let nodes = text(*voice, "Beats")
                         .split_whitespace()
                         .filter_map(|id| beats.get(id).copied());
-                    read_voice(nodes, &notes, &rhythms, staff, skipped)
+                    read_voice(nodes, &notes, &rhythms, staff, kit, skipped)
                 })
                 .collect();
             staff.bars.push(bar(read_voices));
@@ -254,11 +288,15 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
 
 /// Reads the beats of a voice. Grace notes are stored as beats of their own before the beat
 /// they decorate; the model attaches them to that beat's notes instead.
+/// Lines a drum staff is given.
+const DRUM_LINES: usize = 5;
+
 fn read_voice<'a>(
     nodes: impl Iterator<Item = Node<'a, 'a>>,
     notes: &HashMap<&str, Node>,
     rhythms: &HashMap<&str, Node>,
     staff: &Staff,
+    kit: Option<&[u8]>,
     skipped: &mut Skipped,
 ) -> Voice {
     let mut beats = Vec::new();
@@ -266,7 +304,7 @@ fn read_voice<'a>(
     // beat and whether it is hammered.
     let mut graces: Vec<(GraceNote, bool, bool)> = Vec::new();
     for node in nodes {
-        let mut beat = read_beat(node, notes, rhythms, staff, skipped);
+        let mut beat = read_beat(node, notes, rhythms, staff, kit, skipped);
         if let Some(kind) = child(node, "GraceNotes") {
             let on_beat = kind.text().map(str::trim) == Some("OnBeat");
             graces.extend(beat.notes.iter().map(|n| {
@@ -322,6 +360,7 @@ fn read_beat(
     notes: &HashMap<&str, Node>,
     rhythms: &HashMap<&str, Node>,
     staff: &Staff,
+    kit: Option<&[u8]>,
     skipped: &mut Skipped,
 ) -> Beat {
     skipped.add_if(child(node, "Chord").is_some(), "chord names");
@@ -370,7 +409,29 @@ fn read_beat(
     let read_notes = text(node, "Notes")
         .split_whitespace()
         .filter_map(|id| notes.get(id))
-        .filter_map(|note| {
+        .enumerate()
+        .filter_map(|(line, note)| {
+            if let Some(kit) = kit {
+                // The piece of the kit is the note's fret, as on any drum staff here, and
+                // the notes of a beat take its lines from the top.
+                let piece = (text(*note, "InstrumentArticulation").parse::<usize>().ok())
+                    .and_then(|index| kit.get(index).copied())
+                    .filter(|piece| (1..=Instrument::Drums.max_fret()).contains(piece));
+                skipped.add_if(
+                    piece.is_none(),
+                    "percussion that is not in the General MIDI kit",
+                );
+                skipped.add_if(
+                    line >= string_count,
+                    "more drums at once than a staff has lines",
+                );
+                return Some(Note {
+                    string: line as u8,
+                    fret: piece?,
+                    tied: false,
+                    effects: read_note_effects(*note),
+                });
+            }
             let fret: u8 = text(property(*note, "Fret")?, "Fret").parse().ok()?;
             // Strings are numbered from the lowest; the model counts from the highest.
             let from_low: usize = text(property(*note, "String")?, "String").parse().ok()?;

@@ -93,11 +93,13 @@ impl Timbre {
 
     /// How much louder than a bank has it this sound is played from samples. A driven
     /// guitar is recorded no louder than a clean one, but in a band it is the loud one, as
-    /// its model is.
+    /// its model is; and a sampled bass is brought down towards its model, which it
+    /// would otherwise be three times as loud as.
     pub fn sample_trim(self) -> f32 {
         match self {
-            Timbre::Distortion => 2.5,
+            Timbre::Distortion => 2.0,
             Timbre::Overdrive => 1.3,
+            Timbre::Bass => 0.8,
             _ => 1.0,
         }
     }

@@ -1,0 +1,282 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="988" viewBox="0 0 1000 988">
+<style>@font-face { font-family: Bravura; src: url("../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="988" fill="#ffffff"/>
+<line x1="36" y1="934" x2="380" y2="934" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="921" x2="380" y2="921" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="908" x2="380" y2="908" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="895" x2="380" y2="895" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="882" x2="380" y2="882" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="839" x2="380" y2="839" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="830" x2="380" y2="830" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="821" x2="380" y2="821" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="812" x2="380" y2="812" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="803" x2="380" y2="803" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="687" x2="380" y2="687" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="678" x2="380" y2="678" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="669" x2="380" y2="669" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="660" x2="380" y2="660" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="651" x2="380" y2="651" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="596.5" x2="380" y2="596.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="587.5" x2="380" y2="587.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="578.5" x2="380" y2="578.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="569.5" x2="380" y2="569.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="560.5" x2="380" y2="560.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="485" x2="380" y2="485" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="472" x2="380" y2="472" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="459" x2="380" y2="459" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="446" x2="380" y2="446" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="412" x2="380" y2="412" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="403" x2="380" y2="403" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="394" x2="380" y2="394" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="385" x2="380" y2="385" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="376" x2="380" y2="376" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="314" x2="380" y2="314" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="301" x2="380" y2="301" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="288" x2="380" y2="288" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="275" x2="380" y2="275" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="262" x2="380" y2="262" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="249" x2="380" y2="249" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="192.5" x2="380" y2="192.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="183.5" x2="380" y2="183.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="174.5" x2="380" y2="174.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="165.5" x2="380" y2="165.5" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="156.5" x2="380" y2="156.5" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Band</text>
+<text x="36" y="115" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Guitar</text>
+<line x1="114.7" y1="219.5" x2="131.3" y2="219.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="114.7" y1="210.5" x2="131.3" y2="210.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="114.7" y1="201.5" x2="131.3" y2="201.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="123" y="192.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="123" y="206" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="123" y="224" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="223" x2="127.7" y2="161" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="134.7" y1="219.5" x2="151.3" y2="219.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="134.7" y1="210.5" x2="151.3" y2="210.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="134.7" y1="201.5" x2="151.3" y2="201.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="143" y="192.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="143" y="206" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="143" y="224" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="147.7" y1="223" x2="147.7" y2="161" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="127.1,161 148.3,161 148.3,165 127.1,165" fill="#1b1b1f"/>
+<line x1="171.7" y1="219.5" x2="188.3" y2="219.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="171.7" y1="210.5" x2="188.3" y2="210.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="171.7" y1="201.5" x2="188.3" y2="201.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="180" y="188" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="169.2" y="188" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="180" y="201.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="161.2" y="201.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="180" y="219.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="169.2" y="219.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="184.7" y1="218.5" x2="184.7" y2="156.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="220.7" y1="210.5" x2="237.3" y2="210.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="220.7" y1="201.5" x2="237.3" y2="201.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="229" y="183.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="229" y="197" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="229" y="215" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="233.7" y1="214" x2="233.7" y2="152" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="316.7" y1="219.5" x2="333.3" y2="219.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="316.7" y1="210.5" x2="333.3" y2="210.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="316.7" y1="201.5" x2="333.3" y2="201.5" stroke="#1b1b1f" stroke-width="1"/>
+<text x="325" y="192.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="325" y="206" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="325" y="224" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="41" y="183.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="165.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="183.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="304" y1="156.5" x2="304" y2="192.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="156.5" x2="380" y2="192.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="156.5" x2="375" y2="192.5" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="156.5" width="3" height="36" fill="#1b1b1f"/>
+<rect x="117.9" y="282.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="123" y="288" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="117.9" y="295.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="123" y="301" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="117.9" y="308.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="123" y="314" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="137.9" y="282.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="143" y="288" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="137.9" y="295.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="143" y="301" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="137.9" y="308.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="143" y="314" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="174.9" y="282.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="180" y="288" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">4</text>
+<rect x="174.9" y="295.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="180" y="301" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">4</text>
+<rect x="174.9" y="308.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="180" y="314" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="223.9" y="282.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="229" y="288" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">5</text>
+<rect x="223.9" y="295.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="229" y="301" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">5</text>
+<rect x="223.9" y="308.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="229" y="314" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">3</text>
+<rect x="319.9" y="282.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="325" y="288" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="319.9" y="295.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="325" y="301" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="319.9" y="308.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="325" y="314" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="43.6" y="262.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="268.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="275.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="281.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="288.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="294.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<line x1="304" y1="249" x2="304" y2="314" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="249" x2="380" y2="314" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="249" x2="375" y2="314" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="249" width="3" height="65" fill="#1b1b1f"/>
+<text x="75" y="147.5" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="307" y="147.5" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">2</text>
+<text x="36" y="349" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Bass</text>
+<line x1="114.7" y1="421" x2="131.3" y2="421" stroke="#1b1b1f" stroke-width="1"/>
+<text x="123" y="421" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="420" x2="127.7" y2="389.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="180" y="416.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="169.2" y="416.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="184.7" y1="415.5" x2="184.7" y2="385" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="229" y="412" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="233.7" y1="411" x2="233.7" y2="380.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="316.7" y1="421" x2="333.3" y2="421" stroke="#1b1b1f" stroke-width="1"/>
+<text x="325" y="421" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="41" y="385" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="385" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="403" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="304" y1="376" x2="304" y2="412" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="376" x2="380" y2="412" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="376" x2="375" y2="412" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="376" width="3" height="36" fill="#1b1b1f"/>
+<rect x="117.9" y="479.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="123" y="485" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="174.9" y="479.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="180" y="485" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">2</text>
+<rect x="223.9" y="479.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="229" y="485" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">3</text>
+<rect x="319.9" y="479.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="325" y="485" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="43.6" y="446.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="452.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="459.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="465.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="472.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="478.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<line x1="304" y1="446" x2="304" y2="485" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="446" x2="380" y2="485" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="446" x2="375" y2="485" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="446" width="3" height="39" fill="#1b1b1f"/>
+<text x="36" y="520" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Piano</text>
+<text x="123" y="578.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="123" y="587.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="123" y="596.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="595.5" x2="127.7" y2="547" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="229" y="569.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="229" y="578.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="218.2" y="578.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="229" y="587.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="224.3" y1="570.5" x2="224.3" y2="619" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="41" y="587.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="569.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="587.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="304" y1="560.5" x2="304" y2="596.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="560.5" x2="380" y2="596.5" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="560.5" x2="375" y2="596.5" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="560.5" width="3" height="36" fill="#1b1b1f"/>
+<line x1="114.7" y1="696" x2="131.3" y2="696" stroke="#1b1b1f" stroke-width="1"/>
+<text x="123" y="696" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="695" x2="127.7" y2="664.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="229" y="687" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="233.7" y1="686" x2="233.7" y2="655.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="41" y="660" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="660" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="678" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="304" y1="651" x2="304" y2="687" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="651" x2="380" y2="687" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="651" x2="375" y2="687" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="651" width="3" height="36" fill="#1b1b1f"/>
+<rect x="30" y="560.5" width="3" height="126.5" fill="#1b1b1f"/>
+<line x1="31.5" y1="560.5" x2="37" y2="556.5" stroke="#1b1b1f" stroke-width="1.4"/>
+<line x1="31.5" y1="687" x2="37" y2="691" stroke="#1b1b1f" stroke-width="1.4"/>
+<text x="36" y="740" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Drums</text>
+<text x="123" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="127.7" y1="797.5" x2="127.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="143" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="147.7" y1="797.5" x2="147.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="127.1,767 148.3,767 148.3,771 127.1,771" fill="#1b1b1f"/>
+<text x="180" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="180" y="816.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="184.7" y1="815.5" x2="184.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="200" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="204.7" y1="797.5" x2="204.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="184.1,767 205.3,767 205.3,771 184.1,771" fill="#1b1b1f"/>
+<text x="229" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="233.7" y1="797.5" x2="233.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="249" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="253.7" y1="797.5" x2="253.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="233.1,767 254.3,767 254.3,771 233.1,771" fill="#1b1b1f"/>
+<text x="269" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="269" y="816.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="273.7" y1="815.5" x2="273.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="289" y="798.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="293.7" y1="797.5" x2="293.7" y2="767" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="273.1,767 294.3,767 294.3,771 273.1,771" fill="#1b1b1f"/>
+<text x="123" y="834.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="118.3" y1="835.5" x2="118.3" y2="866" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="200" y="834.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="195.3" y1="835.5" x2="195.3" y2="866" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="194.7" y="866" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="229" y="834.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="224.3" y1="835.5" x2="224.3" y2="866" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="316.7" y1="794" x2="333.3" y2="794" stroke="#1b1b1f" stroke-width="1"/>
+<text x="325" y="794" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="325" y="834.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="41" y="821" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="812" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="830" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="304" y1="803" x2="304" y2="839" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="803" x2="380" y2="839" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="803" x2="375" y2="839" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="803" width="3" height="36" fill="#1b1b1f"/>
+<rect x="114.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="123" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="114.3" y="928.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="123" y="934" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">36</text>
+<rect x="134.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="143" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="171.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="180" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="171.3" y="902.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="180" y="908" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">38</text>
+<rect x="191.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="200" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="191.3" y="928.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="200" y="934" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">36</text>
+<rect x="220.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="229" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="220.3" y="928.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="229" y="934" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">36</text>
+<rect x="240.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="249" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="260.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="269" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">46</text>
+<rect x="260.3" y="902.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="269" y="908" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">38</text>
+<rect x="280.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="289" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">42</text>
+<rect x="316.3" y="876.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="325" y="882" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">49</text>
+<rect x="316.3" y="928.0" width="17.4" height="12.0" fill="#ffffff"/>
+<text x="325" y="934" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">36</text>
+<rect x="43.6" y="888.5" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="895" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="901.5" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="908" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="914.5" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="921" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<line x1="304" y1="882" x2="304" y2="934" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="380" y1="882" x2="380" y2="934" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="375" y1="882" x2="375" y2="934" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="377" y="882" width="3" height="52" fill="#1b1b1f"/>
+<line x1="36" y1="156.5" x2="36" y2="934" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+</svg>

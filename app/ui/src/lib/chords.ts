@@ -26,18 +26,34 @@ const SPAN = 4;
 /** Highest position looked at. */
 const LAST_POSITION = 12;
 /** Most shapes offered. */
-const LIMIT = 10;
+const LIMIT = 24;
+
+/** What a chord is called: its root and kind, and its bass note after a slash if that is not the root. */
+export function chordName(root: number, suffix: string, bass: number = root): string {
+  return ROOTS[root] + suffix + (bass === root ? '' : `/${ROOTS[bass]}`);
+}
 
 /**
  * Ways to finger a chord, lowest position first. `tuning` gives the open-string pitches
  * from the highest string to the lowest, as the score has them, and each shape lists a fret
  * per string in the same order: 0 for an open string and -1 for one that is not played.
  *
- * A shape has the root in the bass, sounds the strings above it as far as they can take a
- * note of the chord, holds every note of the chord (the fifth may be left out of a chord of
- * four or more notes), and fits in one position, open strings aside.
+ * `bass` is the note the lowest string played sounds. Left out, it is the root. A note of
+ * the chord other than the root gives an inversion, and any other note a slash chord, with
+ * that note under the chord and nowhere else in it.
+ *
+ * A shape has the bass note on its lowest string, sounds the strings above it as far as
+ * they can take a note of the chord, holds every note of the chord (the fifth may be left
+ * out of a chord of four or more notes), and fits in one position, open strings aside. A
+ * position offers a shape from each string the bass note can be on, and for each of those
+ * one that keeps the other strings low in the position and one that takes them high.
  */
-export function chordShapes(tuning: number[], root: number, intervals: number[]): number[][] {
+export function chordShapes(
+  tuning: number[],
+  root: number,
+  intervals: number[],
+  bass: number = root,
+): number[][] {
   const tones = intervals.map((i) => (root + i) % 12);
   const needed = tones.filter((_, i) => !(intervals.length >= 4 && intervals[i] === 7));
   // Work from the lowest string up, the way a chord is built.
@@ -47,55 +63,57 @@ export function chordShapes(tuning: number[], root: number, intervals: number[])
 
   for (let position = 0; position <= LAST_POSITION; position++) {
     const first = Math.max(1, position);
-    /** Frets on a string that give a note of the chord, in this position. */
-    const choices = (string: number) => {
+    /** Frets on a string in this position, with the open string where the hand is near the nut. */
+    const reach = (string: number) => {
       const frets = position <= 3 ? [0] : [];
       for (let fret = first; fret < first + SPAN; fret++) frets.push(fret);
-      return frets.filter((fret) => tones.includes((open[string] + fret) % 12));
+      return frets;
     };
+    const toneAt = (string: number, fret: number) => (open[string] + fret) % 12;
+    /** Frets on a string that give a note of the chord. */
+    const choices = (string: number) => reach(string).filter((f) => tones.includes(toneAt(string, f)));
 
-    for (let bass = 0; bass + 3 <= open.length || (bass === 0 && open.length < 3); bass++) {
-      const rootFret = choices(bass).find((fret) => (open[bass] + fret) % 12 === root);
-      if (rootFret === undefined) continue;
-      const frets: number[] = open.map(() => -1);
-      frets[bass] = rootFret;
-      // Strings above the bass each take a note of the chord; where one cannot, it and
-      // the strings above it are left out.
-      for (let string = bass + 1; string < open.length; string++) {
-        const options = choices(string);
-        if (!options.length) break;
-        frets[string] = options[0];
-      }
-      if (frets.filter((f) => f >= 0).length < Math.max(2, needed.length)) continue;
+    for (let low = 0; low + 3 <= open.length || (low === 0 && open.length < 3); low++) {
+      const bassFret = reach(low).find((fret) => toneAt(low, fret) === bass);
+      if (bassFret === undefined) continue;
+      for (const high of [false, true]) {
+        const frets: number[] = open.map(() => -1);
+        frets[low] = bassFret;
+        // Strings above the bass each take a note of the chord; where one cannot, it and
+        // the strings above it are left out.
+        for (let string = low + 1; string < open.length; string++) {
+          const options = choices(string);
+          if (!options.length) break;
+          frets[string] = options[high ? options.length - 1 : 0];
+        }
+        if (frets.filter((f) => f >= 0).length < Math.max(2, needed.length)) continue;
 
-      // Where a note of the chord is missing, give it a string that doubles another note.
-      const toneOf = (string: number) => (open[string] + frets[string]) % 12;
-      for (const tone of needed) {
-        const sounding = frets.map((f, s) => (f < 0 ? -1 : toneOf(s)));
-        if (sounding.includes(tone)) continue;
-        for (let string = open.length - 1; string > bass; string--) {
-          if (frets[string] < 0) continue;
-          const doubled = sounding.filter((t) => t === sounding[string]).length > 1;
-          const fret = choices(string).find((f) => (open[string] + f) % 12 === tone);
-          if (doubled && fret !== undefined) {
-            frets[string] = fret;
-            break;
+        // Where a note of the chord is missing, give it a string that doubles another note.
+        for (const tone of needed) {
+          const sounding = frets.map((f, s) => (f < 0 ? -1 : toneAt(s, f)));
+          if (sounding.includes(tone)) continue;
+          for (let string = open.length - 1; string > low; string--) {
+            if (frets[string] < 0) continue;
+            const doubled = sounding.filter((t) => t === sounding[string]).length > 1;
+            const fret = choices(string).find((f) => toneAt(string, f) === tone);
+            if (doubled && fret !== undefined) {
+              frets[string] = fret;
+              break;
+            }
           }
         }
-      }
-      const sounding = frets.flatMap((f, s) => (f < 0 ? [] : [toneOf(s)]));
-      if (!needed.every((tone) => sounding.includes(tone))) continue;
+        const sounding = frets.flatMap((f, s) => (f < 0 ? [] : [toneAt(s, f)]));
+        if (!needed.every((tone) => sounding.includes(tone))) continue;
 
-      const shape = [...frets].reverse();
-      const key = shape.join();
-      if (!seen.has(key)) {
-        seen.add(key);
-        shapes.push(shape);
+        const shape = [...frets].reverse();
+        const key = shape.join();
+        if (!seen.has(key)) {
+          seen.add(key);
+          shapes.push(shape);
+        }
       }
-      // One shape per position: the one with the lowest root.
-      break;
     }
     if (shapes.length >= LIMIT) break;
   }
-  return shapes;
+  return shapes.slice(0, LIMIT);
 }

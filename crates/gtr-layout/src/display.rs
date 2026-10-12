@@ -58,6 +58,9 @@ pub struct RowBox {
     pub strings: usize,
     /// The note on the middle line of a staff without strings; see [`Layout::middle`].
     pub middle: Option<i32>,
+    /// X centre of each beat this staff has in the voice being edited, for every bar of
+    /// the line, so that a click on a staff other than the cursor's can find its beat.
+    pub beats: Vec<Vec<f64>>,
 }
 
 #[derive(Debug, Clone, Serialize, ts_rs::TS)]
@@ -138,6 +141,15 @@ pub enum Item {
         y: f64,
         r: f64,
     },
+    /// A beam: a band `h` thick with upright ends, whose top edge runs from `(x1, y1)` to
+    /// `(x2, y2)`.
+    Beam {
+        x1: f64,
+        y1: f64,
+        x2: f64,
+        y2: f64,
+        h: f64,
+    },
     /// A tie: a curve from `(x1, y)` to `(x2, y)` bulging upwards by `h`.
     Arc {
         x1: f64,
@@ -195,6 +207,16 @@ impl Item {
         }
     }
 
+    pub(crate) fn beam(x1: f64, y1: f64, x2: f64, y2: f64, h: f64) -> Item {
+        Item::Beam {
+            x1: r(x1),
+            y1: r(y1),
+            x2: r(x2),
+            y2: r(y2),
+            h,
+        }
+    }
+
     pub(crate) fn curve(x1: f64, y1: f64, cx: f64, cy: f64, x2: f64, y2: f64) -> Item {
         Item::Curve {
             x1: r(x1),
@@ -209,7 +231,7 @@ impl Item {
     /// Moves the item down the page.
     pub(crate) fn shift_y(&mut self, by: f64) {
         match self {
-            Item::Line { y1, y2, .. } => {
+            Item::Line { y1, y2, .. } | Item::Beam { y1, y2, .. } => {
                 *y1 = r(*y1 + by);
                 *y2 = r(*y2 + by);
             }

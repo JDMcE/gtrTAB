@@ -1,0 +1,150 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="478" viewBox="0 0 1000 478">
+<style>@font-face { font-family: Bravura; src: url("../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="478" fill="#ffffff"/>
+<line x1="36" y1="371" x2="608" y2="371" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="362" x2="608" y2="362" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="353" x2="608" y2="353" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="344" x2="608" y2="344" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="335" x2="608" y2="335" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Untitled</text>
+<text x="123" y="339.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="130.3" y1="338.7" x2="143.7" y2="337.1" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="118.3" y1="340.5" x2="118.3" y2="371" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="162" y="335" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="151.2" y="335" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="157.3" y1="336" x2="157.3" y2="366.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="192" y="344" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="176.7" y1="348" x2="184.7" y2="344" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="187.3" y1="345" x2="187.3" y2="375.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="222" y="339.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="229.3" y1="339.5" x2="237.3" y2="343.5" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="217.3" y1="340.5" x2="217.3" y2="371" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="268" y="348.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<path d="M269 340.5 Q283 330.5 297 340.5" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="263.3" y1="349.5" x2="263.3" y2="380" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="298" y="344" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<path d="M299 336 Q313 326 327 336" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="293.3" y1="345" x2="293.3" y2="377.8" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="262.7,376 293.9,373.7 293.9,377.7 262.7,380" fill="#1b1b1f"/>
+<text x="328" y="348.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="323.3" y1="349.5" x2="323.3" y2="384.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="360" y="357.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="355.3" y1="358.5" x2="355.3" y2="389" stroke="#1b1b1f" stroke-width="1.2"/>
+<polygon points="322.7,380.4 355.9,385.1 355.9,389.1 322.7,384.4" fill="#1b1b1f"/>
+<line x1="371.7" y1="326" x2="388.3" y2="326" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="371.7" y1="317" x2="388.3" y2="317" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="371.7" y1="308" x2="388.3" y2="308" stroke="#1b1b1f" stroke-width="1"/>
+<text x="380" y="308" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="375.3" y1="309" x2="375.3" y2="353" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="425" y="339.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="425" y="353" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="416.7" y="353" font-family="system-ui, sans-serif" font-size="12" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">(</text>
+<text x="433.3" y="353" font-family="system-ui, sans-serif" font-size="12" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">)</text>
+<text x="425" y="362" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="414.2" y="362" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="425" y="371" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="429.7" y1="370" x2="429.7" y2="308" stroke="#1b1b1f" stroke-width="1.2"/>
+<text x="469" y="330.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="464.3" y1="331.5" x2="464.3" y2="362" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="548.7" y1="326" x2="565.3" y2="326" stroke="#1b1b1f" stroke-width="1"/>
+<text x="557" y="326" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="552.3" y1="327" x2="552.3" y2="357.5" stroke="#1b1b1f" stroke-width="1.2"/>
+<path d="M168.3 335 Q176.3 335 176.3 263" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="176.3" y1="263" x2="173.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="176.3" y1="263" x2="179.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<path d="M176.3 263 Q189.3 263 189.3 330" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="189.3" y1="330" x2="186.3" y2="325" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="189.3" y1="330" x2="192.3" y2="325" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="176.3" y="256" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">full</text>
+<path d="M475.3 330.5 Q491.3 330.5 491.3 274.3" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="491.3" y1="274.3" x2="488.3" y2="279.3" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="491.3" y1="274.3" x2="494.3" y2="279.3" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="491.3" y="267.3" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">½</text>
+<path d="M491.3 274.3 Q507.3 274.3 507.3 263" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="507.3" y1="263" x2="504.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="507.3" y1="263" x2="510.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="507.3" y="256" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">1½</text>
+<path d="M507.3 263 Q523.3 263 523.3 268.7" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="523.3" y1="268.7" x2="520.3" y2="263.7" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="523.3" y1="268.7" x2="526.3" y2="263.7" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="523.3" y="275.7" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">full</text>
+<path d="M523.3 268.7 Q539.3 268.7 539.3 263" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="539.3" y1="263" x2="536.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="539.3" y1="263" x2="542.3" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="539.3" y="256" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">1½</text>
+<line x1="557" y1="318" x2="557" y2="271.5" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="557" y1="271.5" x2="554" y2="276.5" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="557" y1="271.5" x2="560" y2="276.5" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="557" y="264.5" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">½</text>
+<path d="M557 271.5 Q573 271.5 573 263" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="573" y1="263" x2="570" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="573" y1="263" x2="576" y2="268" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="573" y="256" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">full</text>
+<path d="M573 263 Q589 263 589 275.7" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="589" y1="275.7" x2="586" y2="270.7" stroke="#1b1b1f" stroke-width="1.1"/>
+<line x1="589" y1="275.7" x2="592" y2="270.7" stroke="#1b1b1f" stroke-width="1.1"/>
+<text x="589" y="282.7" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">¼</text>
+<text x="41" y="362" font-family="Bravura" font-size="36" font-weight="400" text-anchor="start" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="344" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="96" y="362" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="247" y1="335" x2="247" y2="371" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="448" y1="335" x2="448" y2="371" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="608" y1="335" x2="608" y2="371" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="603" y1="335" x2="603" y2="371" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="605" y="335" width="3" height="36" fill="#1b1b1f"/>
+<text x="119" y="129.5" font-family="system-ui, sans-serif" font-size="13" font-weight="600" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Am7</text>
+<line x1="122" y1="150" x2="122" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="127.5" y1="150" x2="127.5" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="133" y1="150" x2="133" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="138.5" y1="150" x2="138.5" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="144" y1="150" x2="144" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="149.5" y1="150" x2="149.5" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="150" x2="149.5" y2="150" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="157" x2="149.5" y2="157" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="164" x2="149.5" y2="164" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="171" x2="149.5" y2="171" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="178" x2="149.5" y2="178" stroke="#1b1b1f" stroke-width="0.8"/>
+<line x1="122" y1="185" x2="149.5" y2="185" stroke="#1b1b1f" stroke-width="0.8"/>
+<rect x="121.6" y="148" width="28.3" height="2.4" fill="#1b1b1f"/>
+<text x="122" y="143" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">×</text>
+<text x="127.5" y="143" font-family="system-ui, sans-serif" font-size="7" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">○</text>
+<circle cx="133" cy="160.5" r="2.3" fill="#1b1b1f"/>
+<text x="138.5" y="143" font-family="system-ui, sans-serif" font-size="7" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">○</text>
+<circle cx="144" cy="153.5" r="2.3" fill="#1b1b1f"/>
+<text x="149.5" y="143" font-family="system-ui, sans-serif" font-size="7" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">○</text>
+<text x="119" y="115.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">with feeling</text>
+<text x="123" y="423.5" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Oh</text>
+<text x="123" y="404" font-family="Bravura" font-size="22" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="218" y1="250" x2="221" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="221" y1="243" x2="224" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="224" y1="250" x2="227" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="227" y1="243" x2="230" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="230" y1="250" x2="233" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="233" y1="243" x2="236" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="236" y1="250" x2="239" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="239" y1="243" x2="242" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="242" y1="250" x2="245" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="245" y1="243" x2="248" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="248" y1="250" x2="251" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="251" y1="243" x2="254" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="254" y1="250" x2="257" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="257" y1="243" x2="260" y2="250" stroke="#1b1b1f" stroke-width="1.6"/>
+<line x1="260" y1="250" x2="263" y2="243" stroke="#1b1b1f" stroke-width="1.6"/>
+<text x="222" y="404" font-family="Bravura" font-size="22" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="187" y="235" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">P.M.</text>
+<line x1="209.4" y1="235" x2="213.4" y2="235" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="216.4" y1="235" x2="220.4" y2="235" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="223.4" y1="235" x2="227.4" y2="235" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="228" y1="232" x2="228" y2="238" stroke="#1b1b1f" stroke-width="1"/>
+<text x="380" y="211" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">N.H.</text>
+<text x="380" y="203" font-family="Bravura" font-size="26" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="323" y="223" font-family="system-ui, sans-serif" font-size="9" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">let ring</text>
+<line x1="366" y1="220" x2="366" y2="226" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="158" y1="400" x2="210" y2="396" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="158" y1="400" x2="210" y2="404" stroke="#1b1b1f" stroke-width="1"/>
+<text x="75" y="326" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="250" y="326" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">2</text>
+<text x="451" y="326" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">3</text>
+<line x1="36" y1="335" x2="36" y2="371" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+</svg>

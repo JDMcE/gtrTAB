@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1000" height="297" viewBox="0 0 1000 297">
+<style>@font-face { font-family: Bravura; src: url("../../app/ui/public/fonts/Bravura.woff2"); }</style>
+<rect width="1000" height="297" fill="#ffffff"/>
+<line x1="36" y1="191" x2="384" y2="191" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="178" x2="384" y2="178" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="165" x2="384" y2="165" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="152" x2="384" y2="152" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="139" x2="384" y2="139" stroke="#8e8e96" stroke-width="1"/>
+<line x1="36" y1="126" x2="384" y2="126" stroke="#8e8e96" stroke-width="1"/>
+<text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Untitled</text>
+<rect x="109.9" y="120.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="115" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">5</text>
+<rect x="129.9" y="120.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="135" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">7</text>
+<rect x="149.9" y="120.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="155" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">8</text>
+<rect x="162.7" y="120.0" width="24.6" height="12.0" fill="#ffffff"/>
+<text x="175" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">(8)</text>
+<path d="M161 119 Q163.5 109 166 119" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<rect x="197.9" y="133.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="203" y="139" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">5</text>
+<rect x="217.9" y="133.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="223" y="139" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">8</text>
+<rect x="237.9" y="120.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="243" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">5</text>
+<rect x="257.9" y="120.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="263" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">7</text>
+<rect x="294.7" y="120.0" width="24.6" height="12.0" fill="#ffffff"/>
+<text x="307" y="126" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#8e8e96">(7)</text>
+<path d="M269 119 Q283.5 109 298 119" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
+<rect x="109.9" y="172.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="115" y="178" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="197.9" y="185.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="203" y="191" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">3</text>
+<line x1="115" y1="214" x2="115" y2="227" stroke="#1b1b1f" stroke-width="1.2"/>
+<line x1="203" y1="214" x2="203" y2="227" stroke="#1b1b1f" stroke-width="1.2"/>
+<rect x="301.9" y="185.0" width="10.2" height="12.0" fill="#ffffff"/>
+<text x="307" y="191" font-family="system-ui, sans-serif" font-size="12" font-weight="600" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">0</text>
+<rect x="43.6" y="139.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="145.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">T</text>
+<rect x="43.6" y="152.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="158.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">A</text>
+<rect x="43.6" y="165.0" width="10.8" height="13.0" fill="#ffffff"/>
+<text x="49" y="171.5" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">B</text>
+<text x="88" y="142.3" font-family="Bravura" font-size="52" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<text x="88" y="174.8" font-family="Bravura" font-size="52" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
+<line x1="286" y1="126" x2="286" y2="191" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="384" y1="126" x2="384" y2="191" stroke="#1b1b1f" stroke-width="1"/>
+<line x1="379" y1="126" x2="379" y2="191" stroke="#1b1b1f" stroke-width="1"/>
+<rect x="381" y="126" width="3" height="65" fill="#1b1b1f"/>
+<text x="67" y="117" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">1</text>
+<text x="289" y="117" font-family="system-ui, sans-serif" font-size="10" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#8e8e96">2</text>
+<line x1="36" y1="126" x2="36" y2="191" stroke="#1b1b1f" stroke-width="1"/>
+<text x="36" y="102" font-family="system-ui, sans-serif" font-size="13" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">♩ = 120</text>
+</svg>

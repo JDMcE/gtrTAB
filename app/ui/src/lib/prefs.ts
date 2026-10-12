@@ -65,6 +65,7 @@ export function applyTheme(theme: Theme): void {
   if (isTauri) {
     import('@tauri-apps/api/window')
       .then(({ getCurrentWindow }) => getCurrentWindow().setTheme(theme === 'system' ? null : theme))
-      .catch(() => {});
+      // The page has the theme either way; say so if the window's frame did not follow.
+      .catch((error) => console.warn('The window frame did not take the theme:', error));
   }
 }

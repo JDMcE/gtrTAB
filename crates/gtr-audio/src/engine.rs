@@ -279,7 +279,7 @@ impl Engine {
             };
             let voices: Vec<Voice> = match sampled.is_empty() {
                 true => (Voice::new(note, timbre, rate, limit, seed).into_iter()).collect(),
-                false => sampled.into_iter().map(Voice::Sampled).collect(),
+                false => (sampled.into_iter().map(Box::new).map(Voice::Sampled)).collect(),
             };
             for voice in voices {
                 // A closed hi-hat stops the open one, and the like.

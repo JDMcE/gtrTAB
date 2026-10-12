@@ -23,8 +23,12 @@ cd ../desktop && npm install
 | Web app (dev server) | `npm run dev` | `app/ui` |
 | Web app (production build) | `npm run build` | `app/ui` |
 | Type-check the UI | `npm run check` | `app/ui` |
+| Unit tests of the UI's plain functions | `npm test` | `app/ui` |
+| End-to-end tests, of the production build | `npm run build`, then `npm run e2e` | `app/ui` |
 | Desktop app (dev) | `npm run dev` | `app/desktop` |
 | Desktop app (installers) | `npm run build` | `app/desktop` |
+
+The end-to-end tests need Playwright's browser once: `npx playwright install chromium` in `app/ui`. The notation is also tested against pictures in `tests/golden`; when a change to the engraving is meant, look at the new pictures in `target/golden`, then run `GTR_BLESS=1 cargo test -p gtr-render` and commit them.
 
 Playback sounds through the GeneralUser GS SoundFont, which is too big for the repository. Fetch it once with `npm run soundfont` in `app/ui`; without it the app plays through its built-in models.
 
@@ -72,6 +76,9 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | ? or F1 | List every shortcut |
 | Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
 | Arrow keys in a bar, the palette or a menu | Move between its controls |
+| In the track pane: Left / Right | Along a track's row: name, mute, solo, volume, pan |
+| In the track pane: Up / Down on a slider | Set the volume or pan |
+| In the track pane: Alt+Up / Alt+Down on a name | Move the track up or down |
 | Esc | Back to the score |
 
 Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord.
@@ -102,3 +109,4 @@ Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp
 
 - `app/ui/public/fonts/Bravura.woff2`: the Bravura music font by Steinberg, under the SIL Open Font License (`Bravura-OFL.txt` alongside it).
 - Interface icons from [Lucide](https://lucide.dev) (`@lucide/svelte`), under the ISC License. Music symbols in the interface are Bravura glyphs; the guitar technique icons are drawn in `app/ui/src/lib/ui/icons.ts`.
+- `tests/corpus/alphatab/`: Guitar Pro files from the test data of [alphaTab](https://github.com/CoderLine/alphaTab), under the Mozilla Public License 2.0 (`LICENSE` alongside them; `tests/corpus/README.md` says which and from where). They are used by the tests only.

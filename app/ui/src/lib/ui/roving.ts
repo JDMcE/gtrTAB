@@ -1,7 +1,9 @@
 // Keyboard navigation inside a group of controls: the group is a single Tab stop and the
-// arrow keys move between its controls.
+// arrow keys move between its controls. A slider keeps the up and down arrows, Page Up and
+// Down, Home and End for its value, so only the left and right arrows move on from one.
 
-const CONTROLS = 'button, select';
+const CONTROLS = 'button, select, input[type="range"]';
+const SLIDER_KEYS = ['ArrowUp', 'ArrowDown', 'Home', 'End'];
 
 /** Svelte action for a toolbar or palette. Marks the node so the score's keys leave it alone. */
 export function roving(node: HTMLElement) {
@@ -35,6 +37,7 @@ export function roving(node: HTMLElement) {
   function onKeydown(event: KeyboardEvent) {
     const from = event.target as HTMLElement;
     if (from instanceof HTMLSelectElement || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (from instanceof HTMLInputElement && SLIDER_KEYS.includes(event.key)) return;
     const all = controls();
     const at = all.indexOf(from);
     if (at < 0) return;

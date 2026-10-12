@@ -1278,6 +1278,10 @@ dependencies = [
 [[package]]
 name = "gtr-render"
 version = "0.1.0"
+dependencies = [
+ "gtr-layout",
+ "gtr-model",
+]
 
 [[package]]
 name = "gtr-wasm"

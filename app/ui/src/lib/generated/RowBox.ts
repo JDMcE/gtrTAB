@@ -20,4 +20,9 @@ strings: number,
 /**
  * The note on the middle line of a staff without strings; see [`Layout::middle`].
  */
-middle: number | null, };
+middle: number | null, 
+/**
+ * X centre of each beat this staff has in the voice being edited, for every bar of
+ * the line, so that a click on a staff other than the cursor's can find its beat.
+ */
+beats: Array<Array<number>>, };

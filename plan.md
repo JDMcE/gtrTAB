@@ -85,7 +85,7 @@ Each phase ends with something usable. Phases 1–3 make a useful riff-writing t
 - [x] File open, save, recent files (desktop only), autosave with recovery on start
 - [x] Simple read-only Guitar Pro import (`.gp` and `.gp5`): notes, rests, ties, rhythms, tunings, starting tempo and time signatures for all tracks, with one track shown at a time. Anything else is skipped and listed in the status bar after import
 
-Still to check by hand, in phase 6: how playback sounds, recent files, and drag-and-drop and the unsaved-changes prompt in the desktop app. (Autosave recovery was found broken during phase 5, where the saved copy was cleared before it could be read, and fixed.)
+Checked in phase 6: how playback sounds (by measurement; see there), and recent files, drag-and-drop and the unsaved-changes prompt in the desktop app. (Autosave recovery was found broken during phase 5, where the saved copy was cleared before it could be read, and fixed.)
 
 **Done when:** a riff can be written, played back, saved and reopened without touching the mouse, and an existing Guitar Pro file opens with its notes and rhythms intact.
 
@@ -105,10 +105,7 @@ Each item needs notation, input and playback.
 - [x] Fingering for both hands
 - [x] Guitar Pro import brings in all of the above
 
-Known simplifications, all scheduled for phase 6:
-
-- A custom bend is drawn as the nearest common shape, labelled with its highest point; playback follows the real curve.
-- Pick strokes and fingering are notation only, and stay that way: they have nothing to add to how a note sounds.
+Pick strokes and fingering are notation only, and stay that way: they have nothing to add to how a note sounds. (A custom bend used to be drawn as the nearest common shape; since phase 6 it is drawn as its own curve.)
 
 **Done when:** a typical rock or metal lead part can be transcribed with every technique heard in playback.
 
@@ -130,7 +127,7 @@ The toolbar grew one text button at a time through phases 2 and 3 and is now fou
 - [x] Space reserved for the track list and mixer that phase 5 adds (an empty dock under the score)
 - [x] Checked in the desktop window as well as in browsers, since the two have differed before (layout, note entry, the bend editor, the inspector and both themes looked the same in each)
 
-Still to check by hand, in phase 6: the desktop title bar stayed dark when the app was switched to the light theme on Windows, so `setTheme` on the window may not be taking effect; and the interface has not been tried with a screen reader.
+Still to check by hand, on Windows: the desktop title bar stayed dark when the app was switched to the light theme, so `setTheme` on the window may not be taking effect. Phase 6 could not look at it, having no Windows machine; a failure there is now logged to the console instead of being swallowed. The interface has had the automated part of a screen reader check in phase 6, and has not been used with one by a person.
 
 Every command (name, icon, shortcut, action) is defined once in `App.svelte` and the bars, palette, menus, tooltips and shortcut list are built from that set. Add new features there.
 
@@ -159,20 +156,17 @@ Customisable shortcuts, the command palette and further themes stay in phase 10.
 
 Known simplifications, each with the phase that removes it:
 
-- Beams are level, never slanted, and accidentals are spelled by the key alone: sharps in sharp keys, flats in flat keys. (Phase 6)
-- In the combined view the technique markings, chord names and diagrams sit above the tab staff, so between the two staves. The notation-only view shows the markings above the staff but not the ones written on strings (bends, slides). (Phase 6)
-- The mixer sliders on the track rows are for the mouse; the keyboard reaches the same values through the track settings dialog. Tracks are reordered with the move up and move down buttons, not by dragging. (Phase 6)
-- Clicking another staff in the multitrack view goes to the start of the bar clicked, not the beat. (Phase 6)
-- The chord builder finds one shape per position with the root in the bass; it does not know slash chords or inversions, which can still be clicked in by hand. (Phase 6)
-- Guitar Pro import skips lyrics, chord names and diagrams, tempo changes and `.gp` drum tracks. (Phase 7)
+- Beams were level and accidentals spelled by the key alone; in the combined view the markings sat between the two staves, and the notation-only view left out bends and slides. (Removed in phase 6)
+- The mixer sliders were for the mouse alone, tracks were reordered with buttons only, a click on another staff went to the start of its bar, and the chord builder found one shape per position with the root in the bass. (Removed in phase 6)
+- Guitar Pro import skips lyrics, chord names and diagrams, and tempo changes. (Phase 7)
 
 How things stand, for reference:
 
 - Tuning and capo are part of a track's settings (the settings button in the track pane, or double-click the track's name), alongside its instrument and mix. Changing the kind of instrument there switches to that instrument's usual tuning.
-- Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks (`.gp5`), key signatures, repeats, alternate endings, sections, swing feel, credits and, from `.gp`, jumps and free text.
+- Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks, key signatures, repeats, alternate endings, sections, swing feel, credits, signs and jumps and, from `.gp`, free text. A bar holds one sign and one jump: where a file has more, or a second segno or coda, the first is kept and the import says so.
 - The native format is at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
 
-Still to check by hand, in phase 6: how each instrument and the drum kit sound, and the stereo mix; the track pane and the notation views in the desktop window and in a narrow window (only a wide browser window was tried); and Guitar Pro files with repeats, jumps or drum tracks, since none are in the repository.
+Checked in phase 6: each instrument, the drum kit and the stereo mix, by measurement; the track pane and the notation views in the desktop window and in a narrow one; and Guitar Pro files with repeats, jumps and drum tracks, which are now in `tests/corpus/`.
 
 **Done when:** a full band arrangement can be written and played back.
 
@@ -185,7 +179,7 @@ Playback engine:
 - [x] Streaming synth: the synth runs in an AudioWorklet as WASM and plays from the event stream, as the architecture section describes, instead of rendering every track to a buffer first. Edits are heard without stopping, memory no longer grows with the length of the score, and looping, speed changes and audio export in later phases get the engine they need. `gtr_audio::Engine` makes the sound a block at a time; `crates/gtr-worklet` wraps it as a module the worklet (`app/ui/src/lib/synth.worklet.js`) can load without `wasm-bindgen`. After an edit the passage is compiled again and the engine carries on from the same beat of it; notes already sounding ring out as they were
 - [x] SoundFont playback: sampled instruments from a freely licensed SoundFont for every instrument and the drum kit, with the built-in models kept as the fallback when no SoundFont is loaded. The bank is GeneralUser GS 2.0.3 by S. Christian Collins, fetched by `npm run soundfont` in `app/ui` (32 MB, so it is not in the repository) and loaded in the background once the app is up. Score > Sound switches between it, any `.sf2` file of the user's own, which is kept in the browser's storage for next time, and the models. How things stand:
   - The licence allows any use, changes and redistribution, which meets decision 2. Its author adds that he cannot vouch for where every sample came from; that is worth reading again before a release, and is why the licence file is fetched to sit beside the bank
-  - `gtr_audio::SoundFont` follows what a plucked or struck instrument needs: key and velocity zones, tuning, loops, level, pan, the volume envelope, the filter's cutoff and exclusive classes (a closed hi-hat stops an open one). It does not follow modulators, the second envelope, the bank's own vibrato or its reverb and chorus, which GeneralUser GS leans on, so the bank sounds plainer here than in a full SoundFont synth. Compressed banks (`.sf3`) are refused
+  - `gtr_audio::SoundFont` follows what a plucked or struck instrument needs: key and velocity zones, tuning, loops, level, pan, the volume envelope, exclusive classes (a closed hi-hat stops an open one), and the filter in full: its cutoff, the modulation envelope that opens and closes it, the modulators that move it and that envelope's depth with the key and the velocity, and envelope times that shorten up the keyboard. GeneralUser GS keeps its brightness there, and read without it (as it was until the check at the end of this phase) the steel guitar sat under a 500 Hz filter and the tambourine could not be heard. It does not follow modulators of anything but the filter, the envelope's hold on pitch, the bank's own vibrato or its reverb and chorus. Compressed banks (`.sf3`) are refused
   - Palm mutes and dead notes are made from the ordinary sample, damped and dulled, and a harmonic is the ordinary sample at the harmonic's pitch
   - The whole bank goes to the audio thread, about 64 MB of memory there, and reading it stops the sound for a moment if something is playing. Cutting the bank down to the instruments gtrTab has would shrink the download and the memory several times over, and is still to do
 - [x] Each instrument with its own sound: ukulele, banjo and mandolin stop borrowing a guitar's. The banjo is the bank's; General MIDI has no ukulele or mandolin, so those two are always played by models of their own, also when a SoundFont is loaded
@@ -210,33 +204,36 @@ Notes and entry:
 
 Engraving:
 
-- [ ] Slanted beams
-- [ ] Accidentals spelled by context as well as by key: by the direction of the line and the chord the note belongs to
-- [ ] In the combined view, chord names, diagrams, text and technique markings above the notation staff, not between the staves
-- [ ] In the notation-only view, the markings that are written on strings: bends and slides
-- [ ] A custom bend drawn as its own curve
+- [x] Slanted beams: a beam on the notation staff leans the way its notes go, a quarter of a space for each step between the first note and the last, up to a space and a quarter and never steeper than 3 in 10. It stays level when the two are on the same step, or when a note between them comes nearer the beam than either. Every stem is at least its usual length and ends on the beam. The beams under a tab staff and over rhythm slashes have no pitches to follow and stay level. The display list has a `beam` item for them
+- [x] Accidentals spelled by context as well as by key (`notation::spell`). A note of the key is written as the key has it, so the F in F sharp major is an E sharp. One outside it that could be a sharp or a flat goes, in this order, by the chord it is in (a third is written as a third, and two pitches never share a line), by where its line goes (a sharp if it rises a semitone, a flat if it falls one, looking past repeats of the note), by how it was last written in the bar, and then by the key as before. A tied note keeps the name of the note it is tied to
+- [x] In the combined view, chord names, diagrams, text and technique markings above the notation staff, not between the staves. Bends stay over the tab, since they are drawn from the string; dynamics and lyrics stay under it
+- [x] In the notation-only view, the markings that are written on strings: bends rise from the notehead into the same lane as over a tab staff, and slides are lines between noteheads or short ones into and out of a note
+- [x] A custom bend drawn as its own curve: a bend that is not one of the four common shapes is drawn as a step for every level it moves to, each as high in its lane as that level is of the curve's highest, with an arrow and its size; the beat is given the room. How fast a bend gets from one level to the next is still not shown, as it is not in the common shapes
 
 Interface:
 
-- [ ] Tracks reordered by dragging in the track pane
-- [ ] Mixer sliders in the track pane that the keyboard can reach
-- [ ] A click on another staff goes to the beat clicked
-- [ ] Chord builder: slash chords, inversions, and more than one shape per position
+- [x] Tracks reordered by dragging in the track pane: a track's name is the handle, the row fades while it is dragged and a line shows where it will land. Alt+Up and Alt+Down on a name do the same from the keyboard, and the move up and move down buttons stay
+- [x] Mixer sliders in the track pane that the keyboard can reach: the left and right arrows walk a row from the name through mute and solo to the volume and pan sliders, and on a slider the up and down arrows, Page Up, Page Down, Home and End set it (`roving.ts`). The pane is still one Tab stop. Every step is an undo step of its own
+- [x] A click on another staff goes to the beat clicked: each row of the layout carries its own beat positions (`RowBox::beats`), and a click well to the right of a staff's last beat goes to the empty place after it
+- [x] Chord builder: slash chords, inversions, and more than one shape per position. A bass note can be chosen beside the root and kind; a note of the chord gives an inversion and any other a slash chord, named with a slash either way. Each position offers a shape from every string the bass note can be on, with the other strings low in the position and again with them high, up to 24 in all. `npm test` runs the builder's tests under Node, and CI with it
 
 Checks owed from earlier phases:
 
-- [ ] Listen to every instrument, the drum kit and the stereo mix, and fix what sounds wrong
-- [ ] The desktop app: track pane, notation views, recent files, drag-and-drop, the unsaved-changes prompt, and the title bar that stayed dark in the light theme on Windows
-- [ ] A narrow window, with the track pane and the notation views
-- [ ] A screen reader
-- [ ] Guitar Pro files with repeats, jumps and drum tracks, found or made and added to `tests/corpus/`
-- [ ] End-to-end tests for the entry workflow and golden images for the notation, which the testing section calls for and which do not exist yet
+- [x] Every instrument, the drum kit and the stereo mix, measured, and what measured wrong fixed. Each instrument was played across its range, and each piece of the kit, through the SoundFont and through the models, and its level, tuning, peak, steady offset and place between the speakers taken. Three things were wrong. The SoundFont reader left out what GeneralUser GS uses to open its filters (see above): the top of the steel guitar's neck was 25 dB under the bottom of it, and is now within 3; the tambourine was 20 dB under the rest of the kit. The string models carried a steady offset that outlasted the note and, at the top of a piano, was most of what sounded. And with its filter open the sampled distortion guitar was louder than its model, and the bass three times its model's level, so their trims came down. Tuning is within a few cents throughout, panning keeps the power constant, and a full band does not clip. `crates/gtr-audio/tests/soundfont_file.rs` holds the bank to this when `GTR_SOUNDFONT` names it
+- [ ] The same by ear. Nobody has listened: a measurement finds a filter that is shut, not a guitar that sounds like a toy
+- [x] The desktop app, on Linux: the track pane with dragging, the notation views, the native save dialog, recent files and the unsaved-changes prompt, each answered both ways, by running the built app and working it through the X server. A file dropped on the window is opened by the page itself (`dragDropEnabled` is off), and that is tested in the browser; a drop from a file manager was not tried. Closing the window does not ask about unsaved work, and is not meant to: autosave brings it back
+- [ ] The title bar that stayed dark in the light theme on Windows. Not looked at: it needs a Windows machine
+- [x] A narrow window, with the track pane and the notation views: at 640 pixels, the least the desktop window goes to, and at 420. Below 640 the top bar's buttons ran off the side, and now wrap. `e2e/narrow.spec.ts`
+- [x] A screen reader, as far as a machine can check. The score was a picture and nothing else; it is now also put in words, in a live region that says what is under the cursor whenever that changes ("Bar 2, beat 3 of 8, eighth note, string 5, fret 2, B 2, hammer-on or pull-off"). axe finds nothing wrong in the app, its dialogs or its menus, after the track pane's resize handle was given its value, the work area made the main landmark and the name a heading. Every part of the window is one Tab stop. `e2e/accessibility.spec.ts`, `src/lib/describe.ts`
+- [ ] The same with a screen reader and a person. Whether the words are the right ones, and come at the right moments, is not something a test can say
+- [x] Guitar Pro files with repeats, jumps and drum tracks, found and added to `tests/corpus/`: fifteen small files from alphaTab's test data, under the MPL 2.0, each made to show one thing (`tests/corpus/README.md`). They found four faults in the importer. A `.gp5` repeat was played once too often. A `.gp5` drum track that is on MIDI channel 10 without saying it is percussion came in as a piano. The signs and jumps of `.gp5` were not read at all. And a `.gp` drum track came in as nonsense, without a word: it is now read, each note as the General MIDI number its articulation sounds. `crates/gtr-io/tests/corpus.rs` says what each file holds
+- [x] End-to-end tests for the entry workflow and golden images for the notation. Playwright drives the built app (`npm run e2e` in `app/ui`): a riff written, changed, undone, copied, played, saved, reopened, dropped and recovered, from the keyboard alone. `gtr-render` writes a laid-out score as SVG, and `crates/gtr-render/tests/golden.rs` compares ten scores with the pictures in `tests/golden`. Looking at the first pictures found a key change at the start of a line written twice, the labels over narrow bars running into each other, bar numbers under key signatures and track names under clefs, all fixed
 
-**Done when:** no phase from 1 to 5 has a simplification or a check by hand left against it, and what replaced each one is covered by a test.
+**Done when:** no phase from 1 to 5 has a simplification or a check by hand left against it, and what replaced each one is covered by a test. Three checks are left, and none of them can be done by a program: listening, a person with a screen reader, and the title bar on Windows.
 
 ### Phase 7 — Import and export
 
-- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 5, including what is skipped today: lyrics, chord names and diagrams, tempo changes and `.gp` drum tracks
+- [ ] Full Guitar Pro import, extending the phase 2 importer: `.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`, covering every technique and score element from phases 3 and 5, including what is skipped today: lyrics, chord names and diagrams, and tempo changes
 - [ ] Guitar Pro export: `.gp`
 - [ ] MusicXML import and export
 - [ ] MIDI import and export
@@ -284,10 +281,10 @@ The synth itself and its SoundFonts come in phase 6; this phase is what is built
 ## Testing
 
 - **Model and editing:** unit tests plus property tests that apply random command sequences and check undo returns the original score.
-- **Layout and rendering:** golden-image tests per notation feature; a diff means review, not automatic failure. None exist yet: layout is tested by what it places where. They are a phase 6 item.
-- **File formats:** round-trip tests for the native format; a corpus of real files for each import format. No Guitar Pro files are in the repository yet: `crates/gtr-io/tests/gp_samples.rs` runs against a directory named by `GTR_GP_SAMPLES`. Add files we are free to redistribute to `tests/corpus/`.
+- **Layout and rendering:** layout is tested by what it places where, and by golden images: `crates/gtr-render/tests/golden.rs` lays out a score for each area of the notation, writes it as SVG and compares it with the picture in `tests/golden`. A difference fails the test and leaves the new picture in `target/golden`; look at the two, and if the change is meant run the tests with `GTR_BLESS=1` and commit the pictures. They open in a browser straight from the repository.
+- **File formats:** round-trip tests for the native format; a corpus of real files for each import format in `tests/corpus/`, with a note of where each came from and its licence. `crates/gtr-io/tests/corpus.rs` says what each Guitar Pro file there holds, and `gp_samples.rs` imports them all, and any in a directory named by `GTR_GP_SAMPLES`, and checks a piece saved in two formats comes out the same. Only add files we are free to redistribute.
 - **Audio:** snapshot tests on the event stream rather than on audio samples. The synth is tested by what it measures: pitch, level, and that playing in blocks gives the same samples as rendering at once. The SoundFont reader is tested on a small bank made up in the test; `crates/gtr-audio/tests/soundfont_file.rs` plays every instrument from a real one named by `GTR_SOUNDFONT`.
-- **UI:** end-to-end tests for the core entry workflow. None exist yet; the interface has been checked by hand in a browser. They are a phase 6 item.
+- **UI:** end-to-end tests of the built app in `app/ui/e2e`, run by Playwright (`npm run build`, then `npm run e2e`): the entry workflow from the keyboard, a narrow window, and what a screen reader and a keyboard are given. They read the score from the words the app puts it in for a screen reader. The parts of the UI that are plain functions (the chord builder, those words) have unit tests beside them, run by `npm test`.
 
 ## Risks
 

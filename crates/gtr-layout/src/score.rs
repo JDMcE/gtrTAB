@@ -25,6 +25,8 @@ const TAB_PREFIX: f64 = 28.0;
 const CLEF_PREFIX: f64 = 36.0;
 /// Height of the band holding a track's name, in the first line of a multitrack view.
 const NAME_BAND: f64 = 14.0;
+/// How far a clef reaches above what a staff otherwise needs over it.
+const CLEF_RISE: f64 = 12.0;
 /// Height of the band above a line for section names, tempo changes and jumps.
 const MARK_BAND: f64 = 17.0;
 /// Height of the band for the brackets over alternate endings.
@@ -150,6 +152,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         (part.standard && part.staff.is_pitched()).then(|| notation::middle_line(part.clef))
     };
 
+    let times = gtr_model::bar_times(score);
     let measured: Vec<Measured> = (masters.iter().enumerate())
         .map(|(i, master)| {
             let rows: Vec<Row> = (parts.iter())
@@ -165,28 +168,34 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 .is_some_and(|p| p.key_signature != master.key_signature)
                 .then_some(master.key_signature);
             let repeat = (master.repeat_start, master.repeat_count >= 2);
-            spacing::measure(
+            let mut measured = spacing::measure(
                 &rows,
                 (edit_row, voice),
                 master.time_signature,
                 shown,
                 key,
                 repeat,
-            )
+            );
+            // A bar is at least as wide as what is written over it.
+            let marks = marks_width(master, i, times[i]);
+            measured.width = measured.width.max(marks);
+            measured
         })
         .collect();
 
     // What comes before the first bar of a line: a clef and the key, or the letters TAB.
-    let prefix = |first: usize| match standard {
-        true => CLEF_PREFIX + spacing::key_width(masters[first].key_signature),
-        false => TAB_PREFIX,
+    // A bar that changes the key writes the new one itself, so a line that starts with
+    // one has only the clef before it.
+    let prefix = |first: usize| match (standard, measured[first].key) {
+        (true, None) => CLEF_PREFIX + spacing::key_width(masters[first].key_signature),
+        (true, Some(_)) => CLEF_PREFIX,
+        (false, _) => TAB_PREFIX,
     };
     let widest_prefix = (0..masters.len()).map(prefix).fold(TAB_PREFIX, f64::max);
     let width = width.max(2.0 * MARGIN_X + widest_prefix + MIN_BAR_WIDTH);
 
     let mut items = vec![];
     let header_height = header(score, width, &mut items);
-    let times = gtr_model::bar_times(score);
 
     // X of every beat laid out so far, as `[row][voice][bar][beat]`.
     let mut positions: Vec<Vec<Vec<Vec<f64>>>> =
@@ -276,14 +285,21 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             let row_top = cursor;
             if view.multitrack && systems.is_empty() && part.index == 0 {
                 // Leave the tempo mark its place above the first name.
-                let band = if row == 0 {
-                    NAME_BAND + 12.0
-                } else {
-                    NAME_BAND
+                // And a clef, which stands taller than its staff, room under a later one.
+                let band = match (row == 0, part.standard) {
+                    (true, _) => NAME_BAND + 12.0,
+                    (false, true) => NAME_BAND + CLEF_RISE,
+                    (false, false) => NAME_BAND,
                 };
                 items.push(Item::Text {
                     x: MARGIN_X,
-                    y: r(cursor + band - NAME_BAND / 2.0),
+                    y: r(cursor + band
+                        - NAME_BAND / 2.0
+                        - if row > 0 && part.standard {
+                            CLEF_RISE
+                        } else {
+                            0.0
+                        }),
                     s: part.name.to_owned(),
                     size: 11.0,
                     font: Font::Text,
@@ -296,13 +312,20 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             let beats = |bar: usize| part.staff.bars[bar].voices.iter().flat_map(|v| &v.beats);
             let lanes = Lanes::for_beats(range.clone().flat_map(beats));
             let dynamics = if lanes.dynamics { DYNAMICS_HEIGHT } else { 0.0 };
+            // A track shown as notation over tab has its markings above the notation,
+            // not between the two; only the bends, drawn from the strings, stay with
+            // the tab. Shown on one staff, that staff has them all.
+            let (over_notation, over_tab) = match (part.standard || slash) && part.tab {
+                true => (lanes.half(false), lanes.half(true)),
+                false => (lanes.clone(), lanes.clone()),
+            };
             let editing = |v: usize| row != edit_row || v == voice;
             let mut row_lines: Option<(f64, f64)> = None;
             let mut row_y = None;
 
             if part.standard || slash {
                 let mut drawn = Vec::new();
-                let extent = NotationStaff {
+                let notation = NotationStaff {
                     staff: part.split.as_ref().map_or(part.staff, |s| &s.staff),
                     spelled: part.spelled.as_deref(),
                     xs: &positions[row],
@@ -311,12 +334,12 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                     first,
                     end,
                     feet: part.split.as_ref().map(|s| s.feet.as_slice()),
-                }
-                .draw(&mut drawn);
+                    string_marks: !part.tab,
+                };
+                let extent = notation.draw(&mut drawn);
+                notation.draw_bends(over_notation.bend_y(extent.top), &mut drawn);
                 let head = if lines.is_none() { ABOVE_STAFF } else { 8.0 };
-                // Without a tab staff the technique markings go above the notation.
-                let above = if part.tab { 0.0 } else { lanes.height };
-                let mid = cursor + head + above - extent.top;
+                let mid = cursor + head + over_notation.height - extent.top;
                 for item in &mut drawn {
                     item.shift_y(mid);
                 }
@@ -326,6 +349,8 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 notation::draw_lines(MARGIN_X, right, mid, &mut items);
                 if part.standard {
                     notation::draw_clef(part.clef, MARGIN_X + 5.0, mid, &mut items);
+                }
+                if part.standard && measured[first].key.is_none() {
                     let key = masters[first].key_signature;
                     notation::draw_key(
                         key,
@@ -360,29 +385,33 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 );
 
                 let mut bottom = mid + extent.bottom + 4.0;
-                if !part.tab {
-                    // Only the markings above and below the staff: there are no strings
-                    // to write the rest on.
-                    let music_top = mid + extent.top;
-                    for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
-                        let system = System {
-                            staff: part.staff,
-                            voice: v,
-                            xs,
-                            bars: &bars,
-                            first,
-                            y: music_top,
-                            staff_height: bottom - music_top,
-                            lanes: &lanes,
-                            below: 2.0,
-                            strings: false,
-                            ink: Color::Ink,
-                        };
-                        for bar in range.clone() {
-                            system.draw_voice(bar, masters[bar].time_signature, false, &mut items);
-                        }
+                // The markings above the staff, and without a tab staff under it the
+                // ones below as well. There are no strings here to write the rest on.
+                let music_top = mid + extent.top;
+                for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
+                    let system = System {
+                        staff: part.staff,
+                        voice: v,
+                        xs,
+                        bars: &bars,
+                        first,
+                        y: music_top,
+                        staff_height: bottom - music_top,
+                        lanes: &over_notation,
+                        below: 2.0,
+                        strings: false,
+                        above: true,
+                        under: !part.tab,
+                        ink: Color::Ink,
+                    };
+                    for bar in range.clone() {
+                        system.draw_voice(bar, masters[bar].time_signature, false, &mut items);
+                    }
+                    if !part.tab {
                         system.draw_hairpins(end, &mut items);
                     }
+                }
+                if !part.tab {
                     mark_y = if row == edit_row {
                         bottom + 4.0
                     } else {
@@ -410,7 +439,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 // Under a notation staff the tab leaves the rhythm to the notation.
                 let rhythm = !part.standard && !slash;
                 let below = if rhythm { BELOW_STAFF } else { 12.0 };
-                let y = cursor + head + lanes.height;
+                let y = cursor + head + over_tab.height;
                 for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
                     let system = System {
                         staff: part.staff,
@@ -420,9 +449,11 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                         first,
                         y,
                         staff_height,
-                        lanes: &lanes,
+                        lanes: &over_tab,
                         below,
                         strings: true,
+                        above: row_lines.is_none(),
+                        under: true,
                         ink: if editing(v) { Color::Ink } else { Color::Muted },
                     };
                     // One voice's rhythm fits under the staff: the one being edited.
@@ -470,9 +501,12 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                         bars[bar].status,
                         BarStatus::Incomplete | BarStatus::Overfull
                     );
+                    // Clear of the sharps and flats of a key written at the start of the bar.
+                    let keyed = part.standard && measured[bar].key.is_some();
+                    let lift = if keyed { 17.0 } else { 9.0 };
                     items.push(Item::Text {
                         x: r(bars[bar].x + 3.0),
-                        y: r(line_top - 9.0),
+                        y: r(line_top - lift),
                         s: (bar + 1).to_string(),
                         size: 10.0,
                         font: Font::Text,
@@ -525,6 +559,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                     0
                 },
                 middle: middle_of(part),
+                beats: positions[row][voice][range.clone()].to_vec(),
             });
             if row + 1 < parts.len() {
                 cursor += if part.last { TRACK_GAP } else { STAFF_GAP };
@@ -612,6 +647,52 @@ impl Part<'_> {
     }
 }
 
+/// What is written at the right-hand end of a bar, over it: the time the piece has been
+/// playing when it first gets there, how often a repeat is played, and a jump.
+fn ending_label(master: &MasterBar, time: Option<f64>) -> Option<String> {
+    let mut ending = Vec::new();
+    if let (true, Some(seconds)) = (master.timer, time) {
+        let whole = seconds.round() as u64;
+        ending.push(format!("[{}:{:02}]", whole / 60, whole % 60));
+    }
+    if master.repeat_count > 2 {
+        ending.push(format!("\u{00D7}{}", master.repeat_count));
+    }
+    if let Some(jump) = master.jump {
+        ending.push(jump.label().to_owned());
+    }
+    (!ending.is_empty()).then(|| ending.join("  "))
+}
+
+/// Width a bar needs for what [`bar_marks`] writes over it, so that the marks of one bar
+/// do not run into those of the next.
+fn marks_width(master: &MasterBar, bar: usize, time: Option<f64>) -> f64 {
+    let mut width = 0.0;
+    if let Some(target) = master.target {
+        width += if target == Target::Fine { 30.0 } else { 20.0 };
+    }
+    if let Some(section) = &master.section {
+        width += section.chars().count() as f64 * SECTION_CHARACTER + 16.0;
+    }
+    if let Some(tempo) = master.tempo.filter(|_| bar > 0) {
+        width += (tempo.to_string().len() + 4) as f64 * 6.5 + 8.0;
+    }
+    if master.feel.is_some() && bar > 0 {
+        width += 72.0;
+    }
+    if let Some(label) = ending_label(master, time) {
+        width += label.chars().count() as f64 * ENDING_CHARACTER + 8.0;
+    }
+    match width > 0.0 {
+        true => width + 8.0,
+        false => 0.0,
+    }
+}
+
+/// Widths of a character of a section name and of a label at the end of a bar.
+const SECTION_CHARACTER: f64 = 6.4;
+const ENDING_CHARACTER: f64 = 6.0;
+
 /// Draws what applies to whole bars above a line of music: section names, tempo and feel
 /// changes, segno and coda signs, jumps, repeat counts and the brackets over alternate
 /// endings. Returns the y at which the staves can start.
@@ -675,7 +756,7 @@ fn bar_marks(
             }
             if let Some(section) = &m.section {
                 // A section name stands in a box.
-                let width = section.chars().count() as f64 * 6.4 + 8.0;
+                let width = section.chars().count() as f64 * SECTION_CHARACTER + 8.0;
                 for (x1, y1, x2, y2) in [
                     (x, y - 7.0, x + width, y - 7.0),
                     (x, y + 7.0, x + width, y + 7.0),
@@ -716,21 +797,8 @@ fn bar_marks(
                 items.push(text(at, y, mark, 12.0, Align::Left));
             }
             // What happens at the end of the bar is written at its right-hand end.
-            let mut ending = Vec::new();
-            if let (true, Some(seconds)) = (m.timer, times[bar]) {
-                // The time the piece has been playing when it first gets here.
-                let whole = seconds.round() as u64;
-                ending.push(format!("[{}:{:02}]", whole / 60, whole % 60));
-            }
-            if m.repeat_count > 2 {
-                ending.push(format!("\u{00D7}{}", m.repeat_count));
-            }
-            if let Some(jump) = m.jump {
-                ending.push(jump.label().to_owned());
-            }
-            if !ending.is_empty() {
-                let label = ending.join("  ");
-                let width = label.chars().count() as f64 * 6.0;
+            if let Some(label) = ending_label(m, times[bar]) {
+                let width = label.chars().count() as f64 * ENDING_CHARACTER;
                 items.push(text(right - width, y, label, 11.0, Align::Left));
             }
         }
@@ -1023,6 +1091,9 @@ mod tests {
             bass.bars[0].beats,
             [guitar.bars[0].beats[0], guitar.bars[0].beats[4]]
         );
+        // Each row knows where its own beats are, whichever is being edited.
+        assert_eq!(rows[1].beats, [bass.bars[0].beats.clone(), vec![]]);
+        assert_eq!(bass.systems[0].rows[0].beats[1], guitar.bars[1].beats);
         // Its empty second bar offers a slot where the guitar's first beat is.
         assert_eq!(bass.bars[1].status, BarStatus::Empty);
         assert_eq!(bass.bars[1].slot, Some(guitar.bars[1].beats[0]));
@@ -1320,6 +1391,274 @@ mod tests {
         let barre = layout(&score, &view(Notation::Tab), 1000.0);
         let found = texts(&barre);
         assert!(found.contains(&"7fr") && found.contains(&"\u{00D7}"));
+    }
+
+    /// A score of one bar of eighth notes on the top string, at the frets given.
+    fn eighths(frets: &[u8]) -> Score {
+        let mut score = demo_score();
+        score.master_bars.truncate(1);
+        let staff = &mut score.tracks[0].staves[0];
+        staff.bars.truncate(1);
+        staff.bars[0].voices[0].beats = (frets.iter())
+            .map(|&fret| Beat::new(Duration::new(NoteValue::Eighth), vec![Note::new(0, fret)]))
+            .collect();
+        score
+    }
+
+    fn beams(layout: &Layout) -> Vec<(f64, f64, f64, f64)> {
+        (layout.items.iter())
+            .filter_map(|item| match item {
+                Item::Beam { x1, y1, x2, y2, .. } => Some((*x1, *y1, *x2, *y2)),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn beams_lean_the_way_their_notes_go() {
+        // Four pairs: rising, falling, level, and a second pair of the same.
+        let score = eighths(&[0, 7, 8, 1, 3, 3, 0, 7]);
+        let layout = layout(&score, &view(Notation::Standard), 1000.0);
+        let found = beams(&layout);
+        assert_eq!(found.len(), 4);
+        let rise = |b: &(f64, f64, f64, f64)| b.1 - b.3;
+        assert!(rise(&found[0]) > 2.0, "a rising pair has a rising beam");
+        assert!(rise(&found[1]) < -2.0, "a falling pair has a falling beam");
+        assert_eq!(rise(&found[2]), 0.0);
+        assert_eq!(rise(&found[3]), rise(&found[0]));
+        // Never steeper than a beam should be, however far apart the notes are.
+        for beam in &found {
+            assert!(rise(beam).abs() <= 1.25 * SPACE + 0.1);
+            assert!(rise(beam).abs() <= 0.3 * (beam.2 - beam.0) + 0.1);
+        }
+        // Every stem ends on its beam: these notes have their stems down, so the beam's
+        // top edge is its thickness short of where the stems end.
+        let stems: Vec<(f64, f64)> = (layout.items.iter())
+            .filter_map(|item| match item {
+                Item::Line {
+                    x1, x2, y1, y2, w, ..
+                } if x1 == x2 && *w == 1.2 => Some((*x1, y1.max(*y2))),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(stems.len(), 8);
+        for (pair, beam) in stems.chunks(2).zip(&found) {
+            for (x, end) in pair {
+                let along = (x - beam.0) / (beam.2 - beam.0);
+                let top = beam.1 + (beam.3 - beam.1) * along;
+                assert!((top + 4.0 - end).abs() < 0.3, "stem at {x} misses its beam");
+            }
+        }
+
+        // A group whose middle notes dip nearer the beam than either end has a level
+        // beam, and so do rhythm slashes; the beams under a tab staff are plain bars.
+        let sixteenths = |score: &mut Score| {
+            for beat in &mut score.tracks[0].staves[0].bars[0].voices[0].beats {
+                beat.duration = Duration::new(NoteValue::Sixteenth);
+            }
+        };
+        let mut arch = eighths(&[5, 0, 3, 7, 0, 3, 5, 7]);
+        sixteenths(&mut arch);
+        let found = beams(&super::layout(&arch, &view(Notation::Standard), 1000.0));
+        // Two groups of four, each with two beams, one under the other and parallel.
+        assert_eq!(found.len(), 4);
+        assert_eq!(rise(&found[0]), 0.0);
+        assert!(rise(&found[2]) > 2.0);
+        assert_eq!(rise(&found[2]), rise(&found[3]));
+        assert!(
+            beams(&super::layout(&arch, &view(Notation::Slash), 1000.0))
+                .iter()
+                .all(|b| rise(b) == 0.0)
+        );
+        assert!(beams(&super::layout(&arch, &view(Notation::Tab), 1000.0)).is_empty());
+    }
+
+    /// Y of the first text item that reads `label`.
+    fn y_of_text(layout: &Layout, label: &str) -> f64 {
+        (layout.items.iter())
+            .find_map(|item| match item {
+                Item::Text { s, y, .. } if s == label => Some(*y),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("no {label:?}"))
+    }
+
+    #[test]
+    fn markings_go_above_the_notation_when_it_is_shown_over_the_tab() {
+        let mut score = demo_score();
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[0].effects.chord = Some("Em7".into());
+        beats[0].effects.text = Some("with feeling".into());
+        beats[0].effects.diagram = Some(gtr_model::ChordDiagram {
+            frets: vec![7, 8, 9, 9, 7, -1],
+        });
+        beats[0].effects.dynamic = Some(gtr_model::Dynamic::Ff);
+        beats[0].effects.lyrics = vec!["Hel".into()];
+        beats[1].notes[0].effects.palm_mute = true;
+        beats[2].notes[0].effects.harmonic = Some(gtr_model::Harmonic::Pinch);
+        beats[3].notes[0].effects.bend =
+            Some(gtr_model::Bend::preset(gtr_model::BendKind::Bend, 4));
+        beats[4].notes[0].effects.hammer = true;
+
+        let both = layout(&score, &view(Notation::Both), 1000.0);
+        let system = &both.systems[0];
+        // The top line of the notation, and the top string of the tab under it.
+        let (staff_top, tab_top) = (system.cursor_top, system.y);
+        assert!(staff_top < tab_top);
+        for label in ["Em7", "with feeling", "7fr", "P.M.", "P.H."] {
+            let y = y_of_text(&both, label);
+            assert!(y < staff_top, "{label:?} at {y} is not above the notation");
+        }
+        // What is written on the strings stays there: the bend, with its size, between
+        // the staves, and the hammer-on's letter on the tab.
+        for label in ["full", "H"] {
+            let y = y_of_text(&both, label);
+            assert!(y > staff_top + 4.0 * SPACE && y < tab_top + 5.0 * STRING_SPACING);
+        }
+        // Dynamics and lyrics are still under the tab, and each is written once.
+        let fortissimo = "\u{E52F}";
+        for label in [fortissimo, "Hel"] {
+            assert!(y_of_text(&both, label) > tab_top + 5.0 * STRING_SPACING);
+        }
+        let found = texts(&both);
+        for label in ["Em7", "P.M.", "P.H.", "full", fortissimo, "Hel"] {
+            assert_eq!(
+                found.iter().filter(|t| **t == label).count(),
+                1,
+                "{label:?}"
+            );
+        }
+        // Only the bend's lane is left between the staves.
+        let plain = layout(&demo_score(), &view(Notation::Both), 1000.0);
+        let gap = |l: &Layout| l.systems[0].y - l.systems[0].cursor_top;
+        assert_eq!(gap(&both), gap(&plain) + 30.0);
+
+        // In the tab view they are all over the tab, as before.
+        let tab = layout(&score, &view(Notation::Tab), 1000.0);
+        for label in ["Em7", "P.M.", "full"] {
+            assert!(y_of_text(&tab, label) < tab.systems[0].y);
+        }
+    }
+
+    #[test]
+    fn notation_alone_shows_bends_and_slides() {
+        use gtr_model::{Bend, BendKind, Slide};
+        let lines = |l: &Layout| {
+            (l.items.iter())
+                .filter(|i| matches!(i, Item::Line { c: Color::Ink, w, .. } if *w == 1.1))
+                .count()
+        };
+        let curves = |l: &Layout| {
+            (l.items.iter())
+                .filter(|i| matches!(i, Item::Curve { .. }))
+                .count()
+        };
+        let plain = eighths(&[3, 5, 7, 8]);
+        let was = layout(&plain, &view(Notation::Standard), 1000.0);
+
+        let mut score = plain.clone();
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[0].notes[0].effects.slide = Some(Slide::Shift);
+        beats[1].notes[0].effects.slide = Some(Slide::InFromBelow);
+        beats[2].notes[0].effects.slide = Some(Slide::OutDown);
+        let slid = layout(&score, &view(Notation::Standard), 1000.0);
+        assert_eq!(lines(&slid) - lines(&was), 3);
+        // The slide to the next note runs from one head to the other, rising with them.
+        let shift = (slid.items.iter())
+            .find_map(|item| match item {
+                Item::Line {
+                    x1, y1, x2, y2, w, ..
+                } if *w == 1.1 => Some((*x1, *y1, *x2, *y2)),
+                _ => None,
+            })
+            .unwrap();
+        let (from, to) = (slid.bars[0].beats[0], slid.bars[0].beats[1]);
+        assert!(from < shift.0 && shift.0 < shift.2 && shift.2 < to);
+        assert!(shift.3 < shift.1);
+        // Over a tab staff the tab has the slides, once.
+        let both = |score: &Score| layout(score, &view(Notation::Both), 1000.0);
+        assert_eq!(lines(&both(&score)) - lines(&both(&plain)), 3);
+
+        // A bend rises from its notehead into the lane above the staff, with its size.
+        let mut score = plain.clone();
+        score.tracks[0].staves[0].bars[0].voices[0].beats[3].notes[0]
+            .effects
+            .bend = Some(Bend::preset(BendKind::BendRelease, 4));
+        let bent = layout(&score, &view(Notation::Standard), 1000.0);
+        assert_eq!(curves(&bent) - curves(&was), 2);
+        assert!(y_of_text(&bent, "full") < bent.systems[0].cursor_top);
+        assert_eq!(bent.systems[0].y, was.systems[0].y + 30.0);
+        let over_tab = both(&score);
+        let sizes = texts(&over_tab).into_iter().filter(|t| *t == "full");
+        assert_eq!(sizes.count(), 1);
+    }
+
+    #[test]
+    fn a_key_change_at_the_start_of_a_line_is_written_once() {
+        // Enough bars for a second line, with a change to four sharps wherever it starts.
+        let mut score = demo_score();
+        for _ in 0..10 {
+            score
+                .master_bars
+                .push(MasterBar::new(gtr_model::TimeSignature::COMMON));
+            let bar = score.tracks[0].staves[0].bars[0].clone();
+            score.tracks[0].staves[0].bars.push(bar);
+        }
+        let plain = layout(&score, &view(Notation::Standard), 900.0);
+        let second = (plain.bars.iter()).position(|b| b.system == 1).unwrap();
+        for master in &mut score.master_bars[second..] {
+            master.key_signature = 4;
+        }
+        let keyed = layout(&score, &view(Notation::Standard), 900.0);
+        assert_eq!(keyed.bars[second].system, 1);
+        // Four sharps on the line that changes key, and four at the start of each after it.
+        let lines = keyed.systems.len();
+        let sharps = (keyed.items.iter())
+            .filter(|i| matches!(i, Item::Text { s, x, .. } if s == "\u{E262}" && *x < 140.0))
+            .count();
+        assert_eq!(sharps, 4 * (lines - 1));
+        // The bar number steps up out of their way.
+        let number = |layout: &Layout, bar: usize| y_of_text(layout, &(bar + 1).to_string());
+        let top = |layout: &Layout, bar: usize| layout.systems[layout.bars[bar].system].cursor_top;
+        assert_eq!(top(&keyed, second) - number(&keyed, second), 17.0);
+        assert_eq!(top(&plain, second) - number(&plain, second), 9.0);
+    }
+
+    #[test]
+    fn a_bar_is_as_wide_as_what_is_written_over_it() {
+        // Two bars of one whole note each: narrow, until they are given marks.
+        let mut score = eighths(&[0]);
+        score.tracks[0].staves[0].bars[0].voices[0].beats[0].duration =
+            Duration::new(NoteValue::Whole);
+        score.master_bars.push(score.master_bars[0].clone());
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        score.tracks[0].staves[0].bars.push(bar);
+        score.master_bars.push(score.master_bars[0].clone());
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        score.tracks[0].staves[0].bars.push(bar);
+        let plain = layout(&score, &view(Notation::Tab), 1000.0);
+
+        score.master_bars[0].repeat_count = 3;
+        score.master_bars[1].jump = Some(gtr_model::Jump::DalSegnoAlFine);
+        score.master_bars[1].timer = true;
+        score.master_bars[1].section = Some("Middle eight".into());
+        let marked = layout(&score, &view(Notation::Tab), 1000.0);
+        assert!(marked.bars[1].w > plain.bars[1].w + 60.0);
+        // The label at the end of the second bar starts after its section name, inside
+        // the bar, and so clear of the first bar's.
+        let x_of = |label: &str| {
+            (marked.items.iter())
+                .find_map(|item| match item {
+                    Item::Text { s, x, .. } if s == label => Some(*x),
+                    _ => None,
+                })
+                .unwrap()
+        };
+        // The first bar is played three times, two seconds each, before the second is reached.
+        let ending = x_of("[0:06]  D.S. al Fine");
+        assert!(ending > marked.bars[1].x + 12.0 * 6.4);
+        assert!(x_of("\u{00D7}3") + 12.0 < marked.bars[1].x);
+        assert_eq!(marked.bars[2].w, plain.bars[2].w);
     }
 
     #[test]
