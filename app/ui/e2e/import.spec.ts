@@ -46,3 +46,53 @@ test('chords and lyrics come in with the notes', async ({ page }) => {
   await expect(position(page)).toContainText('Bar 1, beat 1 of 4');
   await expect(page.locator('.inspector')).toContainText('This');
 });
+
+// The other formats: each gets from the dialog to the score, known for what it is.
+
+const others = new URL('../../../tests/corpus/', import.meta.url).pathname;
+
+test('a MusicXML file with tablature opens with its strings and frets', async ({ page }) => {
+  await start(page);
+  const chooser = page.waitForEvent('filechooser');
+  await keys(page, 'Control+o');
+  await (await chooser).setFiles(others + 'alphatab/musicxml-testsuite/71e-TabStaves.xml');
+  await expect(page.getByRole('status')).toContainText('Imported 71e-TabStaves.xml.');
+  await expect(page.locator('.file')).toHaveText('71e-TabStaves.gtrtab');
+  // The cursor starts on the lowest string; the first note is two strings up.
+  await keys(page, 'ArrowUp', 'ArrowUp');
+  await expect(position(page)).toHaveText('Bar 1, beat 1 of 4, quarter note, string 4, fret 5, G 3.');
+});
+
+test('a MIDI file opens as the notes it plays', async ({ page }) => {
+  await start(page);
+  const chooser = page.waitForEvent('filechooser');
+  await keys(page, 'Control+o');
+  await (await chooser).setFiles(others + 'mutopia/Bach_Prelude_BWV999.mid');
+  // Sixteenths in three, over a bass on D that rings on under them.
+  await keys(page, 'ArrowUp', 'ArrowUp');
+  await expect(position(page)).toHaveText(
+    'Bar 1, beat 1 of 12, sixteenth note, string 4, fret 0, D 3, let ring.',
+  );
+  await expect(place(page)).toContainText('Bar 1 of 43');
+});
+
+test('a tab typed as text opens with lengths judged from its spacing', async ({ page }) => {
+  await start(page);
+  const chooser = page.waitForEvent('filechooser');
+  await keys(page, 'Control+o');
+  await (await chooser).setFiles(others + 'ascii/ode-to-joy.txt');
+  await keys(page, 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp', 'ArrowUp');
+  await expect(position(page)).toHaveText('Bar 1, beat 1 of 4, quarter note, string 1, fret 0, E 4.');
+  await keys(page, 'Control+End');
+  await expect(position(page)).toContainText('Bar 4,');
+  await expect(page.locator('.file')).toHaveText('ode-to-joy.gtrtab');
+});
+
+test('a file that is nothing it knows is refused with a reason', async ({ page }) => {
+  await start(page);
+  const chooser = page.waitForEvent('filechooser');
+  await keys(page, 'Control+o');
+  await (await chooser).setFiles({ name: 'notes.txt', mimeType: 'text/plain', buffer: Buffer.from('Just some words.') });
+  await expect(page.getByRole('status')).toContainText('Could not import notes.txt');
+  await expect(position(page)).toHaveText(/^Bar 1, empty/);
+});
