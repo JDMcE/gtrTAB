@@ -18,30 +18,11 @@ use zip::ZipArchive;
 use super::write::{
     DYNAMICS, FEELS, KINDS, PALM_MUTE, POP, SLAP, TRILL_TO, TYPES, WIDE_VIBRATO, harmonic_name,
 };
-use crate::util::{durations_for, pitch_of, place};
+use crate::util::{decode, durations_for, pitch_of, place};
 use crate::{ImportError, Skipped};
 
 fn corrupt(what: impl Into<String>) -> ImportError {
     ImportError::Corrupt(what.into())
-}
-
-/// The text of a file that may start with a mark of its encoding, and may be UTF-16.
-pub(crate) fn decode(bytes: &[u8]) -> String {
-    let wide = |big: bool| {
-        let units: Vec<u16> = (bytes[2..].chunks_exact(2))
-            .map(|pair| match big {
-                true => u16::from_be_bytes([pair[0], pair[1]]),
-                false => u16::from_le_bytes([pair[0], pair[1]]),
-            })
-            .collect();
-        String::from_utf16_lossy(&units)
-    };
-    match bytes {
-        [0xFF, 0xFE, ..] => wide(false),
-        [0xFE, 0xFF, ..] => wide(true),
-        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
-        _ => String::from_utf8_lossy(bytes).into_owned(),
-    }
 }
 
 /// The score's XML out of a compressed file: the file its container names, or failing

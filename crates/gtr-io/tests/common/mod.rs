@@ -143,7 +143,7 @@ pub fn band() -> Score {
         beat(Quarter, &[(0, 5)]),
         beat(Quarter, &[(1, 7)]),
         beat(Quarter, &[(1, 8)]),
-        beat(Eighth, &[(2, 7)]),
+        beat(Eighth, &[(1, 10)]),
         beat(Eighth, &[(2, 9)]),
     ];
     first[0].notes[0].effects.bend = Some(Bend::preset(BendKind::Bend, 4));

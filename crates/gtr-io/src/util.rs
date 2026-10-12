@@ -22,6 +22,25 @@ pub(crate) fn esc(text: &str) -> String {
     out
 }
 
+/// The text of a file that may start with a mark of its encoding, and may be UTF-16.
+pub(crate) fn decode(bytes: &[u8]) -> String {
+    let wide = |big: bool| {
+        let units: Vec<u16> = (bytes[2..].chunks_exact(2))
+            .map(|pair| match big {
+                true => u16::from_be_bytes([pair[0], pair[1]]),
+                false => u16::from_le_bytes([pair[0], pair[1]]),
+            })
+            .collect();
+        String::from_utf16_lossy(&units)
+    };
+    match bytes {
+        [0xFF, 0xFE, ..] => wide(false),
+        [0xFE, 0xFF, ..] => wide(true),
+        [0xEF, 0xBB, 0xBF, rest @ ..] => String::from_utf8_lossy(rest).into_owned(),
+        _ => String::from_utf8_lossy(bytes).into_owned(),
+    }
+}
+
 /// The highest fret a pitch is put on when it comes without one.
 pub(crate) const MAX_FRET: u8 = 24;
 
