@@ -106,10 +106,10 @@ fn a_png_is_the_score_in_pixels() {
     let rows =
         miniz_oxide::inflate::decompress_to_vec_zlib(&file[data + 4..data + 4 + length]).unwrap();
     assert_eq!(rows.len(), (width as usize * 3 + 1) * height as usize);
-    let pixels: Vec<&[u8]> = (rows.chunks_exact(width as usize * 3 + 1))
-        .flat_map(|row| row[1..].chunks_exact(3))
+    let pixels: Vec<&[u8; 3]> = (rows.chunks_exact(width as usize * 3 + 1))
+        .flat_map(|row| row[1..].as_chunks::<3>().0)
         .collect();
-    let paper = pixels.iter().filter(|p| **p == [255, 255, 255]).count();
+    let paper = pixels.iter().filter(|p| ***p == [255, 255, 255]).count();
     let ink = pixels.iter().filter(|p| p[0] < 0x40).count();
     assert!(paper * 10 > pixels.len() * 8, "{paper} of {}", pixels.len());
     assert!(ink * 1000 > pixels.len() * 5, "{ink} of {}", pixels.len());

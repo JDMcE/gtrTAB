@@ -25,10 +25,10 @@ pub(crate) fn esc(text: &str) -> String {
 /// The text of a file that may start with a mark of its encoding, and may be UTF-16.
 pub(crate) fn decode(bytes: &[u8]) -> String {
     let wide = |big: bool| {
-        let units: Vec<u16> = (bytes[2..].chunks_exact(2))
+        let units: Vec<u16> = (bytes[2..].as_chunks::<2>().0.iter())
             .map(|pair| match big {
-                true => u16::from_be_bytes([pair[0], pair[1]]),
-                false => u16::from_le_bytes([pair[0], pair[1]]),
+                true => u16::from_be_bytes(*pair),
+                false => u16::from_le_bytes(*pair),
             })
             .collect();
         String::from_utf16_lossy(&units)
