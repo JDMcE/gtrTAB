@@ -165,7 +165,8 @@ fn check_directory(directory: &Path) {
     // The pieces of each name, with the directory and so the version each came from.
     let mut by_name: BTreeMap<String, Vec<(String, Score)>> = BTreeMap::new();
     for path in paths {
-        let name = (path.strip_prefix(directory).unwrap().to_string_lossy()).into_owned();
+        // Named the same way on every system, with the slashes this file writes them with.
+        let name = (path.strip_prefix(directory).unwrap().to_string_lossy()).replace('\\', "/");
         let bytes = std::fs::read(&path).unwrap();
         let Imported { score, skipped } = import(&bytes).unwrap_or_else(|e| panic!("{name}: {e}"));
         let (complete, total) = complete_bars(&score);
