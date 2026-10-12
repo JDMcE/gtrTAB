@@ -180,7 +180,12 @@ impl Engine {
     /// out as they were.
     pub fn replace(&mut self, timeline: Timeline) {
         let now = self.seconds();
-        let at = same_place(&self.timeline.beats, &timeline.beats, now);
+        let at = if now < self.timeline.count_in {
+            // As far through the count-in, which a change of speed makes longer or shorter.
+            now * timeline.count_in / self.timeline.count_in
+        } else {
+            same_place(&self.timeline.beats, &timeline.beats, now)
+        };
         self.set_timeline(timeline, at);
     }
 
@@ -572,6 +577,7 @@ mod tests {
                 },
             ],
             beats: Vec::new(),
+            count_in: 0.0,
             duration: 1.0,
         }
     }
@@ -658,6 +664,29 @@ mod tests {
         engine.process(&mut left, &mut right);
         assert!(energy(&left[..4_000]) > 0.1);
         assert!(!engine.finished());
+    }
+
+    #[test]
+    fn a_change_of_speed_in_the_count_in_stays_as_far_through_it() {
+        let passage = |count_in: f64| Timeline {
+            beats: vec![BeatTime {
+                bar: 0,
+                beat: 0,
+                time: count_in,
+            }],
+            count_in,
+            duration: count_in * 2.0,
+            ..Timeline::default()
+        };
+        // Half a second into a count-in of two seconds, and then of four and of one.
+        let mut engine = Engine::new(44_100);
+        engine.load(passage(2.0));
+        let (mut left, mut right) = (vec![0.0; 22_050], vec![0.0; 22_050]);
+        engine.process(&mut left, &mut right);
+        engine.replace(passage(4.0));
+        assert_eq!(engine.seconds(), 1.0);
+        engine.replace(passage(1.0));
+        assert_eq!(engine.seconds(), 0.25);
     }
 
     #[test]
