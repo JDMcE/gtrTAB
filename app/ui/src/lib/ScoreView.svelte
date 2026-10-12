@@ -32,6 +32,8 @@
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
+  /** How far right of a staff's last beat a click has to be to mean the place after it. */
+  const PAST_LAST = 14;
 
   let scroller: HTMLDivElement;
   let canvas: HTMLCanvasElement;
@@ -64,7 +66,7 @@
   }
 
   function itemY(item: Item): number {
-    return item.t === 'line' || item.t === 'curve' ? item.y1 : item.y;
+    return item.t === 'line' || item.t === 'curve' || item.t === 'beam' ? item.y1 : item.y;
   }
 
   function draw() {
@@ -113,6 +115,16 @@
           context.fillStyle = colors.ink;
           context.beginPath();
           context.arc(item.x, item.y, item.r, 0, Math.PI * 2);
+          context.fill();
+          break;
+        case 'beam':
+          context.fillStyle = colors.ink;
+          context.beginPath();
+          context.moveTo(item.x1, item.y1);
+          context.lineTo(item.x2, item.y2);
+          context.lineTo(item.x2, item.y2 + item.h);
+          context.lineTo(item.x1, item.y1 + item.h);
+          context.closePath();
           context.fill();
           break;
         case 'arc':
@@ -252,15 +264,22 @@
     const rows = layout.systems[system].rows;
     const row = rows.find((r) => y >= r.top && y <= r.bottom);
     if (row && (row.track !== editor.cursor.track || row.staff !== editor.cursor.staff)) {
-      // Another staff: its beats are not the ones laid out for the cursor, so go to the
-      // start of the bar.
+      // Another staff: it has its own beats, the nearest of which is the one clicked. A
+      // click well past the last of them is on the empty place after it, if there is one.
+      const own = row.beats[hit.i - inSystem[0].i] ?? [];
+      let at = 0;
+      own.forEach((stop, i) => {
+        if (Math.abs(stop - x) < Math.abs(own[at] - x)) at = i;
+      });
+      if (own.length && x > own[own.length - 1] + PAST_LAST) at = own.length;
+      const staff = { track: row.track, staff: row.staff };
       if (row.middle !== null) {
-        onpick(hit.i, 0, pitchAt(row.y, row.middle), false, { track: row.track, staff: row.staff });
+        onpick(hit.i, at, pitchAt(row.y, row.middle), false, staff);
         return;
       }
       const string = row.strings ? Math.round((y - row.y) / layout.string_spacing) : 0;
       const clamped = Math.max(0, Math.min(row.strings - 1, string));
-      onpick(hit.i, 0, clamped, false, { track: row.track, staff: row.staff });
+      onpick(hit.i, at, clamped, false, staff);
       return;
     }
     const string =

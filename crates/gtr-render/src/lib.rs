@@ -1,1 +1,6 @@
-//! Display list backends for SVG, PDF and PNG export. Starts in phase 7.
+//! Display list backends. A laid-out score can be written as SVG; PDF and PNG export
+//! start in phase 7.
+
+mod svg;
+
+pub use svg::{SvgOptions, svg};

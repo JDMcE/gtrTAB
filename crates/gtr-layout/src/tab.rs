@@ -2,8 +2,8 @@
 //! the rhythm underneath.
 
 use gtr_model::{
-    Accent, Beat, BendKind, Dynamic, Hairpin, Note, NoteValue, PickStroke, Rational, Slap, Slide,
-    Staff, Strum, TimeSignature, Vibrato, interval_label,
+    Accent, Beat, Bend, BendKind, Dynamic, Hairpin, Note, NoteValue, PickStroke, Rational, Slap,
+    Slide, Staff, Strum, TimeSignature, Vibrato, interval_label,
 };
 
 use crate::display::r;
@@ -93,7 +93,7 @@ const FERMATA: char = '\u{E4C0}';
 const LANE_BASE: f64 = 17.0;
 
 /// The lanes one system uses and where they sit.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub(crate) struct Lanes {
     used: [bool; LANES.len()],
     /// Vertical centre of each used lane, as a distance above the top string.
@@ -134,20 +134,43 @@ impl Lanes {
                 mark(Lane::Accent, e.accent.is_some() || e.staccato);
             }
         }
+        lanes.stack();
+        lanes
+    }
+
+    /// Stacks the lanes in use, from the staff upwards.
+    fn stack(&mut self) {
         let mut offset = LANE_BASE;
+        self.height = 0.0;
         for (i, (_, height)) in LANES.iter().enumerate() {
-            if lanes.used[i] {
-                lanes.centre[i] = offset + height / 2.0;
+            if self.used[i] {
+                self.centre[i] = offset + height / 2.0;
                 offset += height;
-                lanes.height += height;
+                self.height += height;
             }
         }
+    }
+
+    /// One half of the lanes, for a track shown on two staves: the lane for bends, which
+    /// are drawn from the string and so stay over the tab, or all the others, which go
+    /// over the notation.
+    pub fn half(&self, strings: bool) -> Lanes {
+        let mut lanes = self.clone();
+        for (used, (lane, _)) in lanes.used.iter_mut().zip(LANES) {
+            *used &= matches!(lane, Lane::Bend) == strings;
+        }
+        lanes.stack();
         lanes
     }
 
     /// Vertical centre of a lane for a staff whose top string is at `staff_y`.
     fn y(&self, lane: Lane, staff_y: f64) -> f64 {
         staff_y - self.centre[lane as usize]
+    }
+
+    /// Vertical centre of the lane for bends over a staff whose music starts at `staff_y`.
+    pub fn bend_y(&self, staff_y: f64) -> f64 {
+        self.y(Lane::Bend, staff_y)
     }
 }
 
@@ -284,9 +307,13 @@ pub(crate) struct System<'a> {
     pub lanes: &'a Lanes,
     /// Distance from the bottom of the staff to the row of dynamics.
     pub below: f64,
-    /// Whether there are string lines to write on. Without them only the markings above
-    /// and below the staff are drawn.
+    /// Whether there are string lines to write on: the fret numbers and what is tied to
+    /// a string, bends among them.
     pub strings: bool,
+    /// Whether to draw the markings in the lanes above the staff, other than bends.
+    pub above: bool,
+    /// Whether to draw what goes under the staff: dynamics and lyrics.
+    pub under: bool,
     /// Colour of the fret numbers: muted for the voices not being edited.
     pub ink: Color,
 }
@@ -338,22 +365,32 @@ impl System<'_> {
                     self.draw_note(index, i, note, items);
                 }
             }
-            self.draw_beat_marks(index, i, items);
+            if self.above {
+                self.draw_beat_marks(index, i, items);
+            }
+            if self.strings {
+                self.draw_strum(index, i, items);
+            }
+            if self.under {
+                self.draw_under(index, i, items);
+            }
         }
-        self.draw_spans(
-            index,
-            Lane::PalmMute,
-            "P.M.",
-            |n| n.effects.palm_mute,
-            items,
-        );
-        self.draw_spans(
-            index,
-            Lane::LetRing,
-            "let ring",
-            |n| n.effects.let_ring,
-            items,
-        );
+        if self.above {
+            self.draw_spans(
+                index,
+                Lane::PalmMute,
+                "P.M.",
+                |n| n.effects.palm_mute,
+                items,
+            );
+            self.draw_spans(
+                index,
+                Lane::LetRing,
+                "let ring",
+                |n| n.effects.let_ring,
+                items,
+            );
+        }
         if rhythm && self.strings {
             let bottom = self.y + self.staff_height;
             draw_rhythm(beats, xs, time_signature, bottom, items);
@@ -512,31 +549,12 @@ impl System<'_> {
         }
 
         if let Some(bend) = &effects.bend {
-            let lane = self.lanes.y(Lane::Bend, self.y);
-            let tip = lane - 4.0;
-            let arrow = |items: &mut Vec<Item>, x: f64, y: f64, up: f64| {
-                items.push(Item::line(x, y, x - 3.0, y + 5.0 * up, 1.1, Color::Ink));
-                items.push(Item::line(x, y, x + 3.0, y + 5.0 * up, 1.1, Color::Ink));
+            let room = match following {
+                Some((_, Some(next_x))) if next_x > x => next_x - x,
+                _ => bar.x + bar.w - x,
             };
-            // Drawn as the nearest common shape, labelled with the curve's highest point.
-            let kind = bend.kind();
-            let prebend = matches!(kind, BendKind::Prebend | BendKind::PrebendRelease);
-            let release = matches!(kind, BendKind::BendRelease | BendKind::PrebendRelease);
-            // The arrow rises from the note to the bend lane; a pre-bend goes straight up.
-            let peak = if prebend { x } else { x + half + 9.0 };
-            if prebend {
-                items.push(Item::line(x, y - 8.0, x, tip, 1.1, Color::Ink));
-            } else {
-                items.push(Item::curve(x + half + 1.0, y, peak, y, peak, tip));
-            }
-            arrow(items, peak, tip, 1.0);
-            if release {
-                let end = (peak + 13.0, y - 5.0);
-                items.push(Item::curve(peak, tip, end.0, tip, end.0, end.1));
-                arrow(items, end.0, end.1, -1.0);
-            }
-            let label = interval_label(bend.peak());
-            items.push(Item::text(peak, tip - 7.0, label, LABEL_SIZE, Font::Text));
+            let lane = self.lanes.bend_y(self.y);
+            draw_bend(bend, x, y, half, lane, room, items);
         }
     }
 
@@ -621,7 +639,84 @@ impl System<'_> {
                 items.push(Item::text(peak_x, label_y, label, 8.0, Font::Text));
             }
         }
-        if let Some(strum) = (beat.effects.strum).filter(|s| self.strings && *s != Strum::Rasgueado)
+        if beat.effects.fermata {
+            let y = lane(Lane::Fermata) + 6.0;
+            items.push(Item::text(x, y, FERMATA, 26.0, Font::Music));
+        }
+        if let Some(chord) = &beat.effects.chord {
+            let name = Item::text(x - 4.0, lane(Lane::Chord), chord.as_str(), 13.0, Font::Fret);
+            items.push(left_aligned(name));
+        }
+        if let Some(diagram) = &beat.effects.diagram {
+            draw_diagram(diagram, x - 1.0, lane(Lane::Diagram), items);
+        }
+        let mut changes = Vec::new();
+        if let Some(volume) = beat.effects.volume {
+            changes.push(format!("vol {volume}"));
+        }
+        match beat.effects.pan {
+            Some(0) => changes.push("pan centre".into()),
+            Some(pan @ ..0) => changes.push(format!("pan {} L", pan.unsigned_abs())),
+            Some(pan) => changes.push(format!("pan {pan} R")),
+            None => {}
+        }
+        if !changes.is_empty() {
+            let label = Item::text(
+                x - 4.0,
+                lane(Lane::Mix),
+                changes.join(", "),
+                9.0,
+                Font::Text,
+            );
+            items.push(left_aligned(label).colored(Color::Muted));
+        }
+        if let Some(text) = &beat.effects.text {
+            let words = Item::text(x - 4.0, lane(Lane::Text), text.as_str(), 11.0, Font::Text);
+            items.push(left_aligned(words));
+        }
+        let y = lane(Lane::Accent);
+        match beat
+            .notes
+            .iter()
+            .filter_map(|n| n.effects.accent)
+            .max_by_key(|a| *a as u8)
+        {
+            Some(Accent::Normal) => items.push(Item::text(x, y, ">", 12.0, Font::Fret)),
+            Some(Accent::Heavy) => items.push(Item::text(x, y, "\u{2227}", 12.0, Font::Fret)),
+            None => {}
+        }
+        if any(|n| n.effects.staccato) {
+            let beside = if any(|n| n.effects.accent.is_some()) {
+                8.0
+            } else {
+                0.0
+            };
+            items.push(Item::Dot {
+                x: r(x + beside),
+                y: r(y + 1.0),
+                r: 1.6,
+            });
+        }
+        if let Some(stroke) = beat.effects.stroke {
+            let glyph = match stroke {
+                PickStroke::Down => DOWN_BOW,
+                PickStroke::Up => UP_BOW,
+            };
+            items.push(Item::text(
+                x,
+                lane(Lane::Stroke) + 5.0,
+                glyph,
+                20.0,
+                Font::Music,
+            ));
+        }
+    }
+
+    /// Draws the arrow beside a strummed chord.
+    fn draw_strum(&self, bar_index: usize, beat_index: usize, items: &mut Vec<Item>) {
+        let beat = &self.beats(bar_index)[beat_index];
+        let x = self.xs[bar_index][beat_index];
+        if let Some(strum) = (beat.effects.strum).filter(|s| *s != Strum::Rasgueado)
             && let (Some(top), Some(low)) = (beat.notes.first(), beat.notes.last())
         {
             // An arrow beside the chord. A downstroke runs from the low strings to the
@@ -668,41 +763,12 @@ impl System<'_> {
                 Color::Ink,
             ));
         }
-        if beat.effects.fermata {
-            let y = lane(Lane::Fermata) + 6.0;
-            items.push(Item::text(x, y, FERMATA, 26.0, Font::Music));
-        }
-        if let Some(chord) = &beat.effects.chord {
-            let name = Item::text(x - 4.0, lane(Lane::Chord), chord.as_str(), 13.0, Font::Fret);
-            items.push(left_aligned(name));
-        }
-        if let Some(diagram) = &beat.effects.diagram {
-            draw_diagram(diagram, x - 1.0, lane(Lane::Diagram), items);
-        }
-        let mut changes = Vec::new();
-        if let Some(volume) = beat.effects.volume {
-            changes.push(format!("vol {volume}"));
-        }
-        match beat.effects.pan {
-            Some(0) => changes.push("pan centre".into()),
-            Some(pan @ ..0) => changes.push(format!("pan {} L", pan.unsigned_abs())),
-            Some(pan) => changes.push(format!("pan {pan} R")),
-            None => {}
-        }
-        if !changes.is_empty() {
-            let label = Item::text(
-                x - 4.0,
-                lane(Lane::Mix),
-                changes.join(", "),
-                9.0,
-                Font::Text,
-            );
-            items.push(left_aligned(label).colored(Color::Muted));
-        }
-        if let Some(text) = &beat.effects.text {
-            let words = Item::text(x - 4.0, lane(Lane::Text), text.as_str(), 11.0, Font::Text);
-            items.push(left_aligned(words));
-        }
+    }
+
+    /// Draws what goes under a beat: its dynamic mark and its lyrics.
+    fn draw_under(&self, bar_index: usize, beat_index: usize, items: &mut Vec<Item>) {
+        let beat = &self.beats(bar_index)[beat_index];
+        let x = self.xs[bar_index][beat_index];
         let lyrics_top = self.y
             + self.staff_height
             + self.below
@@ -719,42 +785,6 @@ impl System<'_> {
             let y = self.y + self.staff_height + self.below + 9.0;
             let glyph = DYNAMICS[dynamic as usize];
             items.push(Item::text(x, y, glyph, 22.0, Font::Music));
-        }
-        let y = lane(Lane::Accent);
-        match beat
-            .notes
-            .iter()
-            .filter_map(|n| n.effects.accent)
-            .max_by_key(|a| *a as u8)
-        {
-            Some(Accent::Normal) => items.push(Item::text(x, y, ">", 12.0, Font::Fret)),
-            Some(Accent::Heavy) => items.push(Item::text(x, y, "\u{2227}", 12.0, Font::Fret)),
-            None => {}
-        }
-        if any(|n| n.effects.staccato) {
-            let beside = if any(|n| n.effects.accent.is_some()) {
-                8.0
-            } else {
-                0.0
-            };
-            items.push(Item::Dot {
-                x: r(x + beside),
-                y: r(y + 1.0),
-                r: 1.6,
-            });
-        }
-        if let Some(stroke) = beat.effects.stroke {
-            let glyph = match stroke {
-                PickStroke::Down => DOWN_BOW,
-                PickStroke::Up => UP_BOW,
-            };
-            items.push(Item::text(
-                x,
-                lane(Lane::Stroke) + 5.0,
-                glyph,
-                20.0,
-                Font::Music,
-            ));
         }
     }
 
@@ -859,6 +889,128 @@ impl System<'_> {
             }
             start = end;
         }
+    }
+}
+
+/// The levels a bend moves between, in order: where it starts, where it turns or comes to
+/// rest, and where it ends. How fast it gets from one to the next is not part of it.
+fn bend_levels(bend: &Bend) -> Vec<i8> {
+    let values: Vec<i8> = bend.points.iter().map(|p| p.value).collect();
+    let mut levels = Vec::new();
+    for (i, &value) in values.iter().enumerate() {
+        let turns = match (i.checked_sub(1), values.get(i + 1)) {
+            (Some(before), Some(&after)) => values[before].cmp(&value) != value.cmp(&after),
+            _ => true,
+        };
+        if turns && levels.last() != Some(&value) {
+            levels.push(value);
+        }
+    }
+    levels
+}
+
+/// Whether a bend's levels are those of one of the four common shapes.
+fn common_bend(levels: &[i8]) -> bool {
+    match levels {
+        [0, _] | [0, _, 0] | [_, 0] => true,
+        [only] => *only > 0,
+        _ => false,
+    }
+}
+
+/// Width of one move of a bend drawn as its own curve: room for the size written at its end.
+const BEND_STEP: f64 = 16.0;
+
+/// Room a beat needs to the right of a note for its bend.
+pub(crate) fn bend_room(bend: &Bend) -> f64 {
+    let levels = bend_levels(bend);
+    match common_bend(&levels) {
+        true => 30.0,
+        false => 24.0 + BEND_STEP * levels.len().saturating_sub(1) as f64,
+    }
+}
+
+/// Draws a bend on the note at `(x, y)`, whose number or head is `half` wide either side,
+/// up into the lane centred on `lane`. `room` is the distance to whatever comes next.
+///
+/// The four common shapes are drawn as guitarists know them: an arrow up to the lane with
+/// the size of the bend over it, straight up for a pre-bend, and an arrow back down for a
+/// release. Any other curve is drawn as it goes: a step for every level it moves to, as
+/// high in the lane as that level is of the curve's highest, each with its arrow and size.
+pub(crate) fn draw_bend(
+    bend: &Bend,
+    x: f64,
+    y: f64,
+    half: f64,
+    lane: f64,
+    room: f64,
+    items: &mut Vec<Item>,
+) {
+    let tip = lane - 4.0;
+    let arrow = |items: &mut Vec<Item>, x: f64, y: f64, up: f64| {
+        items.push(Item::line(x, y, x - 3.0, y + 5.0 * up, 1.1, Color::Ink));
+        items.push(Item::line(x, y, x + 3.0, y + 5.0 * up, 1.1, Color::Ink));
+    };
+    let label = |items: &mut Vec<Item>, x: f64, y: f64, value: i8| {
+        let text = Item::text(x, y, interval_label(value), LABEL_SIZE, Font::Text);
+        items.push(text);
+    };
+    let levels = bend_levels(bend);
+    let peak = bend.peak();
+    if common_bend(&levels) {
+        let kind = bend.kind();
+        let prebend = matches!(kind, BendKind::Prebend | BendKind::PrebendRelease);
+        let release = matches!(kind, BendKind::BendRelease | BendKind::PrebendRelease);
+        // The arrow rises from the note to the bend lane; a pre-bend goes straight up.
+        let top = if prebend { x } else { x + half + 9.0 };
+        if prebend {
+            items.push(Item::line(x, y - 8.0, x, tip, 1.1, Color::Ink));
+        } else {
+            items.push(Item::curve(x + half + 1.0, y, top, y, top, tip));
+        }
+        arrow(items, top, tip, 1.0);
+        if release {
+            let end = (top + 13.0, y - 5.0);
+            items.push(Item::curve(top, tip, end.0, tip, end.0, end.1));
+            arrow(items, end.0, end.1, -1.0);
+        }
+        label(items, top, tip - 7.0, peak);
+        return;
+    }
+
+    // Unbent is back at the note; every other level has its height in the lane.
+    let floor = lane + 13.0;
+    let height = |value: i8| match value {
+        0 => y - 5.0,
+        _ => floor - (floor - tip) * f64::from(value) / f64::from(peak.max(1)),
+    };
+    let moves = levels.len().saturating_sub(1).max(1) as f64;
+    let step = ((room - half - 10.0) / moves).clamp(10.0, BEND_STEP);
+    let mut at = match levels[0] {
+        0 => (x + half + 1.0, y),
+        // Bent before it is struck: straight up from the note.
+        first => {
+            let top = height(first);
+            items.push(Item::line(x, y - 8.0, x, top, 1.1, Color::Ink));
+            arrow(items, x, top, 1.0);
+            label(items, x, top - 7.0, first);
+            (x, top)
+        }
+    };
+    for pair in levels.windows(2) {
+        let to = (at.0 + step, height(pair[1]));
+        items.push(Item::curve(at.0, at.1, to.0, at.1, to.0, to.1));
+        if pair[1] > pair[0] {
+            arrow(items, to.0, to.1, 1.0);
+            label(items, to.0, to.1 - 7.0, pair[1]);
+        } else {
+            arrow(items, to.0, to.1, -1.0);
+            // Let down part of the way: how far it is still bent goes under the arrow.
+            if pair[1] > 0 {
+                label(items, to.0, to.1 + 7.0, pair[1]);
+            }
+        }
+        at = to;
     }
 }
 
@@ -1115,6 +1267,83 @@ mod tests {
         // Bend, palm mute, let ring and harmonic lanes push the staff down.
         assert_eq!(layout.systems[0].y, plain.systems[0].y + 30.0 + 12.0 * 3.0);
         assert!(layout.items.iter().any(|i| matches!(i, Item::Curve { .. })));
+    }
+
+    #[test]
+    fn a_bend_of_its_own_shape_is_drawn_as_it_goes() {
+        // How fast a bend gets where it is going is not part of its shape.
+        let levels = |points: &[(u8, i8)]| bend_levels(&Bend::new(points.iter().copied()));
+        assert_eq!(levels(&[(0, 0), (10, 1), (20, 4), (60, 4)]), [0, 4]);
+        assert_eq!(
+            bend_levels(&Bend::preset(BendKind::BendRelease, 6)),
+            [0, 6, 0]
+        );
+        assert_eq!(
+            bend_levels(&Bend::preset(BendKind::PrebendRelease, 4)),
+            [4, 0]
+        );
+        assert_eq!(bend_levels(&Bend::preset(BendKind::Prebend, 4)), [4]);
+
+        let drawn = |points: &[(u8, i8)]| {
+            let mut score = demo_score();
+            let note = &mut score.tracks[0].staves[0].bars[0].voices[0].beats[2].notes[0];
+            note.effects.bend = Some(Bend::new(points.iter().copied()));
+            layout_track(&score, 0, 1000.0)
+        };
+        let curves = |layout: &Layout| {
+            (layout.items.iter())
+                .filter_map(|item| match item {
+                    Item::Curve { x2, y2, .. } => Some((*x2, *y2)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let labels = |layout: &Layout| {
+            (layout.items.iter())
+                .filter_map(|item| match item {
+                    Item::Text { s, y, .. } if ["½", "full", "1½"].contains(&s.as_str()) => {
+                        Some((s.clone(), *y))
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+
+        // Up a half step, held, up to a step and a half, then let down to a full step
+        // and bent up again: four moves, each to its own height and with its own size.
+        let custom = drawn(&[(0, 0), (10, 2), (20, 2), (30, 6), (40, 4), (50, 6), (60, 6)]);
+        let ends = curves(&custom);
+        assert_eq!(ends.len(), 4);
+        assert!(
+            ends.windows(2).all(|w| w[0].0 < w[1].0),
+            "moves run left to right"
+        );
+        // The page's y grows downwards: a higher level ends higher up.
+        assert!(ends[1].1 < ends[0].1 && ends[2].1 > ends[1].1 && ends[2].1 < ends[0].1);
+        assert_eq!(ends[3].1, ends[1].1);
+        let found = labels(&custom);
+        let names: Vec<&str> = found.iter().map(|(s, _)| s.as_str()).collect();
+        assert_eq!(names, ["½", "1½", "full", "1½"]);
+        // The size of a rise stands over its arrow and of a partial release under it.
+        assert!(found[0].1 < ends[0].1 && found[2].1 > ends[2].1);
+        // It all stays in the bend lane, clear of the staff.
+        let staff = custom.systems[0].y;
+        assert!(
+            ends.iter()
+                .all(|e| e.1 < staff && e.1 > staff - 17.0 - 30.0)
+        );
+        assert_eq!(staff, drawn(&[(0, 0), (15, 4), (60, 4)]).systems[0].y);
+
+        // A common shape, however its points are placed, is still drawn the usual way:
+        // one arrow up and one label.
+        let slow = drawn(&[(0, 0), (20, 1), (45, 4), (60, 4)]);
+        assert_eq!(curves(&slow).len(), 1);
+        assert_eq!(labels(&slow).len(), 1);
+        // Bent before it is struck and then bent further: a straight line up, then a move.
+        let further = drawn(&[(0, 2), (20, 2), (40, 4), (60, 4)]);
+        assert_eq!(curves(&further).len(), 1);
+        let names: Vec<String> = labels(&further).into_iter().map(|(s, _)| s).collect();
+        assert_eq!(names, ["½", "full"]);
     }
 
     #[test]

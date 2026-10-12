@@ -3,7 +3,7 @@ import type { Align } from "./Align";
 import type { Color } from "./Color";
 import type { Font } from "./Font";
 
-export type Item = { "t": "line", x1: number, y1: number, x2: number, y2: number, w: number, c: Color, } | { "t": "rect", x: number, y: number, w: number, h: number, c: Color, } | { "t": "dot", x: number, y: number, r: number, } | { "t": "arc", x1: number, x2: number, y: number, h: number, } | { "t": "curve", x1: number, y1: number, cx: number, cy: number, x2: number, y2: number, } | { "t": "text", x: number, 
+export type Item = { "t": "line", x1: number, y1: number, x2: number, y2: number, w: number, c: Color, } | { "t": "rect", x: number, y: number, w: number, h: number, c: Color, } | { "t": "dot", x: number, y: number, r: number, } | { "t": "beam", x1: number, y1: number, x2: number, y2: number, h: number, } | { "t": "arc", x1: number, x2: number, y: number, h: number, } | { "t": "curve", x1: number, y1: number, cx: number, cy: number, x2: number, y2: number, } | { "t": "text", x: number, 
 /**
  * Vertical centre of the text, or the glyph origin for [`Font::Music`].
  */

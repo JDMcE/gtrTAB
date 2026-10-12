@@ -49,6 +49,7 @@
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
   import TrackPane from './lib/TrackPane.svelte';
+  import { describeCursor } from './lib/describe';
   import Icon from './lib/ui/Icon.svelte';
   import type { IconName } from './lib/ui/icons';
   import MenuBar from './lib/ui/MenuBar.svelte';
@@ -481,6 +482,12 @@
     const own = score?.tracks[editor?.cursor.track ?? 0]?.kit;
     return own?.length ? own : standardKit;
   });
+  /** What is under the cursor, in words. */
+  const position = $derived(
+    score && editor ?
+      describeCursor(score, editor, new Map(drumKit.map((piece) => [piece.number, piece.name])))
+    : '',
+  );
 
   /** Entering a piece of the drum kit by name, for those who do not know its number. */
   const drumPieces = $derived(
@@ -1219,7 +1226,7 @@
   <!-- The two bars share a row when the window is wide enough and stack when it is not. -->
   <header class="bars">
     <div class="topbar">
-      <strong class="brand">gtrTab</strong>
+      <h1 class="brand">gtrTab</h1>
       <MenuBar {menus} onclose={focusScore} />
       <span class="rule"></span>
       <div class="cluster" role="toolbar" aria-label="File and edit" use:roving>
@@ -1294,7 +1301,7 @@
   </header>
 
   {#if score && editor && doc}
-    <div class="work">
+    <div class="work" role="main">
       <Palette sections={palette} {compact} collapsed={prefs.collapsed} ontoggle={toggleSection} />
       <div class="stage">
         <ScoreView
@@ -1326,6 +1333,7 @@
             commands={[cmd.addTrack, cmd.trackSettings, cmd.trackUp, cmd.trackDown, cmd.removeTrack]}
             onpick={pickTrack}
             onmix={setMix}
+            onmove={(from, to) => edit((d) => d.moveTrack(from, to))}
             onproperties={(track) => pickTrack(track, null).then(() => (dialog = 'track'))}
             onresize={(height) => (prefs.tracksHeight = height)}
           />
@@ -1349,6 +1357,10 @@
   {:else}
     <main>{failed ? '' : 'Loading…'}</main>
   {/if}
+
+  <!-- The score is drawn on a canvas, which says nothing to a screen reader: this says what
+       is under the cursor each time it moves or the music there changes. -->
+  <p class="sr-only" aria-live="polite" aria-atomic="true" data-position>{position}</p>
 
   <footer class:failed>
     <span role="status">{message || 'Press ? for the keyboard shortcuts'}</span>
@@ -1496,6 +1508,7 @@
   /* Sharing a row, the top bar takes the spare width; alone, each bar fills its row. */
   .topbar {
     flex: 1000 1 auto;
+    flex-wrap: wrap;
     min-width: 0;
   }
 
@@ -1505,8 +1518,11 @@
   }
 
   .brand {
+    margin: 0;
     padding: 0 var(--space-3) 0 var(--space-2);
     color: var(--accent);
+    font-size: inherit;
+    font-weight: 700;
   }
 
   .rule {

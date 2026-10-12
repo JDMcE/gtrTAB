@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
-  import { CHORD_TYPES, ROOTS, chordShapes } from './chords';
+  import { CHORD_TYPES, ROOTS, chordName as nameOf, chordShapes } from './chords';
   import type { ChordDiagram, Note } from './model';
   import ChordGrid, { GRID_FRETS, baseFret } from './ui/ChordGrid.svelte';
   import Dialog from './ui/Dialog.svelte';
@@ -26,9 +26,23 @@
   let showDiagram = $state(untrack(() => !!diagram || !name));
   let root = $state(0);
   let type = $state(0);
+  /** The note in the bass, or `null` for the root. */
+  let bass = $state<number | null>(null);
 
-  const shapes = $derived(chordShapes(tuning, root, CHORD_TYPES[type].intervals));
-  const built = $derived(ROOTS[root] + CHORD_TYPES[type].suffix);
+  const shapes = $derived(chordShapes(tuning, root, CHORD_TYPES[type].intervals, bass ?? root));
+  const built = $derived(nameOf(root, CHORD_TYPES[type].suffix, bass ?? root));
+  // The root in the bass is the chord as it stands, not an inversion of it.
+  $effect(() => {
+    if (bass === root) bass = null;
+  });
+  /** What each note is to the chord when it is in the bass, for the list of bass notes. */
+  const bassNotes = $derived(
+    ROOTS.map((note, i) => {
+      const inversion = CHORD_TYPES[type].intervals.indexOf((i - root + 12) % 12);
+      const part = ['', ' (1st inversion)', ' (2nd inversion)', ' (3rd inversion)'][inversion] ?? '';
+      return { value: i, label: note + part };
+    }).filter((option) => option.value !== root),
+  );
   const empty = $derived(frets.every((f) => f < 0));
 
   function useShape(shape: number[]) {
@@ -106,6 +120,15 @@
             {/each}
           </select>
         </label>
+        <label class="bass">
+          Bass
+          <select bind:value={bass}>
+            <option value={null}>{ROOTS[root]} (the root)</option>
+            {#each bassNotes as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
       </div>
       <div class="shapes" role="group" aria-label="Ways to play {built}">
         {#each shapes as shape}
@@ -164,6 +187,10 @@
     display: grid;
     grid-template-columns: 1fr 2fr;
     gap: var(--space-4);
+  }
+
+  .bass {
+    grid-column: 1 / -1;
   }
 
   .pair select {

@@ -64,22 +64,27 @@ fn lead(beat: &Beat) -> f64 {
     grace + if strum { 6.0 } else { 0.0 }
 }
 
-/// Markings that sit beside a note need the beat to be at least a little wider.
-fn wide(beat: &Beat) -> bool {
-    beat.notes.iter().any(|n| {
+/// The least room a beat can do with. Markings that sit beside a note need the beat to be
+/// a little wider, and a bend drawn as its own curve as wide as the curve.
+fn least(beat: &Beat) -> f64 {
+    let notes = beat.notes.iter().map(|n| {
         let e = &n.effects;
-        e.bend.is_some()
-            || e.harmonic.is_some()
-            || e.slide.is_some()
-            || e.hammer
-            || e.trill.is_some()
-    })
+        match &e.bend {
+            Some(bend) => crate::tab::bend_room(bend),
+            None if e.harmonic.is_some() || e.slide.is_some() || e.hammer || e.trill.is_some() => {
+                30.0
+            }
+            None => 20.0,
+        }
+    });
+    notes.fold(20.0, f64::max)
 }
 
 #[derive(Default)]
 struct Column {
     lead: f64,
-    wide: bool,
+    /// The least room the beats that start here can do with.
+    least: f64,
     x: f64,
 }
 
@@ -118,7 +123,7 @@ pub(crate) fn measure(
                     .and_then(|l| l.get(v)?.get(i).copied())
                     .unwrap_or(0.0);
                 column.lead = column.lead.max(lead(beat) + accidentals);
-                column.wide |= wide(beat);
+                column.least = column.least.max(least(beat));
                 time += beat.duration.length();
             }
             end = end.max(time);
@@ -146,7 +151,7 @@ pub(crate) fn measure(
         let quarters = gap * 4;
         let quarters = *quarters.numer() as f64 / *quarters.denom() as f64;
         let width = if quarters > 0.0 {
-            (28.0 * quarters.powf(0.55)).max(if column.wide { 30.0 } else { 20.0 })
+            (28.0 * quarters.powf(0.55)).max(column.least).max(20.0)
         } else {
             // Nothing sounds here: it is the slot at the end of the bar.
             SLOT_WIDTH
