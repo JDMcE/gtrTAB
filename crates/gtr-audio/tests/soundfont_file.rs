@@ -25,6 +25,25 @@ fn note(bytes: Option<&[u8]>, timbre: Timbre, pitch: u8) -> Vec<f32> {
     left
 }
 
+/// The same note's right channel: a kit has its pieces to either side.
+fn note_right(bytes: Option<&[u8]>, timbre: Timbre, pitch: u8) -> Vec<f32> {
+    let timeline = Timeline {
+        channels: vec![Channel {
+            timbre,
+            ..Channel::default()
+        }],
+        notes: vec![NoteEvent::plain(0.0, 1.0, pitch)],
+        duration: 1.0,
+        ..Timeline::default()
+    };
+    let mut engine = Engine::new(RATE);
+    engine.set_soundfont(bytes.map(|bytes| SoundFont::parse(bytes).unwrap()));
+    engine.load(timeline);
+    let (mut left, mut right) = (vec![0.0; 2 * RATE as usize], vec![0.0; 2 * RATE as usize]);
+    engine.process(&mut left, &mut right);
+    right
+}
+
 fn rms(samples: &[f32]) -> f32 {
     (samples.iter().map(|s| s * s).sum::<f32>() / samples.len() as f32).sqrt()
 }
@@ -88,6 +107,34 @@ fn a_general_midi_bank_plays_every_instrument_in_tune_and_at_a_like_level() {
             rms(&sampled[sampled.len() - 4_000..]) < 1e-3,
             "{timbre:?} rings on"
         );
+    }
+
+    // A bank's brightness is in how it moves its filters. GeneralUser GS leaves the steel
+    // guitar's at 500 Hz and has the key and the velocity open it: read without that, the
+    // top of the neck is 25 dB down on the bottom of it, and it should be within 12.
+    let (bottom, top) = (
+        note(Some(&bytes), Timbre::Steel, 40),
+        note(Some(&bytes), Timbre::Steel, 88),
+    );
+    let peak = |samples: &[f32]| samples.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+    println!(
+        "steel guitar: low E {:.3}, top E {:.3}",
+        peak(&bottom),
+        peak(&top)
+    );
+    assert!(
+        peak(&top) > peak(&bottom) * 0.25,
+        "the top of the neck is dull"
+    );
+
+    // Every piece of the kit that gtrTab names can be heard. The tambourine is all top,
+    // and is lost if the envelope that opens its filter is not followed.
+    for piece in 35..=81 {
+        let heard = note(Some(&bytes), Timbre::Drums, piece);
+        let right = note_right(Some(&bytes), Timbre::Drums, piece);
+        let loudest = peak(&heard).max(peak(&right));
+        assert!(loudest > 0.04, "drum {piece} peaks at {loudest}");
+        assert!(loudest < 0.98, "drum {piece} clips");
     }
 
     // The kit: a bass drum is low and long over, a crash is still ringing.

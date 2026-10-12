@@ -22,8 +22,9 @@ const VIBRATO_DELAY: f32 = 0.08;
 pub(crate) enum Voice {
     String(StringVoice),
     Drum(DrumHit),
-    /// A sample from a SoundFont, which is the only kind of voice with two sides.
-    Sampled(SampleVoice),
+    /// A sample from a SoundFont, which is the only kind of voice with two sides. It
+    /// carries all its bank says about it, and is far the largest of the three.
+    Sampled(Box<SampleVoice>),
 }
 
 impl Voice {
@@ -291,6 +292,12 @@ impl StringVoice {
                 *sample = previous;
             }
         }
+
+        // What goes round the string is averaged at every turn, which wears away
+        // everything but a steady offset: left in, that outlasts the note itself, and on
+        // a short string, which holds few samples to average out, is most of what sounds.
+        let offset = line.iter().sum::<f32>() / line.len() as f32;
+        line.iter_mut().for_each(|sample| *sample -= offset);
 
         // Lower strings ring longer; muting damps the string hard.
         let decay = match note.tone {
