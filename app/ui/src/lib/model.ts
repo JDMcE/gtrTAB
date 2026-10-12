@@ -4,6 +4,7 @@
 // names and the order it shows things in. Do not write a type here that Rust has.
 
 import type { BeatTime } from './generated/BeatTime';
+import type { Pulse } from './generated/Pulse';
 import type { Fade } from './generated/Fade';
 import type { Feel } from './generated/Feel';
 import type { Instrument } from './generated/Instrument';
@@ -23,6 +24,7 @@ export type { BarStatus } from './generated/BarStatus';
 export type { Beat } from './generated/Beat';
 export type { BeatEffects } from './generated/BeatEffects';
 export type { BeatTime } from './generated/BeatTime';
+export type { Pulse } from './generated/Pulse';
 export type { Bend } from './generated/Bend';
 export type { BendKind } from './generated/BendKind';
 export type { ChordDiagram } from './generated/ChordDiagram';
@@ -77,6 +79,7 @@ export type DrumPiece = KitPiece;
 /** What the player needs of a passage besides its sound; see `Passage.timelineJson`. */
 export interface Timeline {
   beats: BeatTime[];
+  pulses: Pulse[];
   duration: number;
 }
 

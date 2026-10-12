@@ -207,6 +207,19 @@ pub struct BeatTime {
     pub time: f64,
 }
 
+/// A pulse of the bar, as a metronome counts it, for showing the count while it plays.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct Pulse {
+    pub time: f64,
+    /// Which pulse of the bar it is, from 0.
+    pub index: u8,
+    /// Pulses in the bar.
+    pub count: u8,
+    /// One of the count-in's.
+    pub count_in: bool,
+}
+
 /// A change to a track's place in the mix part-way through, written on a beat.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 pub struct Automation {
@@ -230,6 +243,9 @@ pub struct Timeline {
     pub clicks: Vec<Click>,
     /// Beats of the followed track in time order.
     pub beats: Vec<BeatTime>,
+    /// Every pulse of every bar in time order, the count-in's among them, whether the
+    /// metronome is heard or not. The synth has no use for them and they are not sent to it.
+    pub pulses: Vec<Pulse>,
     /// Seconds the count-in lasts, before the first bar starts; zero without one.
     pub count_in: f64,
     /// Total length in seconds.
@@ -296,6 +312,7 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         notes: Vec::new(),
         clicks: Vec::new(),
         beats: Vec::new(),
+        pulses: Vec::new(),
         count_in: 0.0,
         duration: 0.0,
         looped: options.looped,
@@ -307,9 +324,16 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         let signature = masters[timing.bar].time_signature;
         let pulse = Rational::new(1, signature.denominator.into());
         let pulses = (0..signature.numerator).map(|i| (pulse * i64::from(i), i == 0));
+        let count = signature.numerator;
         if position == 0 && options.count_in {
             // The count-in keeps strict time, whatever the bar it leads into holds.
             let whole = timing.whole();
+            timeline.pulses.extend((0..count).map(|index| Pulse {
+                time: seconds(pulse * i64::from(index), whole),
+                index,
+                count,
+                count_in: true,
+            }));
             timeline
                 .clicks
                 .extend(pulses.clone().map(|(at, accent)| Click {
@@ -319,6 +343,12 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
             time += seconds(signature.bar_length(), whole);
             timeline.count_in = time;
         }
+        timeline.pulses.extend((0..count).map(|index| Pulse {
+            time: time + timing.at(pulse * i64::from(index)),
+            index,
+            count,
+            count_in: false,
+        }));
         if options.metronome {
             timeline.clicks.extend(pulses.map(|(at, accent)| Click {
                 time: time + timing.at(at),
@@ -852,6 +882,20 @@ mod tests {
         assert_eq!(t.duration, 8.0);
         assert_eq!(t.count_in, 4.0);
         assert!(t.looped);
+        // Every pulse is counted, the count-in's first, whether clicked or not.
+        assert_eq!(t.pulses.len(), 8);
+        assert!(t.pulses[..4].iter().all(|p| p.count_in && p.count == 4));
+        assert_eq!((t.pulses[5].time, t.pulses[5].index), (5.0, 1));
+        assert!(!t.pulses[5].count_in);
+        let quiet = compile(
+            &score,
+            0,
+            &Options {
+                metronome: false,
+                ..options
+            },
+        );
+        assert_eq!(quiet.pulses, t.pulses);
         assert_eq!(t.clicks.len(), 8);
         assert!(t.clicks[0].accent && !t.clicks[1].accent);
         assert_eq!(t.clicks[5].time, 5.0);

@@ -640,6 +640,7 @@ mod tests {
                 },
             ],
             beats: Vec::new(),
+            pulses: Vec::new(),
             count_in: 0.0,
             duration: 1.0,
             looped: false,

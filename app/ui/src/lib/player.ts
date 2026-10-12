@@ -1,5 +1,5 @@
 import synthUrl from '../wasm/gtr_worklet.wasm?url';
-import type { BeatTime, Timeline, Track } from './model';
+import type { BeatTime, Pulse, Timeline, Track } from './model';
 import workletUrl from './synth.worklet.js?url&no-inline';
 
 /** Where a track sits in the mix. */
@@ -50,11 +50,11 @@ export class Player {
   private sent = 0;
   /** The passage playing: the number of its latest version, or 0 when stopped. */
   private current = 0;
-  private beats: BeatTime[] = [];
-  /** Beats of a version the synth has been sent but has not started on yet. */
-  private next?: { id: number; beats: BeatTime[] };
-  /** Beats of the passage a loop goes on to the next time round, if it has been sent one. */
-  private queued?: { id: number; beats: BeatTime[] };
+  private timeline?: Timeline;
+  /** A version the synth has been sent but has not started on yet. */
+  private next?: { id: number; timeline: Timeline };
+  /** The passage a loop goes on to the next time round, if it has been sent one. */
+  private queued?: { id: number; timeline: Timeline };
   /** The last the synth said of how far it had got, and when by the context's clock. */
   private heard?: { seconds: number; at: number };
   private onEnd?: () => void;
@@ -94,11 +94,11 @@ export class Player {
     // The synth has started on a version it was sent: a newer one, or the one queued.
     if (report.id === this.next?.id) {
       this.current = report.id;
-      this.beats = this.next.beats;
+      this.timeline = this.next.timeline;
       this.next = undefined;
     } else if (report.id === this.queued?.id) {
       this.current = report.id;
-      this.beats = this.queued.beats;
+      this.timeline = this.queued.timeline;
       this.queued = undefined;
     }
     if (report.id !== this.current) return;
@@ -153,7 +153,7 @@ export class Player {
     const context = (this.context ??= new AudioContext());
     const [synth] = await Promise.all([this.start(context), context.resume()]);
     this.current = ++this.sent;
-    this.beats = timeline.beats;
+    this.timeline = timeline;
     this.onEnd = onEnd;
     this.onPass = onPass;
     const bytes = events.buffer as ArrayBuffer;
@@ -167,7 +167,7 @@ export class Player {
   async update(events: Uint8Array, timeline: Timeline): Promise<void> {
     if (!this.playing || !this.synth) return;
     const id = ++this.sent;
-    this.next = { id, beats: timeline.beats };
+    this.next = { id, timeline };
     const bytes = events.buffer as ArrayBuffer;
     (await this.synth).port.postMessage({ type: 'replace', id, events: bytes }, [bytes]);
   }
@@ -185,7 +185,7 @@ export class Player {
       return;
     }
     const id = ++this.sent;
-    this.queued = { id, beats: next.timeline.beats };
+    this.queued = { id, timeline: next.timeline };
     const bytes = next.events.buffer as ArrayBuffer;
     synth.port.postMessage({ type: 'queue', id, events: bytes }, [bytes]);
   }
@@ -201,17 +201,32 @@ export class Player {
     void this.synth?.then((synth) => synth.port.postMessage({ type: 'stop' }));
   }
 
+  /** Seconds into the passage now sounding, or `null` when stopped or not yet heard. */
+  private now(): number | null {
+    if (!this.playing || !this.context || !this.heard) return null;
+    return this.heard.seconds + (this.context.currentTime - this.heard.at);
+  }
+
   /** The beat sounding now, or `null` before the first beat or when stopped. */
   position(): BeatTime | null {
-    if (!this.playing || !this.context || !this.heard) return null;
-    const time = this.heard.seconds + (this.context.currentTime - this.heard.at);
-    let low = 0;
-    let high = this.beats.length;
-    while (low < high) {
-      const mid = (low + high) >> 1;
-      if (this.beats[mid].time <= time) low = mid + 1;
-      else high = mid;
-    }
-    return low > 0 ? this.beats[low - 1] : null;
+    return latest(this.timeline?.beats ?? [], this.now());
   }
+
+  /** The pulse of the bar sounding now, or `null` before the first or when stopped. */
+  pulse(): Pulse | null {
+    return latest(this.timeline?.pulses ?? [], this.now());
+  }
+}
+
+/** The last of `items`, in time order, to have started by `time`. */
+function latest<T extends { time: number }>(items: T[], time: number | null): T | null {
+  if (time === null) return null;
+  let low = 0;
+  let high = items.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (items[mid].time <= time) low = mid + 1;
+    else high = mid;
+  }
+  return low > 0 ? items[low - 1] : null;
 }

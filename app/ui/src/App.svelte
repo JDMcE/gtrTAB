@@ -30,6 +30,7 @@
     TARGETS,
     NOTE_VALUES,
     type DrumPiece,
+    type Pulse,
     type Dynamic,
     type Jump,
     type Target,
@@ -39,6 +40,7 @@
     type Score,
     type Timeline,
   } from './lib/model';
+  import BeatLights from './lib/BeatLights.svelte';
   import Palette from './lib/Palette.svelte';
   import PromptDialog, { type Prompt } from './lib/PromptDialog.svelte';
   import TrainerDialog from './lib/TrainerDialog.svelte';
@@ -137,6 +139,8 @@
 
   let playing = $state(false);
   let playhead = $state.raw<{ bar: number; beat: number } | null>(null);
+  /** The pulse of the bar sounding, for the visual metronome. */
+  let pulse = $state.raw<Pulse | null>(null);
   /** First bar visible in the score, which the track pane follows. */
   let viewBar = $state(0);
   let metronome = $state(false);
@@ -374,6 +378,7 @@
       const ended = () => {
         playing = false;
         playhead = null;
+        pulse = null;
       };
       await player.play(events, timeline, ended, onPass);
       playing = true;
@@ -387,6 +392,8 @@
     if (now && (now.bar !== playhead?.bar || now.beat !== playhead?.beat)) {
       playhead = { bar: now.bar, beat: now.beat };
     }
+    const beat = player.pulse();
+    if (beat?.time !== pulse?.time) pulse = beat;
     requestAnimationFrame(follow);
   }
 
@@ -397,6 +404,7 @@
     playing = false;
     const at = playhead;
     playhead = null;
+    pulse = null;
     if (at && doc && editor) {
       doc.setCursor(at.bar, at.beat, editor.cursor.string, false);
       refresh();
@@ -1038,6 +1046,12 @@
     play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
     metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
     countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    beatLights: {
+      label: 'Visual metronome',
+      icon: 'beatLights',
+      active: () => prefs.beatLights,
+      run: () => (prefs.beatLights = !prefs.beatLights),
+    },
     loop: { label: 'Loop', icon: 'loop', active: () => loop, run: () => setLoop(!loop) },
     trainer: { label: 'Speed trainer…', icon: 'trainer', active: () => training, run: () => (trainerOpen = true) },
     slower: { label: 'Slower', keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
@@ -1270,7 +1284,7 @@
           ...notations,
           cmd.multitrack,
           '-',
-          cmd.trackPane, cmd.inspector, cmd.compact,
+          cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: 'Theme', items: themes },
         ],
       },
@@ -1522,6 +1536,14 @@
         </button>
         <ToolButton command={cmd.metronome} />
         <ToolButton command={cmd.countIn} />
+        <ToolButton command={cmd.beatLights} />
+        {#if prefs.beatLights}
+          <BeatLights
+            count={pulse?.count ?? masterBar?.time_signature.numerator ?? 4}
+            lit={pulse?.index ?? null}
+            countIn={pulse?.count_in ?? false}
+          />
+        {/if}
         <ToolButton command={cmd.loop} />
         <ToolButton command={cmd.trainer} />
         <button

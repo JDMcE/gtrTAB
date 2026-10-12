@@ -335,6 +335,7 @@ impl Document {
         Ok(Passage {
             timeline_json: serde_json::to_string(&serde_json::json!({
                 "beats": timeline.beats,
+                "pulses": timeline.pulses,
                 "duration": timeline.duration,
             }))?,
             events: timeline.to_bytes(),

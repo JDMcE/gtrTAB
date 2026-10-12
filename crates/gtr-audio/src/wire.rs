@@ -201,6 +201,8 @@ impl Timeline {
             notes,
             clicks,
             beats,
+            // Only the page counts pulses; the synth is not sent them.
+            pulses: Vec::new(),
             count_in,
             duration,
             looped,
@@ -261,6 +263,7 @@ mod tests {
                 beat: 2,
                 time: 1.5,
             }],
+            pulses: Vec::new(),
             count_in: 0.5,
             duration: 2.0,
             looped: true,
