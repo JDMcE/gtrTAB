@@ -178,6 +178,8 @@ export const ICONS = {
   sixteenth: glyph(0xe1d9, 21, 20, 10),
   thirty_second: glyph(0xe1db, 19, 21, 10),
   sixty_fourth: glyph(0xe1dd, 16, 21.5, 10),
+  hundred_twenty_eighth: glyph(0xe1df, 14, 22, 10),
+  two_hundred_fifty_sixth: glyph(0xe1e1, 12.5, 22.5, 10),
   rest: glyph(0xe4e5, 22, 12.5),
   trill: glyph(0xe566, 34, 17),
   grace: glyph(0xe560, 34, 21),

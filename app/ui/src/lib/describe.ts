@@ -12,6 +12,8 @@ const VALUES: Record<string, string> = {
   sixteenth: 'sixteenth',
   thirty_second: 'thirty-second',
   sixty_fourth: 'sixty-fourth',
+  hundred_twenty_eighth: 'hundred and twenty-eighth',
+  two_hundred_fifty_sixth: 'two hundred and fifty-sixth',
 };
 const SLIDES: Record<string, string> = {
   shift: 'shift slide',
@@ -74,7 +76,7 @@ export function describeCursor(
   } else {
     parts.push(`beat ${cursor.beat + 1} of ${beats.length}`);
     const d = beat.duration;
-    const length = [d.dots > 1 ? 'double dotted' : d.dots ? 'dotted' : '', VALUES[d.value]]
+    const length = [['', 'dotted', 'double dotted', 'triple dotted'][d.dots] ?? '', VALUES[d.value]]
       .filter(Boolean)
       .join(' ');
     const tuplet = d.tuplet ? `, ${d.tuplet.actual} in the time of ${d.tuplet.normal}` : '';
@@ -84,6 +86,8 @@ export function describeCursor(
       : count === 1 ? `${length} note${tuplet}`
       : `${length} chord of ${count} notes${tuplet}`,
     );
+    const fade = editor.beat_effects?.fade;
+    if (fade) parts.push(fade === 'in' ? 'fading in' : fade === 'out' ? 'fading out' : 'swelling');
   }
 
   const note = editor.note;

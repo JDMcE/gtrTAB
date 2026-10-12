@@ -1,7 +1,7 @@
 //! Puts a score on the page: breaks it into lines, stacks the staves of each line and has
 //! each staff drawn.
 
-use gtr_model::{Bar, Clef, MasterBar, Rational, Score, Staff, Target};
+use gtr_model::{Bar, Clef, MasterBar, Rational, Score, Staff, Target, TempoPoint};
 use serde::Deserialize;
 
 use crate::display::r;
@@ -591,7 +591,12 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             items.push(Item::Text {
                 x: MARGIN_X,
                 y: r(top + 6.0),
-                s: format!("\u{2669} = {}", score.tempo),
+                s: tempo_mark(
+                    &gtr_model::tempo_points(score),
+                    0,
+                    Rational::from_integer(0),
+                    Some(score.tempo),
+                ),
                 size: 13.0,
                 font: Font::Text,
                 align: Align::Left,
@@ -658,9 +663,7 @@ fn ending_label(master: &MasterBar, time: Option<f64>) -> Option<String> {
     if master.repeat_count > 2 {
         ending.push(format!("\u{00D7}{}", master.repeat_count));
     }
-    if let Some(jump) = master.jump {
-        ending.push(jump.label().to_owned());
-    }
+    ending.extend(master.jumps.iter().map(|jump| jump.label().to_owned()));
     (!ending.is_empty()).then(|| ending.join("  "))
 }
 
@@ -668,16 +671,17 @@ fn ending_label(master: &MasterBar, time: Option<f64>) -> Option<String> {
 /// do not run into those of the next.
 fn marks_width(master: &MasterBar, bar: usize, time: Option<f64>) -> f64 {
     let mut width = 0.0;
-    if let Some(target) = master.target {
-        width += if target == Target::Fine { 30.0 } else { 20.0 };
-    }
+    width += master.targets.iter().map(|t| target_width(*t)).sum::<f64>();
     if let Some(section) = &master.section {
         width += section.chars().count() as f64 * SECTION_CHARACTER + 16.0;
     }
     if let Some(tempo) = master.tempo.filter(|_| bar > 0) {
         width += (tempo.to_string().len() + 4) as f64 * 6.5 + 8.0;
     }
-    if master.feel.is_some() && bar > 0 {
+    if master.tempo_gradual && bar > 0 {
+        width += 40.0;
+    }
+    if master.feel.is_some() {
         width += 72.0;
     }
     if let Some(label) = ending_label(master, time) {
@@ -687,6 +691,32 @@ fn marks_width(master: &MasterBar, bar: usize, time: Option<f64>) -> f64 {
         true => width + 8.0,
         false => 0.0,
     }
+}
+
+/// Room a sign takes over a bar: a word, one symbol, or two side by side.
+fn target_width(target: Target) -> f64 {
+    match target {
+        Target::Fine => 30.0,
+        Target::Segno | Target::Coda => 20.0,
+        Target::SegnoSegno | Target::DoubleCoda => 32.0,
+    }
+}
+
+/// How a tempo is written where the score sets it: the tempo, if it is a new one, and
+/// which way it moves from there if it does so by degrees.
+fn tempo_mark(points: &[TempoPoint], bar: usize, position: Rational, new: Option<u32>) -> String {
+    let index = (points.iter()).position(|p| (p.bar, p.position) == (bar, position));
+    let moving = match index.and_then(|index| gtr_model::gradual_change(points, index)) {
+        Some(std::cmp::Ordering::Greater) => "accel.",
+        Some(std::cmp::Ordering::Less) => "rit.",
+        _ => "",
+    };
+    let tempo = new.map_or(String::new(), |tempo| format!("\u{2669} = {tempo}"));
+    [tempo.as_str(), moving]
+        .into_iter()
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Widths of a character of a section name and of a label at the end of a bar.
@@ -718,15 +748,16 @@ fn bar_marks(
     };
     let has_marks = range.clone().any(|bar| {
         let m = &masters[bar];
-        let changes = bar > 0 && (m.tempo.is_some() || m.feel.is_some());
+        let changes = m.feel.is_some() || (bar > 0 && (m.tempo.is_some() || m.tempo_gradual));
         m.section.is_some()
             || !m.tempo_changes.is_empty()
             || m.timer
-            || m.target.is_some()
-            || m.jump.is_some()
+            || !m.targets.is_empty()
+            || !m.jumps.is_empty()
             || m.repeat_count > 2
             || changes
     });
+    let points = gtr_model::tempo_points(score);
     let has_endings = range.clone().any(|bar| masters[bar].alternate_endings != 0);
     // The first line keeps its opening tempo mark above everything else.
     let mut cursor = top
@@ -742,17 +773,26 @@ fn bar_marks(
             let m = &masters[bar];
             let (left, right) = (bars[bar].x + 3.0, bars[bar].x + bars[bar].w - 3.0);
             let mut x = left;
-            if let Some(target) = m.target {
-                match target {
-                    Target::Segno => {
-                        items.push(Item::text(x + 7.0, y + 6.0, SEGNO, 20.0, Font::Music))
+            for &target in &m.targets {
+                // A second segno or coda is the sign written twice.
+                let (sign, twice) = match target {
+                    Target::Segno => (Some(SEGNO), false),
+                    Target::SegnoSegno => (Some(SEGNO), true),
+                    Target::Coda => (Some(CODA), false),
+                    Target::DoubleCoda => (Some(CODA), true),
+                    Target::Fine => (None, false),
+                };
+                match sign {
+                    Some(sign) => {
+                        for copy in 0..=usize::from(twice) {
+                            let centre = if sign == SEGNO { 7.0 } else { 8.0 };
+                            let at = x + centre + 12.0 * copy as f64;
+                            items.push(Item::text(at, y + 6.0, sign, 20.0, Font::Music));
+                        }
                     }
-                    Target::Coda => {
-                        items.push(Item::text(x + 8.0, y + 6.0, CODA, 20.0, Font::Music))
-                    }
-                    Target::Fine => items.push(text(x, y, "Fine".into(), 12.0, Align::Left)),
+                    None => items.push(text(x, y, "Fine".into(), 12.0, Align::Left)),
                 }
-                x += if target == Target::Fine { 30.0 } else { 20.0 };
+                x += target_width(target);
             }
             if let Some(section) = &m.section {
                 // A section name stands in a box.
@@ -769,30 +809,22 @@ fn bar_marks(
                 items.push(name);
                 x += width + 8.0;
             }
-            if bar > 0 {
-                if let Some(tempo) = m.tempo {
-                    let mark = format!("\u{2669} = {tempo}");
-                    x += mark.chars().count() as f64 * 6.5 + 8.0;
-                    items.push(text(
-                        x - mark.chars().count() as f64 * 6.5 - 8.0,
-                        y,
-                        mark,
-                        12.0,
-                        Align::Left,
-                    ));
-                }
-                if let Some(feel) = m.feel {
-                    let name = match feel {
-                        gtr_model::Feel::Straight => "Straight",
-                        gtr_model::Feel::SwingEighths => "Swing 8ths",
-                        gtr_model::Feel::SwingSixteenths => "Swing 16ths",
-                    };
-                    items.push(text(x, y, name.into(), 11.0, Align::Left));
-                }
+            // The tempo the piece starts in is written once, over the first line.
+            let mark = match bar {
+                0 => String::new(),
+                _ => tempo_mark(&points, bar, Rational::from_integer(0), m.tempo),
+            };
+            if !mark.is_empty() {
+                let width = mark.chars().count() as f64 * 6.5 + 8.0;
+                items.push(text(x, y, mark, 12.0, Align::Left));
+                x += width;
+            }
+            if let Some(feel) = m.feel {
+                items.push(text(x, y, feel.label().into(), 11.0, Align::Left));
             }
             // A change of tempo inside the bar stands over the beat it starts on.
             for change in &m.tempo_changes {
-                let mark = format!("\u{2669} = {}", change.tempo);
+                let mark = tempo_mark(&points, bar, change.position, Some(change.tempo));
                 let at = moment_x(bar, change.position) - 5.0;
                 items.push(text(at, y, mark, 12.0, Align::Left));
             }
@@ -1154,16 +1186,17 @@ mod tests {
         let first = &mut score.master_bars[0];
         first.repeat_start = true;
         first.section = Some("Chorus".into());
-        first.target = Some(gtr_model::Target::Segno);
+        first.targets = vec![gtr_model::Target::Segno];
         first.alternate_endings = 0b01;
         first.repeat_count = 3;
         let second = &mut score.master_bars[1];
         second.alternate_endings = 0b110;
-        second.jump = Some(gtr_model::Jump::DalSegnoAlFine);
+        second.jumps = vec![gtr_model::Jump::DalSegnoAlFine];
         second.tempo = Some(90);
         second.tempo_changes = vec![gtr_model::TempoChange {
             position: Rational::new(1, 2),
             tempo: 132,
+            gradual: false,
         }];
         second.feel = Some(gtr_model::Feel::SwingEighths);
         let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
@@ -1639,7 +1672,7 @@ mod tests {
         let plain = layout(&score, &view(Notation::Tab), 1000.0);
 
         score.master_bars[0].repeat_count = 3;
-        score.master_bars[1].jump = Some(gtr_model::Jump::DalSegnoAlFine);
+        score.master_bars[1].jumps = vec![gtr_model::Jump::DalSegnoAlFine];
         score.master_bars[1].timer = true;
         score.master_bars[1].section = Some("Middle eight".into());
         let marked = layout(&score, &view(Notation::Tab), 1000.0);

@@ -66,6 +66,8 @@ pub struct EditorState {
     pub beat_effects: Option<BeatEffects>,
     /// The tempo that is written to change on the cursor's beat, if one is.
     pub tempo_change: Option<u32>,
+    /// Whether that tempo moves steadily on towards the next change.
+    pub tempo_gradual: bool,
     pub can_undo: bool,
     pub can_redo: bool,
     pub can_paste: bool,
@@ -158,7 +160,8 @@ impl Editor {
                 .and_then(|b| b.note_on(self.cursor.string))
                 .cloned(),
             beat_effects: self.current_beat().map(|b| b.effects.clone()),
-            tempo_change: self.tempo_change(),
+            tempo_change: self.tempo_change().map(|change| change.0),
+            tempo_gradual: self.tempo_change().is_some_and(|change| change.1),
             can_undo: self.history.can_undo(),
             can_redo: self.history.can_redo(),
             can_paste: self.clipboard.is_some(),
@@ -798,32 +801,40 @@ impl Editor {
             .sum()
     }
 
-    /// The tempo that is written to change on the cursor's beat, if one is.
-    fn tempo_change(&self) -> Option<u32> {
+    /// The tempo that is written to change on the cursor's beat, if one is, and whether
+    /// it moves steadily on from there.
+    fn tempo_change(&self) -> Option<(u32, bool)> {
         let master = &self.score.master_bars[self.cursor.bar];
         let position = self.cursor_position();
         match *position.numer() {
-            0 => master.tempo,
+            0 => master.tempo.map(|tempo| (tempo, master.tempo_gradual)),
             _ => (master.tempo_changes.iter())
                 .find(|c| c.position == position)
-                .map(|c| c.tempo),
+                .map(|c| (c.tempo, c.gradual)),
         }
     }
 
     /// Changes the tempo from the cursor's beat on, or with `None` takes away the change
-    /// written there.
-    pub fn set_tempo_change(&mut self, tempo: Option<u32>) -> Result<(), EditError> {
+    /// written there. `gradual` has the tempo move steadily from there to the next change
+    /// instead of holding until it.
+    pub fn set_tempo_change(&mut self, tempo: Option<u32>, gradual: bool) -> Result<(), EditError> {
         let bar = self.cursor.bar;
         let position = self.cursor_position();
         let mut master_bar = self.score.master_bars[bar].clone();
         if *position.numer() == 0 {
             master_bar.tempo = tempo;
+            master_bar.tempo_gradual = gradual && tempo.is_some();
         } else {
             let changes = &mut master_bar.tempo_changes;
             changes.retain(|c| c.position != position);
             if let Some(tempo) = tempo {
                 let at = changes.partition_point(|c| c.position < position);
-                changes.insert(at, TempoChange { position, tempo });
+                let change = TempoChange {
+                    position,
+                    tempo,
+                    gradual,
+                };
+                changes.insert(at, change);
             }
         }
         if master_bar == self.score.master_bars[bar] {

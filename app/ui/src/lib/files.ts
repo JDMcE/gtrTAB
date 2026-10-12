@@ -1,7 +1,7 @@
 // Opening and saving score files: native dialogs inside Tauri, browser fallbacks on the web.
 
 export const EXTENSION = 'gtrtab';
-export const IMPORT_EXTENSIONS = ['gp', 'gp5', 'gp4', 'gp3'];
+export const IMPORT_EXTENSIONS = ['gp', 'gpx', 'gp5', 'gp4', 'gp3'];
 
 export interface OpenedFile {
   name: string;
@@ -99,6 +99,38 @@ export async function saveFile(
   link.click();
   URL.revokeObjectURL(url);
   return { name, path: null };
+}
+
+/**
+ * Saves something made from the score, such as its sound, under a name the user chooses:
+ * through the save dialog on desktop, and as a download on the web. `kind` names the sort
+ * of file for the dialog and `type` is its media type. Resolves to the name written, or
+ * `null` if the user cancelled.
+ */
+export async function exportFile(
+  name: string,
+  bytes: Uint8Array,
+  kind: string,
+  type: string,
+): Promise<string | null> {
+  if (isTauri) {
+    const { save } = await import('@tauri-apps/plugin-dialog');
+    const path = await save({
+      defaultPath: name,
+      filters: [{ name: kind, extensions: [name.split('.').pop() ?? ''] }],
+    });
+    if (path === null) return null;
+    const { writeFile } = await import('@tauri-apps/plugin-fs');
+    await writeFile(path, bytes);
+    return baseName(path);
+  }
+  const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  URL.revokeObjectURL(url);
+  return name;
 }
 
 // --- Recent files and autosave, kept in localStorage ---

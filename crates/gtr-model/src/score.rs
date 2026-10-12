@@ -59,18 +59,24 @@ pub struct MasterBar {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub section: Option<String>,
-    /// A place that a jump leads to.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub target: Option<Target>,
-    /// An instruction, at the end of this bar, to carry on from somewhere else.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[ts(optional)]
-    pub jump: Option<Jump>,
+    /// The places this bar is that a jump leads to. Usually one, if any.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Target>>")]
+    pub targets: Vec<Target>,
+    /// Instructions, at the end of this bar, to carry on from somewhere else, in the
+    /// order they are taken: each is followed once.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Jump>>")]
+    pub jumps: Vec<Jump>,
     /// A new tempo from this bar on, in quarter notes per minute.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub tempo: Option<u32>,
+    /// From the start of this bar the tempo moves steadily towards the next change of
+    /// tempo, wherever that is, instead of holding until it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
+    pub tempo_gradual: bool,
     /// Changes of tempo part-way through the bar, in the order they come.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(optional, as = "Option<Vec<TempoChange>>")]
@@ -94,6 +100,10 @@ pub struct TempoChange {
     pub position: Rational,
     /// Quarter notes per minute.
     pub tempo: u32,
+    /// From here the tempo moves steadily towards the next change, instead of holding.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
+    pub gradual: bool,
 }
 
 fn is_zero(value: &u8) -> bool {
@@ -109,6 +119,20 @@ pub enum Target {
     Coda,
     /// The end of the piece, once a jump "al fine" has been taken.
     Fine,
+    /// A second segno, for a piece that goes back to two places.
+    SegnoSegno,
+    /// A second coda.
+    DoubleCoda,
+}
+
+impl Target {
+    pub const ALL: [Target; 5] = [
+        Target::Segno,
+        Target::SegnoSegno,
+        Target::Coda,
+        Target::DoubleCoda,
+        Target::Fine,
+    ];
 }
 
 /// Where to carry on from at the end of a bar.
@@ -126,6 +150,15 @@ pub enum Jump {
     DalSegnoAlCoda,
     /// On to the coda, once a jump "al coda" has been taken.
     ToCoda,
+    DaCapoAlDoubleCoda,
+    DalSegnoAlDoubleCoda,
+    /// Back to the second segno.
+    DalSegnoSegno,
+    DalSegnoSegnoAlFine,
+    DalSegnoSegnoAlCoda,
+    DalSegnoSegnoAlDoubleCoda,
+    /// On to the second coda, once a jump "al double coda" has been taken.
+    ToDoubleCoda,
 }
 
 impl Jump {
@@ -138,6 +171,52 @@ impl Jump {
             Jump::DalSegnoAlFine => "D.S. al Fine",
             Jump::DalSegnoAlCoda => "D.S. al Coda",
             Jump::ToCoda => "To Coda",
+            Jump::DaCapoAlDoubleCoda => "D.C. al Double Coda",
+            Jump::DalSegnoAlDoubleCoda => "D.S. al Double Coda",
+            Jump::DalSegnoSegno => "D.S.S.",
+            Jump::DalSegnoSegnoAlFine => "D.S.S. al Fine",
+            Jump::DalSegnoSegnoAlCoda => "D.S.S. al Coda",
+            Jump::DalSegnoSegnoAlDoubleCoda => "D.S.S. al Double Coda",
+            Jump::ToDoubleCoda => "To Double Coda",
+        }
+    }
+
+    /// The sign it goes back to, or `None` for the start of the piece or for a jump on
+    /// to a coda.
+    pub fn back_to(self) -> Option<Target> {
+        use Jump::*;
+        match self {
+            DalSegno | DalSegnoAlFine | DalSegnoAlCoda | DalSegnoAlDoubleCoda => {
+                Some(Target::Segno)
+            }
+            DalSegnoSegno
+            | DalSegnoSegnoAlFine
+            | DalSegnoSegnoAlCoda
+            | DalSegnoSegnoAlDoubleCoda => Some(Target::SegnoSegno),
+            _ => None,
+        }
+    }
+
+    /// Where the piece is to go once it has gone back: on to the end, to stop at the
+    /// fine, or to leave for one of the codas.
+    pub fn until(self) -> Option<Target> {
+        use Jump::*;
+        match self {
+            DaCapoAlFine | DalSegnoAlFine | DalSegnoSegnoAlFine => Some(Target::Fine),
+            DaCapoAlCoda | DalSegnoAlCoda | DalSegnoSegnoAlCoda => Some(Target::Coda),
+            DaCapoAlDoubleCoda | DalSegnoAlDoubleCoda | DalSegnoSegnoAlDoubleCoda => {
+                Some(Target::DoubleCoda)
+            }
+            _ => None,
+        }
+    }
+
+    /// The coda a jump onwards leads to, for the two jumps that are that.
+    pub fn onward(self) -> Option<Target> {
+        match self {
+            Jump::ToCoda => Some(Target::Coda),
+            Jump::ToDoubleCoda => Some(Target::DoubleCoda),
+            _ => None,
         }
     }
 }
@@ -151,6 +230,41 @@ pub enum Feel {
     /// Pairs of eighth notes are played long-short, as two thirds and one third.
     SwingEighths,
     SwingSixteenths,
+    /// Long-short as three quarters and one quarter: a dotted note and a short one.
+    DottedEighths,
+    DottedSixteenths,
+    /// Short-long, the Scotch snap: one quarter and three quarters.
+    ScottishEighths,
+    ScottishSixteenths,
+}
+
+impl Feel {
+    /// The length of a pair of the notes it moves, and the share of it the first takes;
+    /// nothing for a straight feel.
+    pub fn pair(self) -> Option<(Rational, Rational)> {
+        let (eighths, share) = match self {
+            Feel::Straight => return None,
+            Feel::SwingEighths => (true, Rational::new(2, 3)),
+            Feel::SwingSixteenths => (false, Rational::new(2, 3)),
+            Feel::DottedEighths => (true, Rational::new(3, 4)),
+            Feel::DottedSixteenths => (false, Rational::new(3, 4)),
+            Feel::ScottishEighths => (true, Rational::new(1, 4)),
+            Feel::ScottishSixteenths => (false, Rational::new(1, 4)),
+        };
+        Some((Rational::new(1, if eighths { 4 } else { 8 }), share))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Feel::Straight => "Straight",
+            Feel::SwingEighths => "Swing 8ths",
+            Feel::SwingSixteenths => "Swing 16ths",
+            Feel::DottedEighths => "Dotted 8ths",
+            Feel::DottedSixteenths => "Dotted 16ths",
+            Feel::ScottishEighths => "Scottish 8ths",
+            Feel::ScottishSixteenths => "Scottish 16ths",
+        }
+    }
 }
 
 impl MasterBar {
@@ -165,9 +279,10 @@ impl MasterBar {
             repeat_count: 0,
             alternate_endings: 0,
             section: None,
-            target: None,
-            jump: None,
+            targets: Vec::new(),
+            jumps: Vec::new(),
             tempo: None,
+            tempo_gradual: false,
             tempo_changes: Vec::new(),
             feel: None,
             timer: false,

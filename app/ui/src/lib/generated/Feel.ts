@@ -3,4 +3,4 @@
 /**
  * How evenly pairs of short notes are played.
  */
-export type Feel = "straight" | "swing_eighths" | "swing_sixteenths";
+export type Feel = "straight" | "swing_eighths" | "swing_sixteenths" | "dotted_eighths" | "dotted_sixteenths" | "scottish_eighths" | "scottish_sixteenths";

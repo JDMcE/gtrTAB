@@ -235,7 +235,7 @@ fn bar_marks() -> Score {
     bars[1].alternate_endings = 0b01;
     bars[1].repeat_count = 2;
     bars[2].alternate_endings = 0b10;
-    bars[2].target = Some(Target::Segno);
+    bars[2].targets = vec![Target::Segno];
     bars[3].tempo = Some(96);
     bars[3].key_signature = 2;
     bars[3].time_signature = TimeSignature {
@@ -245,11 +245,12 @@ fn bar_marks() -> Score {
     bars[3].tempo_changes = vec![TempoChange {
         position: gtr_model::Rational::new(3, 8),
         tempo: 132,
+        gradual: false,
     }];
     bars[4].repeat_start = true;
     bars[4].repeat_count = 3;
-    bars[4].target = Some(Target::Fine);
-    bars[5].jump = Some(Jump::DalSegnoAlFine);
+    bars[4].targets = vec![Target::Fine];
+    bars[5].jumps = vec![Jump::DalSegnoAlFine];
     bars[5].timer = true;
     for bar in &mut bars[4..6] {
         bar.key_signature = 2;
@@ -307,6 +308,65 @@ fn band() -> Score {
     drums.staves[0].bars[1].voices[0].beats = vec![beat(Whole, &[(0, 49), (4, 36)])];
     score.tracks.extend([bass, piano, drums]);
     score
+}
+
+/// What Guitar Pro has that came late to the model: second segnos and codas, several
+/// jumps on a bar, the dotted and Scottish feels, a tempo that changes by degrees, fades,
+/// notes down to a 256th and a third dot.
+fn late_arrivals() -> Score {
+    use NoteValue::{HundredTwentyEighth, SixtyFourth, ThirtySecond, TwoHundredFiftySixth};
+    let run = |value: NoteValue, count: u8| (0..count).map(move |i| beat(value, &[(1, 5 + i % 4)]));
+    let mut score = guitar(vec![
+        vec![
+            beat(Quarter, &[(2, 7)]),
+            beat(Quarter, &[(2, 9)]),
+            beat(Half, &[(1, 8)]),
+        ],
+        vec![
+            beat(Half, &[(1, 5)]),
+            beat(Quarter, &[(1, 7)]),
+            beat(Quarter, &[(1, 8)]),
+        ],
+        run(ThirtySecond, 8)
+            .chain(run(SixtyFourth, 16))
+            .chain(run(HundredTwentyEighth, 16))
+            .chain(run(TwoHundredFiftySixth, 32))
+            .chain([beat(Quarter, &[(1, 5)])])
+            .collect(),
+        vec![
+            beat(Half, &[(3, 2)]),
+            Beat::rest(Duration::new(HundredTwentyEighth)),
+        ],
+    ]);
+    let bars = &mut score.master_bars;
+    bars[0].targets = vec![Target::Segno, Target::SegnoSegno];
+    bars[0].tempo_gradual = true;
+    bars[0].feel = Some(gtr_model::Feel::DottedEighths);
+    bars[1].targets = vec![Target::DoubleCoda];
+    bars[1].tempo = Some(160);
+    bars[1].feel = Some(gtr_model::Feel::ScottishSixteenths);
+    bars[1].tempo_changes = vec![TempoChange {
+        position: gtr_model::Rational::new(1, 2),
+        tempo: 140,
+        gradual: true,
+    }];
+    bars[2].tempo = Some(80);
+    bars[3].jumps = vec![Jump::DalSegnoSegno, Jump::DalSegnoAlDoubleCoda];
+    let first = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+    first[0].effects.fade = Some(gtr_model::Fade::In);
+    first[1].effects.fade = Some(gtr_model::Fade::Out);
+    first[2].effects.fade = Some(gtr_model::Fade::Swell);
+    // A half note with three dots and a 128th rest fill the last bar but for a sliver.
+    score.tracks[0].staves[0].bars[3].voices[0].beats[0]
+        .duration
+        .dots = 3;
+    score
+}
+
+#[test]
+fn what_came_late_from_guitar_pro() {
+    check("late-arrivals-both", &late_arrivals(), view(Notation::Both));
+    check("late-arrivals-tab", &late_arrivals(), view(Notation::Tab));
 }
 
 #[test]

@@ -29,17 +29,23 @@ alternate_endings?: number,
  */
 section?: string, 
 /**
- * A place that a jump leads to.
+ * The places this bar is that a jump leads to. Usually one, if any.
  */
-target?: Target, 
+targets?: Array<Target>, 
 /**
- * An instruction, at the end of this bar, to carry on from somewhere else.
+ * Instructions, at the end of this bar, to carry on from somewhere else, in the
+ * order they are taken: each is followed once.
  */
-jump?: Jump, 
+jumps?: Array<Jump>, 
 /**
  * A new tempo from this bar on, in quarter notes per minute.
  */
 tempo?: number, 
+/**
+ * From the start of this bar the tempo moves steadily towards the next change of
+ * tempo, wherever that is, instead of holding until it.
+ */
+tempo_gradual?: boolean, 
 /**
  * Changes of tempo part-way through the bar, in the order they come.
  */

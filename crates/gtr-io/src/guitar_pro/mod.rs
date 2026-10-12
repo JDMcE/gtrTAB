@@ -1,9 +1,11 @@
-//! Read-only Guitar Pro import. It brings in tracks, tunings, bars, time signatures, the
-//! starting tempo, notes, rests and ties; everything else is skipped and listed in
-//! [`Imported::skipped`].
+//! Guitar Pro import, from every version of its format: the binary files of versions 3 to
+//! 5, the XML score of versions 6 to 8, in the container of version 6 or the zip archive
+//! of the later ones. What a file holds that the model has no place for is left out and
+//! listed in [`Imported::skipped`].
 
 mod gp5;
 mod gp7;
+mod gpx;
 
 use std::collections::BTreeSet;
 
@@ -38,9 +40,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
     let score = if bytes.starts_with(b"PK") {
         gp7::read(bytes, &mut skipped)?
     } else if bytes.starts_with(b"BCFZ") || bytes.starts_with(b"BCFS") {
-        return Err(ImportError::UnsupportedVersion(
-            "Guitar Pro 6 (.gpx)".into(),
-        ));
+        gpx::read(bytes, &mut skipped)?
     } else {
         gp5::read(bytes, &mut skipped)?
     };
@@ -85,10 +85,10 @@ fn duration(
     tuplet: Option<(u8, u8)>,
     skipped: &mut Skipped,
 ) -> Duration {
-    skipped.add_if(value.is_none(), "notes shorter than a 64th");
-    skipped.add_if(dots > Duration::MAX_DOTS, "triple dots");
+    skipped.add_if(value.is_none(), "notes shorter than a 256th");
+    skipped.add_if(dots > Duration::MAX_DOTS, "more than three dots");
     Duration {
-        value: value.unwrap_or(NoteValue::SixtyFourth),
+        value: value.unwrap_or(NoteValue::TwoHundredFiftySixth),
         dots: dots.min(Duration::MAX_DOTS),
         tuplet: tuplet.and_then(|(actual, normal)| {
             Some(Tuplet {
@@ -169,6 +169,74 @@ fn keep_dynamic_changes(staff: &mut Staff) {
                 }
             }
         }
+    }
+}
+
+/// Has the tempo change at a moment of a bar, given in whole notes from its start: the
+/// bar's own tempo if that is its first beat, and otherwise a change inside it. A second
+/// tempo for the same moment takes the place of the first. `gradual` has the tempo move
+/// steadily from there to the next change.
+fn set_tempo(
+    master: &mut gtr_model::MasterBar,
+    position: gtr_model::Rational,
+    tempo: u32,
+    gradual: bool,
+) {
+    let tempo = tempo.clamp(1, 1000);
+    if position <= gtr_model::Rational::from_integer(0) {
+        master.tempo = Some(tempo);
+        master.tempo_gradual = gradual;
+    } else if position < master.time_signature.bar_length() {
+        let change = gtr_model::TempoChange {
+            position,
+            tempo,
+            gradual,
+        };
+        match (master.tempo_changes).binary_search_by(|c| c.position.cmp(&position)) {
+            Ok(at) => master.tempo_changes[at] = change,
+            Err(at) => master.tempo_changes.insert(at, change),
+        }
+    }
+}
+
+/// Puts the words of one line of lyrics under a staff, a syllable to each beat that has
+/// notes, from the bar numbered `start`. Words are split at spaces and after hyphens; a
+/// plus sign joins two words under one beat, and what is in square brackets is a remark
+/// that is not sung.
+fn set_lyrics(staff: &mut Staff, line: usize, start: usize, words: &str) {
+    if line >= gtr_model::BeatEffects::MAX_LYRIC_LINES {
+        return;
+    }
+    let mut sung = String::new();
+    let mut remark = 0;
+    for c in words.chars() {
+        match c {
+            '[' => remark += 1,
+            ']' => remark = (remark - 1).max(0),
+            _ if remark > 0 => {}
+            // A hyphen ends a syllable and stays with it.
+            '-' => sung.push_str("- "),
+            _ => sung.push(c),
+        }
+    }
+    let mut syllables = sung
+        .split_whitespace()
+        .map(|syllable| syllable.replace('+', " "));
+    let beats = (staff.bars.iter_mut().skip(start))
+        .filter_map(|bar| bar.voices.first_mut())
+        .flat_map(|voice| &mut voice.beats)
+        .filter(|beat| !beat.is_rest());
+    for beat in beats {
+        let Some(syllable) = syllables.next() else {
+            break;
+        };
+        if beat.effects.lyrics.len() <= line {
+            beat.effects.lyrics.resize(line + 1, String::new());
+        }
+        beat.effects.lyrics[line] = syllable
+            .chars()
+            .take(gtr_model::BeatEffects::MAX_TEXT)
+            .collect();
     }
 }
 

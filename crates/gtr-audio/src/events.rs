@@ -1,6 +1,6 @@
 use gtr_model::{
-    Accent, BarTiming, Beat, Bend, Dynamic, Hairpin, Harmonic, Instrument, Note, Rational, Score,
-    Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
+    Accent, BarTiming, Beat, Bend, Dynamic, Fade, Hairpin, Harmonic, Instrument, Note, Rational,
+    Score, Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -165,6 +165,9 @@ pub struct NoteEvent {
     pub pitch_curve: Vec<(f32, f32)>,
     /// Vibrato depth in semitones; zero for none.
     pub vibrato: f32,
+    /// The note's volume is brought up from nothing, taken down to it, or both, over
+    /// its length.
+    pub fade: Option<Fade>,
 }
 
 impl NoteEvent {
@@ -180,6 +183,7 @@ impl NoteEvent {
             soft: false,
             pitch_curve: Vec::new(),
             vibrato: 0.0,
+            fade: None,
         }
     }
 }
@@ -519,6 +523,7 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         note_event(note, staff, pitch, time, pick_length, following, trill_step);
                     // A tapped note is hammered on by the picking hand, not picked.
                     event.soft = previous.legato || note.effects.tapped;
+                    event.fade = beat.effects.fade;
                     event.velocity *= gain * hits[0].2;
                     if event.pitch_curve.is_empty()
                         && let Some(whammy) = &beat.effects.whammy

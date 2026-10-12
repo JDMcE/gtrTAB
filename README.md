@@ -97,7 +97,9 @@ Repeats, alternate endings, segno, coda and fine, section names, tempo changes, 
 
 On a drum track a note's fret is the number of a piece of the kit, such as 36 for the bass drum, 38 for the snare and 42 for the closed hi-hat; Note > Drum piece lists them by name. A piano track has a staff for each hand, and its notes are entered on tab lines like any other track's.
 
-Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp`, `.gp5`) open through Open or by dropping them on the window.
+File > Export audio (WAV)… writes the score to a sound file as it plays.
+
+Moving right past the end of a full bar starts a new one. Guitar Pro files of every version (`.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`) open through Open or by dropping them on the window.
 
 ## Layout
 
@@ -109,4 +111,4 @@ Moving right past the end of a full bar starts a new one. Guitar Pro files (`.gp
 
 - `app/ui/public/fonts/Bravura.woff2`: the Bravura music font by Steinberg, under the SIL Open Font License (`Bravura-OFL.txt` alongside it).
 - Interface icons from [Lucide](https://lucide.dev) (`@lucide/svelte`), under the ISC License. Music symbols in the interface are Bravura glyphs; the guitar technique icons are drawn in `app/ui/src/lib/ui/icons.ts`.
-- `tests/corpus/alphatab/`: Guitar Pro files from the test data of [alphaTab](https://github.com/CoderLine/alphaTab), under the Mozilla Public License 2.0 (`LICENSE` alongside them; `tests/corpus/README.md` says which and from where). They are used by the tests only.
+- `tests/corpus/alphatab/`: Guitar Pro files of every version from the test data of [alphaTab](https://github.com/CoderLine/alphaTab), under the Mozilla Public License 2.0 (`LICENSE` alongside them; `tests/corpus/README.md` says which and from where). They are used by the tests only.

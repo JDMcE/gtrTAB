@@ -874,7 +874,7 @@ impl Notation<'_> {
                 _ => 0.0,
             };
         items.push(glyph(x, y, REST_WHOLE + beat.duration.value as u32));
-        for dot in 0..beat.duration.dots.min(2) {
+        for dot in 0..beat.duration.dots.min(3) {
             items.push(Item::Dot {
                 x: r(x + 9.0 + 4.0 * f64::from(dot)),
                 y: r(shift - SPACE / 2.0),
@@ -1152,7 +1152,7 @@ impl Notation<'_> {
             let space = spelled.position + i32::from(spelled.position % 2 == 0);
             if !dotted.contains(&space) {
                 dotted.push(space);
-                for dot in 0..beat.duration.dots.min(2) {
+                for dot in 0..beat.duration.dots.min(3) {
                     items.push(Item::Dot {
                         x: r(right + 4.5 + 4.0 * f64::from(dot)),
                         y: r(y_of(space)),
@@ -1187,7 +1187,7 @@ impl Notation<'_> {
                 // Slides, as the tab has them: a line to the note slid to, or a short one
                 // into or out of this note. They start clear of the dots and stop clear
                 // of the signs.
-                let dots = f64::from(beat.duration.dots.min(2));
+                let dots = f64::from(beat.duration.dots.min(3));
                 let after = right + if dots > 0.0 { 5.0 + 4.0 * dots } else { 2.0 };
                 let before = left_edge
                     - if spelled.accidental.is_some() {

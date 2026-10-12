@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 6;
+pub const FORMAT_VERSION: u64 = 7;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -123,6 +123,24 @@ fn migrate(from: u64, score: &mut Value) {
             }
         });
     }
+    if from < 7 {
+        // Version 7 also added shorter notes, a third dot, more feels, fades and gradual
+        // changes of tempo, none of which an older file can have.
+        list_signs_and_jumps(score);
+    }
+}
+
+/// Version 7 lets a bar be several signs and have several jumps: what was one of each, if
+/// there was one, becomes a list of one.
+fn list_signs_and_jumps(score: &mut Value) {
+    let bars = score.get_mut("master_bars").and_then(Value::as_array_mut);
+    for bar in bars.into_iter().flatten().filter_map(Value::as_object_mut) {
+        for (one, several) in [("target", "targets"), ("jump", "jumps")] {
+            if let Some(value) = bar.remove(one).filter(|value| !value.is_null()) {
+                bar.insert(several.into(), Value::Array(vec![value]));
+            }
+        }
+    }
 }
 
 fn for_each_note(score: &mut Value, mut visit: impl FnMut(&mut Value)) {
@@ -193,6 +211,45 @@ mod tests {
         );
         // And what is saved now is read back as it is.
         assert_eq!(load(&save(&loaded).unwrap()).unwrap(), loaded);
+    }
+
+    #[test]
+    fn version_6_signs_and_jumps_become_lists() {
+        // A bar had one sign and one jump, each under its own name.
+        let mut score = serde_json::to_value(demo_score()).unwrap();
+        score["master_bars"][0]["target"] = "segno".into();
+        score["master_bars"][1]["jump"] = "dal_segno_al_fine".into();
+        score["master_bars"][1]["target"] = serde_json::Value::Null;
+        let json = serde_json::json!({ "format_version": 6, "score": score }).to_string();
+        let loaded = load(&archive(&json)).unwrap();
+        assert_eq!(loaded.master_bars[0].targets, [gtr_model::Target::Segno]);
+        assert!(loaded.master_bars[0].jumps.is_empty());
+        assert_eq!(
+            loaded.master_bars[1].jumps,
+            [gtr_model::Jump::DalSegnoAlFine]
+        );
+        assert!(loaded.master_bars[1].targets.is_empty());
+
+        // What version 7 added goes out and comes back as it was.
+        let mut score = demo_score();
+        let bar = &mut score.master_bars[0];
+        bar.targets = vec![gtr_model::Target::SegnoSegno, gtr_model::Target::DoubleCoda];
+        bar.jumps = vec![
+            gtr_model::Jump::DalSegnoSegno,
+            gtr_model::Jump::ToDoubleCoda,
+        ];
+        bar.feel = Some(gtr_model::Feel::ScottishSixteenths);
+        bar.tempo_gradual = true;
+        bar.tempo_changes = vec![gtr_model::TempoChange {
+            position: gtr_model::Rational::new(1, 2),
+            tempo: 90,
+            gradual: true,
+        }];
+        let beat = &mut score.tracks[0].staves[0].bars[0].voices[0].beats[0];
+        beat.effects.fade = Some(gtr_model::Fade::Swell);
+        beat.duration.dots = 3;
+        beat.duration.value = gtr_model::NoteValue::TwoHundredFiftySixth;
+        assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
     }
 
     #[test]

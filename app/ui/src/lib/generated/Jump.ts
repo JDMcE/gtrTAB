@@ -3,4 +3,4 @@
 /**
  * Where to carry on from at the end of a bar.
  */
-export type Jump = "da_capo" | "da_capo_al_fine" | "da_capo_al_coda" | "dal_segno" | "dal_segno_al_fine" | "dal_segno_al_coda" | "to_coda";
+export type Jump = "da_capo" | "da_capo_al_fine" | "da_capo_al_coda" | "dal_segno" | "dal_segno_al_fine" | "dal_segno_al_coda" | "to_coda" | "da_capo_al_double_coda" | "dal_segno_al_double_coda" | "dal_segno_segno" | "dal_segno_segno_al_fine" | "dal_segno_segno_al_coda" | "dal_segno_segno_al_double_coda" | "to_double_coda";

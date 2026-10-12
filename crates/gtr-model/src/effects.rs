@@ -443,6 +443,19 @@ pub enum Hairpin {
     Decrescendo,
 }
 
+/// The volume of a beat's notes moved by hand, as with a guitar's volume knob.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+#[serde(rename_all = "snake_case")]
+pub enum Fade {
+    /// From nothing up to full: the attack is not heard.
+    In,
+    /// From full down to nothing.
+    Out,
+    /// Up from nothing and down again.
+    Swell,
+}
+
 /// The fingering of a chord: for each string from the highest to the lowest, the fret it is
 /// stopped at, zero for an open string or -1 for one that is not played.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
@@ -504,6 +517,10 @@ pub struct BeatEffects {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     #[ts(optional, as = "Option<bool>")]
     pub fermata: bool,
+    /// The notes fade in, fade out or swell.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub fade: Option<Fade>,
     /// The name of the chord from this beat on, such as `Am7`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]

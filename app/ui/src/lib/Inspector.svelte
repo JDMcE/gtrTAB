@@ -46,6 +46,8 @@
     sixteenth: '16th',
     thirty_second: '32nd',
     sixty_fourth: '64th',
+    hundred_twenty_eighth: '128th',
+    two_hundred_fifty_sixth: '256th',
   };
   const SLIDES: Record<string, [IconName, string]> = {
     shift: ['slideShift', 'Shift slide'],
@@ -192,6 +194,10 @@
       rows.push({ icon: 'lyrics', label: 'Lyrics', value: e.lyrics.join(' / '), remove: clear('lyrics') });
     }
     if (e.fermata) rows.push({ icon: 'fermata', label: 'Fermata', remove: clear('fermata') });
+    if (e.fade) {
+      const label = e.fade === 'in' ? 'Fade in' : e.fade === 'out' ? 'Fade out' : 'Volume swell';
+      rows.push({ icon: e.fade === 'out' ? 'decrescendo' : 'crescendo', label, remove: clear('fade') });
+    }
     if (e.dynamic) rows.push({ icon: e.dynamic, label: 'Dynamic', value: e.dynamic, remove: clear('dynamic') });
     if (e.hairpin) {
       rows.push({
