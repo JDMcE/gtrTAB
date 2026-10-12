@@ -6,33 +6,15 @@
 mod gp5;
 mod gp7;
 mod gpx;
-
-use std::collections::BTreeSet;
+mod write;
 
 use gtr_model::{
-    Bar, Beat, Bend, CurvePoint, Duration, Dynamic, ModelError, Note, NoteValue, Score, Slide,
-    Staff, Tuning, Tuplet, Voice,
+    Bar, Beat, Bend, CurvePoint, Duration, Dynamic, Note, NoteValue, Score, Slide, Staff, Tuning,
+    Tuplet, Voice,
 };
 
-/// A score read from another program's file.
-#[derive(Debug)]
-pub struct Imported {
-    pub score: Score,
-    /// Kinds of content the file contained that were not imported, in alphabetical order.
-    pub skipped: Vec<String>,
-}
-
-#[derive(Debug, thiserror::Error)]
-pub enum ImportError {
-    #[error("not a Guitar Pro file")]
-    UnknownFormat,
-    #[error("{0} files are not supported yet")]
-    UnsupportedVersion(String),
-    #[error("the file is damaged: {0}")]
-    Corrupt(String),
-    #[error("the imported score is inconsistent: {0}")]
-    Invalid(#[from] ModelError),
-}
+use crate::Skipped;
+pub use crate::{ExportError, Exported, ImportError, Imported};
 
 /// Imports a Guitar Pro file, working out the version from its contents.
 pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
@@ -58,23 +40,30 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
     score.validate()?;
     Ok(Imported {
         score,
-        skipped: skipped.0.into_iter().map(String::from).collect(),
+        skipped: skipped.list(),
     })
 }
 
-/// Names of the kinds of content that were left out.
-#[derive(Default)]
-struct Skipped(BTreeSet<&'static str>);
+/// Writes a score as a Guitar Pro file, the `.gp` of versions 7 and 8. What the score
+/// holds that the format has no place for is listed in [`Exported::skipped`].
+pub fn export(score: &Score) -> Result<Exported, ExportError> {
+    let mut skipped = Skipped::default();
+    let bytes = write::write(score, &mut skipped)?;
+    Ok(Exported {
+        bytes,
+        skipped: skipped.list(),
+    })
+}
 
-impl Skipped {
-    fn add(&mut self, what: &'static str) {
-        self.0.insert(what);
-    }
-
-    fn add_if(&mut self, condition: bool, what: &'static str) {
-        if condition {
-            self.add(what);
-        }
+/// The formats that say for every bar how its short notes are played give way here to a
+/// mark where that changes, which lasts until the next: a bar that goes back to playing
+/// them evenly says so.
+fn keep_feel_changes(masters: &mut [gtr_model::MasterBar]) {
+    let mut current = gtr_model::Feel::Straight;
+    for master in masters {
+        let feel = master.feel.unwrap_or(gtr_model::Feel::Straight);
+        master.feel = (feel != current).then_some(feel);
+        current = feel;
     }
 }
 
@@ -176,7 +165,7 @@ fn keep_dynamic_changes(staff: &mut Staff) {
 /// bar's own tempo if that is its first beat, and otherwise a change inside it. A second
 /// tempo for the same moment takes the place of the first. `gradual` has the tempo move
 /// steadily from there to the next change.
-fn set_tempo(
+pub(crate) fn set_tempo(
     master: &mut gtr_model::MasterBar,
     position: gtr_model::Rational,
     tempo: u32,

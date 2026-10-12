@@ -286,6 +286,9 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
         }
         master_bars.push(master);
     }
+    if v >= 500 {
+        super::keep_feel_changes(&mut master_bars);
+    }
 
     for (direction, bar) in DIRECTIONS.iter().zip(directions) {
         let Some(master) = bar.and_then(|bar| master_bars.get_mut(bar)) else {
