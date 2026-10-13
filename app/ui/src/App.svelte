@@ -9,6 +9,7 @@
     addRecentFile,
     confirmDialog,
     exportFile,
+    openAudioFile,
     openFile,
     readAutosave,
     readPath,
@@ -36,6 +37,7 @@
     type Target,
     type EditorState,
     type Layout,
+    type AudioTrack,
     type Instrument,
     type Mix,
     type Pedal,
@@ -45,6 +47,7 @@
   import BeatLights from './lib/BeatLights.svelte';
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
   import Pedalboard from './lib/Pedalboard.svelte';
+  import AudioPanel, { peaksOf, type Peaks, type RecordingBar } from './lib/AudioPanel.svelte';
   import SoundDialog from './lib/SoundDialog.svelte';
   import LineInDialog, { loadLineSettings, saveLineSettings, type LineSettings } from './lib/LineInDialog.svelte';
   import { LineIn, type Levels } from './lib/linein';
@@ -314,7 +317,8 @@
     }
     void score;
     const timer = setTimeout(() => {
-      if (doc) writeAutosave({ name: fileName, path: filePath, bytes: doc.save() });
+      // The recording is left out: it can be large, and is in the file it came from.
+      if (doc) writeAutosave({ name: fileName, path: filePath, bytes: doc.saveWithoutRecording() });
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
   });
@@ -413,6 +417,7 @@
     }
     const beat = player.pulse();
     if (beat?.time !== pulse?.time) pulse = beat;
+    recordingNow = player.recordingTime();
     requestAnimationFrame(follow);
   }
 
@@ -424,6 +429,7 @@
     const at = playhead;
     playhead = null;
     pulse = null;
+    recordingNow = null;
     if (at && doc && editor) {
       doc.setCursor(at.bar, at.beat, editor.cursor.string, false);
       refresh();
@@ -439,7 +445,9 @@
 
   // Volume, pan, mute and solo take effect on what is already playing.
   $effect(() => {
-    if (playing && score) player.setMix(mixOf(score.tracks));
+    if (!playing || !score) return;
+    const mix = mixOf(score.tracks, score.audio);
+    player.setMix(mix.slice(0, score.tracks.length), mix[score.tracks.length]);
   });
 
   // So do an edit, a change of speed and the loop switched on or off: the synth is handed
@@ -839,6 +847,60 @@
       },
     };
   }
+
+  // --- Audio track ---
+
+  let recordingPeaks = $state.raw<Peaks | null>(null);
+  let recordingProblem = $state('');
+  /** Seconds into the recording sounding, while it plays. */
+  let recordingNow = $state<number | null>(null);
+  const recordingBars = $derived.by((): RecordingBar[] => {
+    void revision;
+    return score?.audio && doc ? JSON.parse(doc.recordingBarsJson()) : [];
+  });
+
+  // The recording is read and handed to the synth whenever the score is given another one,
+  // or another score is opened.
+  let readFor: { doc: Document | undefined; name: string | null } = { doc: undefined, name: null };
+  $effect(() => {
+    const name = score?.audio?.name ?? null;
+    const current = doc;
+    untrack(() => void readRecording(current, name));
+  });
+
+  async function readRecording(current: Document | undefined, name: string | null) {
+    if (readFor.doc === current && readFor.name === name) return;
+    readFor = { doc: current, name };
+    recordingPeaks = null;
+    recordingProblem = '';
+    const bytes = name && current ? current.recordingFile() : undefined;
+    if (!name || !bytes) {
+      if (name) recordingProblem = `The recording ${name} is not at hand: replace it with the file it came from.`;
+      await player.setRecording(null);
+      return;
+    }
+    try {
+      const decoded = await player.decode(bytes);
+      if (readFor.doc !== current || readFor.name !== name) return;
+      recordingPeaks = peaksOf(decoded);
+      await player.setRecording(decoded);
+    } catch {
+      recordingProblem = `${name} could not be read as a recording.`;
+      await player.setRecording(null);
+    }
+  }
+
+  const importRecording = () =>
+    run(async () => {
+      const file = await openAudioFile();
+      if (!file || !doc) return;
+      const replacing = !!score?.audio;
+      doc.importRecording(file.name, file.bytes);
+      prefs.audio = true;
+      message = replacing ? `The recording is now ${file.name}` : `Added an audio track of ${file.name}`;
+    });
+
+  const setAudio = (audio: AudioTrack | null) => edit((d) => d.setAudio(JSON.stringify(audio)));
 
   // --- Line in ---
 
@@ -1395,6 +1457,17 @@
         };
       },
     },
+    audioTrack: {
+      label: 'Audio track…',
+      icon: 'soundChange',
+      run: () => (score?.audio ? (prefs.audio = true) : importRecording()),
+    },
+    audioPanel: {
+      label: 'Audio track',
+      active: () => prefs.audio && !!score?.audio,
+      disabled: () => !score?.audio,
+      run: () => (prefs.audio = !prefs.audio),
+    },
     pedalboard: {
       label: 'Pedalboard',
       icon: 'pedalboard',
@@ -1622,6 +1695,8 @@
           '-',
           cmd.addTrack, cmd.trackSettings, cmd.drumKit, cmd.trackEffects, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
           '-',
+          cmd.audioTrack,
+          '-',
           cmd.mute, cmd.solo,
         ],
       },
@@ -1632,7 +1707,7 @@
           ...notations,
           cmd.multitrack,
           '-',
-          cmd.instrument, cmd.pedalboard, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
+          cmd.instrument, cmd.pedalboard, cmd.audioPanel, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: 'Theme', items: themes },
         ],
       },
@@ -1981,6 +2056,26 @@
             onclearmarks={() => (marks = null)}
             onclose={() => {
               prefs.instrument = false;
+              focusScore();
+            }}
+          />
+        {/if}
+        {#if prefs.audio && score.audio}
+          <AudioPanel
+            audio={score.audio}
+            bars={recordingBars}
+            peaks={recordingPeaks}
+            problem={recordingProblem}
+            cursorBar={editor.cursor.bar}
+            now={recordingNow}
+            onsync={(place, millis) => edit((d) => d.syncRecording(place, millis))}
+            onunsync={(place) => edit((d) => d.unsyncRecording(place))}
+            onseek={(bar) => edit((d) => d.goToBar(bar))}
+            onmix={(mix) => score?.audio && setAudio({ ...score.audio, mix })}
+            onreplace={importRecording}
+            onremove={() => setAudio(null)}
+            onclose={() => {
+              prefs.audio = false;
               focusScore();
             }}
           />

@@ -35,7 +35,9 @@ impl Passage {
         self.events.clone()
     }
 
-    /// JSON `{ beats: [{ bar, beat, time }], duration }`, times in seconds.
+    /// JSON `{ beats: [{ bar, beat, time }], pulses, duration, count_in, recording }`,
+    /// times in seconds; `recording` says where the score's recording plays from, if it
+    /// has one.
     #[wasm_bindgen(getter, js_name = timelineJson)]
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
@@ -190,21 +192,70 @@ impl Document {
     }
 
     /// Gives the score an audio track playing the file `name`, its first bar at the
-    /// recording's start and the rest as written, in place of any it had. `bytes` is the
-    /// file as it is, which is saved with the score.
+    /// recording's start and the rest as written; or if it has one, puts the file in place
+    /// of its recording, keeping where its bars start. `bytes` is the file as it is, which
+    /// is saved with the score.
     #[wasm_bindgen(js_name = importRecording)]
     pub fn import_recording(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), JsError> {
         let name: String = name.chars().take(gtr_model::AudioTrack::MAX_NAME).collect();
         self.recordings.insert(name.clone(), bytes);
-        Ok(self
-            .editor
-            .set_audio(Some(gtr_model::AudioTrack::new(name)))?)
+        let audio = match self.editor.score().audio.clone() {
+            Some(audio) => gtr_model::AudioTrack { name, ..audio },
+            None => gtr_model::AudioTrack::new(name),
+        };
+        Ok(self.editor.set_audio(Some(audio))?)
+    }
+
+    /// Holds bar `place` of the play-through to `millis` into the recording, letting go of
+    /// any held bars that would then be out of order with it.
+    #[wasm_bindgen(js_name = syncRecording)]
+    pub fn sync_recording(&mut self, place: usize, millis: u32) -> Result<(), JsError> {
+        let Some(mut audio) = self.editor.score().audio.clone() else {
+            return Ok(());
+        };
+        audio.sync = audio.with_sync(gtr_model::SyncPoint { bar: place, millis });
+        Ok(self.editor.set_audio(Some(audio))?)
+    }
+
+    /// Lets go of bar `place` of the play-through, which is then fitted between the bars
+    /// either side that are held. The last held bar is kept.
+    #[wasm_bindgen(js_name = unsyncRecording)]
+    pub fn unsync_recording(&mut self, place: usize) -> Result<(), JsError> {
+        let Some(mut audio) = self.editor.score().audio.clone() else {
+            return Ok(());
+        };
+        if audio.sync.len() > 1 {
+            audio.sync.retain(|p| p.bar != place);
+        }
+        Ok(self.editor.set_audio(Some(audio))?)
     }
 
     /// The file of the score's recording, if it has one and the file is at hand.
     #[wasm_bindgen(js_name = recordingFile)]
     pub fn recording_file(&self) -> Option<Vec<u8>> {
         self.recording().cloned()
+    }
+
+    /// Where each bar of the play-through starts in the recording and how long it lasts
+    /// there, in seconds: `[{ bar, place, start, length }]`, `place` counting the bars
+    /// played before it. Empty without a recording.
+    #[wasm_bindgen(js_name = recordingBarsJson)]
+    pub fn recording_bars_json(&self) -> String {
+        let score = self.editor.score();
+        let Some(audio) = &score.audio else {
+            return "[]".into();
+        };
+        let full = gtr_model::play_order(&score.master_bars, false);
+        let lengths: Vec<f64> = (gtr_model::timings(score, &full, 1.0).iter())
+            .map(|t| t.length)
+            .collect();
+        let fitted = gtr_model::synced(&lengths, &audio.sync);
+        let bars: Vec<_> = (full.iter().zip(&lengths).zip(&fitted).enumerate())
+            .map(|(place, ((bar, length), (start, factor)))| {
+                serde_json::json!({ "bar": bar, "place": place, "start": start, "length": length * factor })
+            })
+            .collect();
+        serde_json::Value::from(bars).to_string()
     }
 
     /// Changes the audio track's mix or sync points, or with `"null"` takes it away.
@@ -383,6 +434,8 @@ impl Document {
                 "beats": timeline.beats,
                 "pulses": timeline.pulses,
                 "duration": timeline.duration,
+                "count_in": timeline.count_in,
+                "recording": timeline.recording,
             }))?,
             events: timeline.to_bytes(),
         })
@@ -404,6 +457,8 @@ impl Document {
                 "beats": timeline.beats,
                 "pulses": timeline.pulses,
                 "duration": timeline.duration,
+                "count_in": timeline.count_in,
+                "recording": timeline.recording,
             }))?,
             events: timeline.to_bytes(),
         })

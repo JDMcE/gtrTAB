@@ -15,6 +15,8 @@ import type { NoteValue } from './generated/NoteValue';
 import type { Target } from './generated/Target';
 import type { IconName } from './ui/icons';
 
+export type { AudioTrack } from './generated/AudioTrack';
+export type { SyncPoint } from './generated/SyncPoint';
 export type { Accent } from './generated/Accent';
 export type { Fade } from './generated/Fade';
 export type { Align } from './generated/Align';
@@ -84,6 +86,10 @@ export interface Timeline {
   beats: BeatTime[];
   pulses: Pulse[];
   duration: number;
+  /** Seconds the count-in lasts, before the first bar starts. */
+  count_in: number;
+  /** Where the score's recording plays from, and at what speed, if it has one. */
+  recording: { start: number; rate: number } | null;
 }
 
 /** Instruments in the order they are offered, with the names `gtr_model::Instrument` gives. */

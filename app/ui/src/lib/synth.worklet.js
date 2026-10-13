@@ -55,11 +55,26 @@ class SynthProcessor extends AudioWorkletProcessor {
         if (this.wasm.gtr_queue(this.synth, 0)) this.queued = message.id;
         break;
       }
-      case 'mix':
+      case 'mix': {
         message.mix.forEach((track, index) => {
           this.wasm.gtr_set_mix(this.synth, index, track.audible ? 1 : 0, track.gain, track.pan);
         });
+        const recording = message.recording;
+        if (recording) this.wasm.gtr_set_recording_mix(this.synth, recording.audible ? 1 : 0, recording.gain, recording.pan);
         break;
+      }
+      case 'recording': {
+        // The score's recording, left and right in turn as sixteen bits, or nothing.
+        if (!message.samples) {
+          this.wasm.gtr_set_recording(this.synth, 1);
+          break;
+        }
+        const samples = new Int16Array(message.samples);
+        const at = this.wasm.gtr_recording_input(this.synth, samples.length / 2);
+        new Int16Array(this.wasm.memory.buffer, at, samples.length).set(samples);
+        this.wasm.gtr_set_recording(this.synth, 0);
+        break;
+      }
       case 'effects': {
         // The pedals of a track's sound, or with a track below zero the mix's, as a knob
         // turns.

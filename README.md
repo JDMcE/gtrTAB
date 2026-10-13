@@ -6,7 +6,7 @@ Scores are kept in gtrTab's own format. Guitar Pro files of every version, Music
 
 For practice, Score has the loop, the speed trainer and the playback speed; View has the fretboard, keyboard or drum kit under the score and the visual metronome; and Tools has the tuner, the chord and scale libraries and the scale finder.
 
-For the sound, View > Pedalboard puts each track, and the whole mix, through a chain of pedals: compressor, wah, overdrive, distortion, amp, cabinet, EQ, chorus, delay and reverb, from presets or set by hand. A track can have other sounds, each an instrument's sound through pedals of its own, which Beat > Change of sound switches to part-way through; Tools > Line in plays a guitar through the pedals as it is played.
+For the sound, View > Pedalboard puts each track, and the whole mix, through a chain of pedals: compressor, wah, overdrive, distortion, amp, cabinet, EQ, chorus, delay and reverb, from presets or set by hand. A track can have other sounds, each an instrument's sound through pedals of its own, which Beat > Change of sound switches to part-way through; Tools > Line in plays a guitar through the pedals as it is played. Track > Audio track adds a recording to play along with, slowed down or sped up as the score is, whose bars are fitted to it by dragging their lines on its waveform.
 
 ## Requirements
 

@@ -1,5 +1,5 @@
 import synthUrl from '../wasm/gtr_worklet.wasm?url';
-import type { BeatTime, Pulse, Timeline, Track } from './model';
+import type { AudioTrack, BeatTime, Pulse, Timeline, Track } from './model';
 import workletUrl from './synth.worklet.js?url&no-inline';
 
 /** Where a track sits in the mix. */
@@ -14,10 +14,10 @@ export interface TrackMix {
 /** Volume setting at which a track plays at its natural level, as in `gtr_model::Mix`. */
 const UNITY_VOLUME = 75;
 
-/** The mix the tracks' settings ask for. */
-export function mixOf(tracks: Track[]): TrackMix[] {
-  const anySolo = tracks.some((t) => t.mix.solo);
-  return tracks.map(({ mix }) => {
+/** The mix the tracks' settings ask for, and the audio track's if there is one. */
+export function mixOf(tracks: Track[], audio?: AudioTrack | null): TrackMix[] {
+  const anySolo = tracks.some((t) => t.mix.solo) || !!audio?.mix.solo;
+  return [...tracks, ...(audio ? [audio] : [])].map(({ mix }) => {
     const audible = !mix.mute && (mix.solo || !anySolo);
     return { audible, gain: (mix.volume / UNITY_VOLUME) ** 2, pan: mix.pan / 100 };
   });
@@ -190,9 +190,43 @@ export class Player {
     synth.port.postMessage({ type: 'queue', id, events: bytes }, [bytes]);
   }
 
-  /** Changes the mix of what is playing. */
-  async setMix(mix: TrackMix[]): Promise<void> {
-    if (this.playing) (await this.synth)?.port.postMessage({ type: 'mix', mix });
+  /**
+   * Changes the mix of what is playing: one for each track, and after them one for the
+   * recording if the score has one.
+   */
+  async setMix(mix: TrackMix[], recording?: TrackMix): Promise<void> {
+    if (this.playing) (await this.synth)?.port.postMessage({ type: 'mix', mix, recording });
+  }
+
+  /** Reads a recording's file into samples at the rate the synth plays at. */
+  async decode(bytes: Uint8Array): Promise<AudioBuffer> {
+    const context = (this.context ??= new AudioContext());
+    return context.decodeAudioData(bytes.slice().buffer as ArrayBuffer);
+  }
+
+  /** Has the synth play a recording along with the passages that cue it, or none. */
+  async setRecording(recording: AudioBuffer | null): Promise<void> {
+    const synth = await this.start((this.context ??= new AudioContext()));
+    if (!recording) {
+      synth.port.postMessage({ type: 'recording', samples: null });
+      return;
+    }
+    const left = recording.getChannelData(0);
+    const right = recording.numberOfChannels > 1 ? recording.getChannelData(1) : left;
+    const samples = new Int16Array(2 * recording.length);
+    for (let i = 0; i < recording.length; i++) {
+      samples[2 * i] = Math.max(-1, Math.min(1, left[i])) * 32_767;
+      samples[2 * i + 1] = Math.max(-1, Math.min(1, right[i])) * 32_767;
+    }
+    synth.port.postMessage({ type: 'recording', samples: samples.buffer }, [samples.buffer]);
+  }
+
+  /** Seconds into the recording now sounding, or `null` when it is not. */
+  recordingTime(): number | null {
+    const now = this.now();
+    const cue = this.timeline?.recording;
+    if (now === null || !cue || !this.timeline || now < this.timeline.count_in) return null;
+    return cue.start + (now - this.timeline.count_in) * cue.rate;
   }
 
   /**
