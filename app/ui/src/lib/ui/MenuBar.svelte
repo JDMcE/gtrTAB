@@ -175,8 +175,12 @@
 </nav>
 
 <style>
+  /* In a narrow window the menus close up, and wrap rather than run off the side when the
+     font is wider than expected. */
   .menubar {
     display: flex;
+    flex-wrap: wrap;
+    min-width: 0;
   }
 
   .slot {
@@ -193,6 +197,12 @@
     height: var(--control);
     padding: 0 var(--space-3);
     border-radius: var(--radius-s);
+  }
+
+  @media (max-width: 520px) {
+    .top {
+      padding: 0 var(--space-2);
+    }
   }
 
   .top:hover,
