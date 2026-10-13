@@ -1069,6 +1069,15 @@ impl Editor {
         self.keep_selection(|e| e.run(Command::SetEffects { track, effects }))
     }
 
+    /// Gives the score an audio track, changes its mix or sync points, or with `None`
+    /// takes it away.
+    pub fn set_audio(&mut self, audio: Option<gtr_model::AudioTrack>) -> Result<(), EditError> {
+        if self.score.audio == audio {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetAudio { audio }))
+    }
+
     /// Sets the other sounds a track can switch to. To take one away, use
     /// [`Editor::remove_sound`], which keeps the beats that switch to the others right.
     pub fn set_sounds(&mut self, track: usize, sounds: Vec<Sound>) -> Result<(), EditError> {

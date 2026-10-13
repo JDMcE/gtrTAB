@@ -427,6 +427,7 @@ pub(super) fn read(text: &str, skipped: &mut Skipped) -> Result<Score, ImportErr
         master_bars: masters,
         tracks,
         effects: Vec::new(),
+        audio: None,
     })
 }
 

@@ -51,7 +51,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
     if (170..190).contains(&kind) {
         let count = score.tracks.len();
         let instrument = Instrument::ALL[usize::from(b) % Instrument::ALL.len()];
-        return match a % 7 {
+        return match a % 8 {
             0 => Command::InsertTrack {
                 index: idx[0] % (count + 2),
                 // Now and then a track with the wrong number of bars, which must be refused.
@@ -82,6 +82,17 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
                         Pedal::with(kind, &[b % 104])
                     })
                     .collect(),
+            },
+            6 => Command::SetAudio {
+                // Now and then sync points out of order, which must be refused.
+                audio: (b % 3 != 0).then(|| {
+                    let mut audio = gtr_model::AudioTrack::new("take.ogg");
+                    audio.sync.push(gtr_model::SyncPoint {
+                        bar: usize::from(b % 4),
+                        millis: u32::from(a) * 10,
+                    });
+                    audio
+                }),
             },
             5 => Command::SetSounds {
                 track: idx[0] % (count + 1),

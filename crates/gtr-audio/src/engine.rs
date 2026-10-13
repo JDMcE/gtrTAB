@@ -7,6 +7,7 @@ use std::rc::Rc;
 use gtr_model::{Fade, Pedal};
 
 use crate::fx::{self, Chain};
+use crate::recording::{Recording, Stretch};
 use crate::soundfont::{Playing, SampleVoice};
 use crate::voice::{ClickVoice, Voice, shape, squeeze};
 use crate::{Automation, BeatTime, Channel, SoundFont, Timbre, Timeline};
@@ -150,6 +151,13 @@ pub struct Engine {
     master: Chain,
     /// The samples notes are played from, where the bank has their instrument.
     font: Option<Rc<SoundFont>>,
+    /// The score's recording, if it has been given one, and what plays it at another
+    /// speed.
+    recording: Option<Rc<Recording>>,
+    stretch: Stretch,
+    /// The recording's gains for the two sides: where they are heading and where they
+    /// have got to.
+    recording_gains: ((f32, f32), (f32, f32)),
     /// What a looped passage goes on to the next time round, in place of itself.
     queued: Option<Timeline>,
     /// Times a looped passage has gone back to its start.
@@ -174,6 +182,9 @@ impl Engine {
             strips: Vec::new(),
             master: Chain::default(),
             font: None,
+            recording: None,
+            stretch: Stretch::new(sample_rate as f32),
+            recording_gains: ((0.0, 0.0), (0.0, 0.0)),
             queued: None,
             passes: 0,
         }
@@ -189,12 +200,35 @@ impl Engine {
         self.font = font.map(Rc::new);
     }
 
+    /// Plays the score's recording along with the passages that cue it, or with `None`
+    /// none.
+    pub fn set_recording(&mut self, recording: Option<Recording>) {
+        self.recording = recording.map(Rc::new);
+        self.stretch.reset();
+    }
+
+    /// Moves the recording in the mix while it plays.
+    pub fn set_recording_mix(&mut self, audible: bool, gain: f32, pan: f32) {
+        if let Some(cue) = &mut self.timeline.recording {
+            (cue.audible, cue.gain, cue.pan) = (audible, gain, pan);
+        }
+        self.aim_recording();
+    }
+
+    fn aim_recording(&mut self) {
+        self.recording_gains.0 = match self.timeline.recording {
+            Some(cue) if cue.audible => pan_gains(cue.gain, cue.pan),
+            _ => (0.0, 0.0),
+        };
+    }
+
     /// Starts playing `timeline` from its beginning, dropping whatever was sounding.
     pub fn load(&mut self, timeline: Timeline) {
         self.voices.clear();
         self.clicks.clear();
         self.strips.clear();
         self.master = Chain::default();
+        self.stretch.reset();
         self.queued = None;
         self.passes = 0;
         self.set_timeline(timeline, 0.0);
@@ -295,6 +329,10 @@ impl Engine {
             (strip.scored_gain, strip.scored_pan) = (None, None);
         }
         self.master.set(&self.timeline.effects, rate);
+        self.aim_recording();
+        if self.position == 0 {
+            self.recording_gains.1 = self.recording_gains.0;
+        }
         // What the score has changed by this point in the passage still holds.
         for change in &self.timeline.automation[..self.next_change] {
             if let Some(strip) = self.strips.get_mut(change.channel) {
@@ -574,7 +612,38 @@ impl Engine {
         for sample in left[..frames].iter_mut().chain(&mut right[..frames]) {
             *sample = sample.tanh();
         }
+        self.play_recording(&mut left[..frames], &mut right[..frames], glide);
         self.position = end;
+    }
+}
+
+impl Engine {
+    /// Adds the recording to a block, from where the passage has got to in it. It is
+    /// added after the limiter, as it has been mixed already, and only clipped if the two
+    /// together are too loud.
+    fn play_recording(&mut self, left: &mut [f32], right: &mut [f32], glide: f32) {
+        let (Some(recording), Some(cue)) = (&self.recording, self.timeline.recording) else {
+            return;
+        };
+        let rate = f64::from(self.sample_rate);
+        let count_in = self.timeline.count_in;
+        let (target, current) = &mut self.recording_gains;
+        for (i, (left, right)) in left.iter_mut().zip(right).enumerate() {
+            current.0 = toward(current.0, target.0, glide);
+            current.1 = toward(current.1, target.1, glide);
+            let seconds = (self.position + i) as f64 / rate;
+            // Nothing of it during the count-in.
+            if seconds < count_in {
+                continue;
+            }
+            let frame = (cue.start + (seconds - count_in) * cue.rate) * rate;
+            let (l, r) = match cue.rate == 1.0 {
+                true => recording.at(frame.round() as i64),
+                false => self.stretch.next(recording, frame),
+            };
+            *left = (*left + current.0 * l).clamp(-1.0, 1.0);
+            *right = (*right + current.1 * r).clamp(-1.0, 1.0);
+        }
     }
 }
 
@@ -734,6 +803,7 @@ mod tests {
             duration: 1.0,
             looped: false,
             effects: Vec::new(),
+            recording: None,
         }
     }
 
@@ -839,6 +909,58 @@ mod tests {
         let (mut left, mut right) = (vec![0.0; 4_410], vec![0.0; 4_410]);
         engine.process(&mut left, &mut right);
         assert!(energy(&left) > 0.01);
+    }
+
+    #[test]
+    fn the_recording_plays_from_its_cue_after_the_count_in() {
+        use crate::{Cue, Recording};
+        // A recording of a rising line, so that each sample says where it is from.
+        let ramp: Vec<f32> = (0..44_100).map(|i| i as f32 / 44_100.0 - 0.5).collect();
+        let recording = Recording::new(&ramp, &ramp);
+        let cue = |rate, audible| Cue {
+            start: 0.25,
+            rate,
+            audible,
+            gain: 1.0,
+            pan: 0.0,
+        };
+        let timeline = |cue| Timeline {
+            count_in: 0.1,
+            duration: 0.5,
+            recording: Some(cue),
+            ..Timeline::default()
+        };
+        let mut engine = Engine::new(44_100);
+        engine.set_recording(Some(recording.clone()));
+        engine.load(timeline(cue(1.0, true)));
+        let played = play_out(&mut engine, 128);
+        // Silent through the count-in; then from a quarter of a second into it.
+        assert!(played.left[..4_410].iter().all(|&s| s == 0.0));
+        for i in [0, 1_000, 10_000] {
+            let expected = recording.at(11_025 + i as i64).0;
+            assert!((played.left[4_410 + i] - expected).abs() < 1e-5);
+        }
+        // Muted, nothing; without a recording given, nothing.
+        engine.load(timeline(cue(1.0, false)));
+        assert!(play_out(&mut engine, 128).left.iter().all(|&s| s == 0.0));
+        engine.set_recording(None);
+        engine.load(timeline(cue(1.0, true)));
+        assert!(play_out(&mut engine, 128).left.iter().all(|&s| s == 0.0));
+        // At half the speed it is half as far through by the end.
+        engine.set_recording(Some(recording.clone()));
+        engine.load(timeline(cue(0.5, true)));
+        let slow = play_out(&mut engine, 128);
+        let at = 4_410 + 13_230;
+        let heard = slow.left[at];
+        let expected = recording.at(11_025 + 13_230 / 2).0;
+        assert!((heard - expected).abs() < 0.03, "{heard} {expected}");
+        // Brought in from muted while it plays.
+        engine.load(timeline(cue(1.0, false)));
+        let (mut left, mut right) = (vec![0.0; 8_820], vec![0.0; 8_820]);
+        engine.process(&mut left, &mut right);
+        engine.set_recording_mix(true, 1.0, 0.0);
+        engine.process(&mut left, &mut right);
+        assert!(left[4_000..].iter().any(|&s| s != 0.0));
     }
 
     #[test]

@@ -3,10 +3,12 @@
 
 use gtr_model::{Fade, Pedal, PedalKind};
 
-use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone, Voicing};
+use crate::{
+    Automation, BeatTime, Channel, Click, Cue, NoteEvent, Timbre, Timeline, Tone, Voicing,
+};
 
 /// First bytes of an encoded timeline.
-const MAGIC: &[u8; 4] = b"GTL3";
+const MAGIC: &[u8; 4] = b"GTL4";
 
 const TIMBRES: [Timbre; 11] = [
     Timbre::Steel,
@@ -181,6 +183,14 @@ impl Timeline {
             w.count(beat.beat);
             w.f64(beat.time);
         }
+        w.u8(self.recording.is_some().into());
+        if let Some(cue) = &self.recording {
+            w.f64(cue.start);
+            w.f64(cue.rate);
+            w.u8(cue.audible.into());
+            w.f32(cue.gain);
+            w.f32(cue.pan);
+        }
         w.0
     }
 
@@ -251,6 +261,16 @@ impl Timeline {
                 time: r.f64()?,
             })
         })?;
+        let recording = match r.u8()? {
+            0 => None,
+            _ => Some(Cue {
+                start: r.f64()?,
+                rate: r.f64()?,
+                audible: r.u8()? != 0,
+                gain: r.f32()?,
+                pan: r.f32()?,
+            }),
+        };
         r.0.is_empty().then_some(Timeline {
             channels,
             effects,
@@ -263,6 +283,7 @@ impl Timeline {
             count_in,
             duration,
             looped,
+            recording,
         })
     }
 }
@@ -353,6 +374,13 @@ mod tests {
             count_in: 0.5,
             duration: 2.0,
             looped: true,
+            recording: Some(Cue {
+                start: -1.5,
+                rate: 0.75,
+                audible: false,
+                gain: 0.5,
+                pan: 0.25,
+            }),
         };
         let bytes = timeline.to_bytes();
         assert_eq!(Timeline::from_bytes(&bytes), Some(timeline));

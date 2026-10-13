@@ -15,6 +15,9 @@ use wasm_bindgen::prelude::*;
 pub struct Document {
     editor: Editor,
     import_report: String,
+    /// The files of the recordings the score has had, by name, kept outside the score
+    /// and its history: an import undone and done again finds its recording here.
+    recordings: std::collections::HashMap<String, Vec<u8>>,
 }
 
 /// A passage ready to be played.
@@ -144,7 +147,13 @@ impl Document {
 
     /// Opens a native `.gtrtab` file.
     pub fn load(bytes: &[u8]) -> Result<Document, JsError> {
-        Ok(Document::from_score(native::load(bytes)?))
+        let (score, recording) = native::load_with(bytes)?;
+        let name = score.audio.as_ref().map(|a| a.name.clone());
+        let mut document = Document::from_score(score);
+        if let (Some(name), Some(recording)) = (name, recording) {
+            document.recordings.insert(name, recording);
+        }
+        Ok(document)
     }
 
     /// Imports a file written by another program: Guitar Pro of any version, MusicXML,
@@ -167,7 +176,43 @@ impl Document {
 
     /// Serialises the score as a native `.gtrtab` file.
     pub fn save(&self) -> Result<Vec<u8>, JsError> {
+        Ok(native::save_with(
+            self.editor.score(),
+            self.recording().map(Vec::as_slice),
+        )?)
+    }
+
+    /// Saves the score without its recording, which can be large, as for keeping a copy
+    /// of the work in case the app closes before it is saved.
+    #[wasm_bindgen(js_name = saveWithoutRecording)]
+    pub fn save_without_recording(&self) -> Result<Vec<u8>, JsError> {
         Ok(native::save(self.editor.score())?)
+    }
+
+    /// Gives the score an audio track playing the file `name`, its first bar at the
+    /// recording's start and the rest as written, in place of any it had. `bytes` is the
+    /// file as it is, which is saved with the score.
+    #[wasm_bindgen(js_name = importRecording)]
+    pub fn import_recording(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), JsError> {
+        let name: String = name.chars().take(gtr_model::AudioTrack::MAX_NAME).collect();
+        self.recordings.insert(name.clone(), bytes);
+        Ok(self
+            .editor
+            .set_audio(Some(gtr_model::AudioTrack::new(name)))?)
+    }
+
+    /// The file of the score's recording, if it has one and the file is at hand.
+    #[wasm_bindgen(js_name = recordingFile)]
+    pub fn recording_file(&self) -> Option<Vec<u8>> {
+        self.recording().cloned()
+    }
+
+    /// Changes the audio track's mix or sync points, or with `"null"` takes it away.
+    /// `audio_json` holds a `gtr_model::AudioTrack`.
+    #[wasm_bindgen(js_name = setAudio)]
+    pub fn set_audio(&mut self, audio_json: &str) -> Result<(), JsError> {
+        let audio: Option<gtr_model::AudioTrack> = serde_json::from_str(audio_json)?;
+        Ok(self.editor.set_audio(audio)?)
     }
 
     /// Writes the score as another program's file. `format` is one of `guitar_pro`,
@@ -765,7 +810,14 @@ impl Document {
         Document {
             editor: Editor::new(score),
             import_report: String::new(),
+            recordings: Default::default(),
         }
+    }
+
+    /// The file of the score's recording, if it has one and the file is at hand.
+    fn recording(&self) -> Option<&Vec<u8>> {
+        let audio = self.editor.score().audio.as_ref()?;
+        self.recordings.get(&audio.name)
     }
 }
 

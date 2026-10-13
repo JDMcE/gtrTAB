@@ -264,6 +264,20 @@ pub struct Automation {
     pub sound: Option<u8>,
 }
 
+/// Where the score's recording plays from in a passage, and how it is mixed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Cue {
+    /// Seconds into the recording where the music starts, at the end of the count-in.
+    /// Under zero, the recording starts that much later.
+    pub start: f64,
+    /// Seconds of the recording played each second: the speed of playback.
+    pub rate: f64,
+    pub audible: bool,
+    pub gain: f32,
+    /// From -1.0 (left) to 1.0 (right).
+    pub pan: f32,
+}
+
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Timeline {
     /// One per track of the score.
@@ -285,6 +299,8 @@ pub struct Timeline {
     pub duration: f64,
     /// Played again from the end of the count-in on reaching `duration`, until stopped.
     pub looped: bool,
+    /// The score's recording, played along with the passage.
+    pub recording: Option<Cue>,
 }
 
 /// Longest a let-ring note is allowed to sustain.
@@ -349,7 +365,8 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         }
     };
 
-    let any_solo = score.tracks.iter().any(|t| t.mix.solo);
+    let audio = score.audio.as_ref();
+    let any_solo = score.tracks.iter().any(|t| t.mix.solo) || audio.is_some_and(|a| a.mix.solo);
     let mut timeline = Timeline {
         channels: (score.tracks.iter())
             .map(|track| Channel {
@@ -375,11 +392,39 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         count_in: 0.0,
         duration: 0.0,
         looped: options.looped,
+        recording: None,
     };
+    let mut bar_timings = timings(score, &order, speed);
+    if let Some(audio) = audio {
+        // The bars are timed as the recording plays them, and the recording played from
+        // where the passage starts in it.
+        let full = play_order(masters, false);
+        let written = timings(score, &full, 1.0);
+        let lengths: Vec<f64> = written.iter().map(|t| t.length).collect();
+        let fitted = gtr_model::synced(&lengths, &audio.sync);
+        let places = places_in(&full, &order);
+        for (timing, place) in bar_timings.iter_mut().zip(&places) {
+            if let Some(place) = *place {
+                *timing = written[place].scaled(fitted[place].1 / speed);
+            }
+        }
+        let start = places
+            .first()
+            .copied()
+            .flatten()
+            .map_or(0.0, |p| fitted[p].0);
+        timeline.recording = Some(Cue {
+            start,
+            rate: speed,
+            audible: !audio.mix.mute && (audio.mix.solo || !any_solo),
+            gain: audio.mix.gain(),
+            pan: f32::from(audio.mix.pan) / f32::from(gtr_model::Mix::MAX_PAN),
+        });
+    }
 
     let mut time = 0.0;
     let mut played = Vec::with_capacity(order.len());
-    for (position, timing) in timings(score, &order, speed).into_iter().enumerate() {
+    for (position, timing) in bar_timings.into_iter().enumerate() {
         let signature = masters[timing.bar].time_signature;
         let pulse = Rational::new(1, signature.denominator.into());
         let pulses = (0..signature.numerator).map(|i| (pulse * i64::from(i), i == 0));
@@ -441,6 +486,26 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
     let first = order.first().copied().unwrap_or(0);
     choose_sounds(&mut timeline, score, first);
     timeline
+}
+
+/// Where each bar of a passage, played in `order`, is in the play-through from the start
+/// (`full`): the next place of the bar after the one before it, or its first place if
+/// there is none after; `None` for a bar that is never reached.
+fn places_in(full: &[usize], order: &[usize]) -> Vec<Option<usize>> {
+    let first = |bar: usize| full.iter().position(|&b| b == bar);
+    let mut next = order.first().and_then(|&bar| first(bar)).unwrap_or(0);
+    (order.iter())
+        .map(|&bar| {
+            let found = (full[next.min(full.len())..].iter())
+                .position(|&b| b == bar)
+                .map(|i| next + i)
+                .or_else(|| first(bar));
+            if let Some(place) = found {
+                next = place + 1;
+            }
+            found
+        })
+        .collect()
 }
 
 /// Gives each note the sound its track has switched to by the time it is played: the last
@@ -970,6 +1035,84 @@ mod tests {
         let t = compile(&score, 0, &options);
         let sounds: Vec<u8> = t.notes.iter().map(|n| n.sound).collect();
         assert_eq!(sounds, [2, 2, 0, 0]);
+    }
+
+    #[test]
+    fn with_a_recording_the_bars_are_timed_as_it_plays_them() {
+        use gtr_model::{AudioTrack, MasterBar, SyncPoint, TimeSignature};
+        // Four bars of four quarter notes, written at 120: two seconds each.
+        let mut score = quarters(vec![Note::new(5, 0); 4]);
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        for _ in 0..3 {
+            score
+                .master_bars
+                .push(MasterBar::new(TimeSignature::COMMON));
+            score.tracks[0].staves[0].bars.push(bar.clone());
+        }
+        // The recording has the first bar a second in, and the third at six seconds: the
+        // first two bars take five seconds between them, where they are written to take
+        // four, and the bars after go on as fast.
+        let mut audio = AudioTrack::new("song.ogg");
+        audio.sync = vec![
+            SyncPoint {
+                bar: 0,
+                millis: 1_000,
+            },
+            SyncPoint {
+                bar: 2,
+                millis: 6_000,
+            },
+        ];
+        score.audio = Some(audio);
+        let t = compile(&score, 0, &Options::default());
+        let starts: Vec<f64> = t.beats.iter().step_by(4).map(|b| b.time).collect();
+        let expected = [0.0, 2.5, 5.0, 7.5];
+        assert!(
+            starts
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 1e-9),
+            "{starts:?}"
+        );
+        assert!((t.duration - 10.0).abs() < 1e-9);
+        let cue = t.recording.unwrap();
+        assert_eq!((cue.start, cue.rate, cue.audible), (1.0, 1.0, true));
+        // From the third bar at half the speed, with a count-in: the recording starts at
+        // six seconds, played at half the speed, and the bars take twice as long.
+        let options = Options {
+            from_bar: 2,
+            speed: 0.5,
+            count_in: true,
+            ..Options::default()
+        };
+        let t = compile(&score, 0, &options);
+        let cue = t.recording.unwrap();
+        assert_eq!((cue.start, cue.rate), (6.0, 0.5));
+        assert!((t.beats[4].time - t.beats[0].time - 5.0).abs() < 1e-9);
+        // Muted, it is cued all the same, to be brought in while it plays.
+        score.audio.as_mut().unwrap().mix.mute = true;
+        assert!(
+            !compile(&score, 0, &Options::default())
+                .recording
+                .unwrap()
+                .audible
+        );
+        // Soloed, the tracks are left out.
+        let audio = score.audio.as_mut().unwrap();
+        (audio.mix.mute, audio.mix.solo) = (false, true);
+        assert!(!compile(&score, 0, &Options::default()).channels[0].audible);
+    }
+
+    #[test]
+    fn a_bar_played_twice_has_a_place_for_each_time() {
+        // Bars 0 1 1 2 with bar 1 repeated: a passage from bar 1 to the end is the bars at
+        // places 1, 2 and 3; a range of bar 1 alone, played twice, the same two places.
+        let full = [0, 1, 1, 2];
+        assert_eq!(places_in(&full, &[1, 1, 2]), [Some(1), Some(2), Some(3)]);
+        assert_eq!(places_in(&full, &[1, 1]), [Some(1), Some(2)]);
+        // More times than the score has it: the first place again. Never played: nowhere.
+        assert_eq!(places_in(&full, &[1, 1, 1]), [Some(1), Some(2), Some(1)]);
+        assert_eq!(places_in(&full, &[5]), [None]);
     }
 
     #[test]

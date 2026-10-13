@@ -8,6 +8,7 @@
 mod engine;
 mod events;
 mod fx;
+mod recording;
 mod soundfont;
 mod voice;
 mod wav;
@@ -17,9 +18,10 @@ pub use soundfont::{SoundFont, SoundFontError};
 
 pub use engine::{Engine, Stereo, render};
 pub use events::{
-    Automation, BeatTime, Channel, Click, NoteEvent, Options, Pulse, Timbre, Timeline, Tone,
+    Automation, BeatTime, Channel, Click, Cue, NoteEvent, Options, Pulse, Timbre, Timeline, Tone,
     Voicing, audition, compile,
 };
 pub use fx::Rack;
+pub use recording::Recording;
 pub use wav::wav;
 pub use wire::{chain_from_bytes, chain_to_bytes};

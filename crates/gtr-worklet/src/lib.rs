@@ -2,13 +2,15 @@
 //! glue code `wasm-bindgen` generates, so this is a plain C interface with no imports: the
 //! worklet copies bytes and samples in and out of the module's memory itself.
 
-use gtr_audio::{Engine, Rack, SoundFont, SoundFontError, Timeline, chain_from_bytes};
+use gtr_audio::{Engine, Rack, Recording, SoundFont, SoundFontError, Timeline, chain_from_bytes};
 
 /// The synth and the memory it shares with the worklet.
 pub struct Synth {
     engine: Engine,
     /// An encoded timeline or a SoundFont file on its way in.
     input: Vec<u8>,
+    /// A recording on its way in.
+    recording: Vec<i16>,
     /// The block of samples last made.
     left: Vec<f32>,
     right: Vec<f32>,
@@ -20,6 +22,7 @@ pub extern "C" fn gtr_new(sample_rate: u32) -> *mut Synth {
     Box::into_raw(Box::new(Synth {
         engine: Engine::new(sample_rate),
         input: Vec::new(),
+        recording: Vec::new(),
         left: Vec::new(),
         right: Vec::new(),
     }))
@@ -123,6 +126,47 @@ pub unsafe extern "C" fn gtr_soundfont(synth: *mut Synth) -> u32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn gtr_no_soundfont(synth: *mut Synth) {
     unsafe { &mut *synth }.engine.set_soundfont(None);
+}
+
+/// Makes room for `frames` frames of a recording, left and right in turn as sixteen bits
+/// each, and says where to write them.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_recording_input(synth: *mut Synth, frames: usize) -> *mut i16 {
+    let synth = unsafe { &mut *synth };
+    synth.recording.clear();
+    synth.recording.resize(2 * frames, 0);
+    synth.recording.as_mut_ptr()
+}
+
+/// Plays the recording written to [`gtr_recording_input`] along with the passages that
+/// cue it, or with `none` set none.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_set_recording(synth: *mut Synth, none: u32) {
+    let synth = unsafe { &mut *synth };
+    let samples = std::mem::take(&mut synth.recording);
+    let recording = (none == 0).then(|| Recording::interleaved(samples));
+    synth.engine.set_recording(recording);
+}
+
+/// Moves the recording in the mix.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_set_recording_mix(
+    synth: *mut Synth,
+    audible: u32,
+    gain: f32,
+    pan: f32,
+) {
+    let synth = unsafe { &mut *synth };
+    synth.engine.set_recording_mix(audible != 0, gain, pan);
 }
 
 /// Moves a track in the mix.

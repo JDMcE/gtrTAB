@@ -19,6 +19,10 @@ pub struct Score {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(optional, as = "Option<Vec<Pedal>>")]
     pub effects: Vec<Pedal>,
+    /// A recording to play along with, which the bars are timed to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub audio: Option<crate::AudioTrack>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -655,6 +659,8 @@ pub enum ModelError {
     InvalidTimeSignature { bar: usize },
     #[error("the master effects are not valid")]
     InvalidEffects,
+    #[error("the audio track's mix or sync points are not valid")]
+    InvalidAudio,
     #[error("track {track} has no staff, or settings that are out of range")]
     InvalidTrack { track: usize },
     #[error("track {track} staff {staff} has too many strings")]
@@ -683,6 +689,7 @@ impl Score {
             master_bars: vec![MasterBar::new(TimeSignature::COMMON)],
             tracks: vec![Track::empty("Guitar", Instrument::default(), 1)],
             effects: Vec::new(),
+            audio: None,
         }
     }
 
@@ -697,6 +704,9 @@ impl Score {
         }
         if !Pedal::chain_is_valid(&self.effects) {
             return Err(ModelError::InvalidEffects);
+        }
+        if self.audio.as_ref().is_some_and(|a| !a.is_valid()) {
+            return Err(ModelError::InvalidAudio);
         }
         for (track, t) in self.tracks.iter().enumerate() {
             if t.staves.is_empty()

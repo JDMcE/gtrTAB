@@ -124,6 +124,10 @@ pub enum Command {
         track: Option<usize>,
         effects: Vec<Pedal>,
     },
+    /// Gives the score an audio track, changes it, or with `None` takes it away.
+    SetAudio {
+        audio: Option<gtr_model::AudioTrack>,
+    },
     /// Sets the other sounds a track can switch to.
     SetSounds {
         track: usize,
@@ -184,6 +188,8 @@ pub enum EditError {
     InvalidEffects,
     #[error("a sound needs a name, and a drum track's sounds must be drums and only its")]
     InvalidSound,
+    #[error("the audio track's bars must start in the order they are played")]
+    InvalidAudio,
 }
 
 impl Command {
@@ -516,6 +522,14 @@ impl Command {
                 Ok(Command::SetEffects {
                     track,
                     effects: std::mem::replace(target, effects),
+                })
+            }
+            Command::SetAudio { audio } => {
+                if audio.as_ref().is_some_and(|a| !a.is_valid()) {
+                    return Err(EditError::InvalidAudio);
+                }
+                Ok(Command::SetAudio {
+                    audio: std::mem::replace(&mut score.audio, audio),
                 })
             }
             Command::SetSounds { track, sounds } => {
