@@ -11,6 +11,7 @@ import {
   Volume2,
   Check,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   CircleQuestionMark,
   ClipboardPaste,
@@ -38,6 +39,7 @@ import {
   SaveAll,
   Scissors,
   Settings2,
+  SlidersVertical,
   Square,
   Sun,
   Trash2,
@@ -106,7 +108,9 @@ export const ICONS = {
   remove: { lucide: X },
   check: { lucide: Check },
   chevronDown: { lucide: ChevronDown },
+  chevronLeft: { lucide: ChevronLeft },
   chevronRight: { lucide: ChevronRight },
+  pedalboard: { lucide: SlidersVertical },
 
   // Tracks
   trackPane: { lucide: PanelBottom },

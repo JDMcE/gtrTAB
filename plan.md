@@ -164,7 +164,7 @@ How things stand, for reference:
 
 - Tuning and capo are part of a track's settings (the settings button in the track pane, or double-click the track's name), alongside its instrument and mix. Changing the kind of instrument there switches to that instrument's usual tuning.
 - Guitar Pro import brings in instruments, volume and pan (`.gp5`), drum tracks, key signatures, repeats, alternate endings, sections, swing feel, credits, signs and jumps and, from `.gp`, free text. A bar holds one sign and one jump: where a file has more, or a second segno or coda, the first is kept and the import says so.
-- The native format is at version 7 since phase 7, which made a bar's sign and jump lists and added optional fields. At the end of phase 5 it was at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
+- The native format is at version 7 since phase 7, which made a bar's sign and jump lists and added optional fields, and at version 8 since phase 9, which added a chain of pedals to each track and to the mix. At the end of phase 5 it was at version 6. Version 4 only added optional fields; version 5 turned a grace note into a list of them, with a migration, and added tempo changes inside a bar and where a harmonic is touched; version 6 took the strings off a piano, with a migration, and added a track's own drum kit.
 
 Checked in phase 6: each instrument, the drum kit and the stereo mix, by measurement; the track pane and the notation views in the desktop window and in a narrow one; and Guitar Pro files with repeats, jumps and drum tracks, which are now in `tests/corpus/`.
 
@@ -293,13 +293,22 @@ Checks owed, none of which a program here can make: listening to the loop come r
 
 The synth itself and its SoundFonts come in phase 6; this phase is what is built around them.
 
-- [ ] Per-track effects chain: amp simulation, cabinet, overdrive, distortion, compressor, EQ, chorus, delay, reverb, wah
-- [ ] Pedalboard view and presets
+- [x] Per-track effects chain: amp simulation, cabinet, overdrive, distortion, compressor, EQ, chorus, delay, reverb, wah. How things stand:
+  - A track has a chain of pedals its sound goes through on its way to the mix (`Track::effects`), each one a kind and its knobs from 0 to 100 (`gtr_model::Pedal`), switched on or off where it stands. A chain is set in one undoable step (`Command::SetEffects`) and saved with the score: the native format is at version 8, which only added optional fields
+  - The synth (`gtr-audio/src/fx.rs`) runs a track's chain on both sides of the track before it is placed in the mix, so a chorus or a reverb is in stereo, and a track with no pedals sounds sample for sample as it did. The compressor follows the peak of both sides; the wah is a state-variable filter swept by its pedal or, with Auto turned up, by how hard the strings are played; overdrive and distortion are a soft and a hard clip with filters either side, and the amp a biased valve stage, its tone stack and a power stage, all three clipping at twice the sample rate so that their overtones do not fold back; the cabinet is a run of filters from a small combo to a four-by-twelve and a microphone from off the cone to on it; the EQ is two shelves and a peak; the chorus and the delay read a line of past samples between two of them, and the delay's time glides when it is changed; the reverb is Freeverb. The amp is brought down as its gain goes up and the compressor brought back up by what an everyday note loses, so that every preset comes out between half and two and a half times the level of the note going in (`every_preset_keeps_a_note_near_its_level`)
+  - A passage lasts until the echoes of its delays have died 60 dB and its reverbs have rung out, and exported audio has the pedals in it. While the music plays, a turn of a knob is heard at once (`Engine::set_effects`) and kept when it is let go; a pedal that stays where it was keeps its echoes and its reverb's tail through the change. `fx.rs` tests, `e2e/pedals.spec.ts`
+- [x] Pedalboard view and presets. View > Pedalboard, its button in the transport bar, or Track > Effects… opens a panel under the score with the cursor's track's chain from left to right, in the order the sound meets it. A pedal is added where its kind usually goes, from the compressor at the guitar's end to the reverb at the amplifier's, and can be switched off, moved earlier or later and taken away. Its knobs turn by dragging up or right, by the arrow keys a step at a time (with Shift, or Page Up and Down, ten), and back to where they start with a double click; each is a slider to a screen reader. The app comes with eleven presets for a track, from Clean and Crunch to Metal, Funk, Ambient, Acoustic and Bass, and three for the mix (`gtr_model::presets`). A chain can be saved as a preset of the user's, kept in the browser or the app's storage like the other preferences, put on any track, and deleted while it is the chain shown. `pedals.test.mjs`, `e2e/pedals.spec.ts`
 - [ ] Per-track sound banks with switching mid-score via automation
-- [ ] Master track effects
+- [x] Master track effects. The mix has a chain of its own (`Score::effects`), run after the tracks are added up and before the limiter, and shown on the pedalboard under Master, or from Score > Master effects…
 - [ ] Audio track: import an audio file and sync the score to it with tempo mapping
 - [ ] Line-in: play a real guitar through the track's effects
 - [ ] Native audio backend on desktop if AudioWorklet latency is not good enough
+
+Known simplifications, each with the phase that removes it:
+
+- The pedals of a Guitar Pro file's tracks are not imported, and none are exported: Guitar Pro 6 and later keep a chain of their own pedals and amplifiers for each track, which would have to be matched to the ones here. (Phase 10)
+
+Checks owed, none of which a program here can make: listening to each pedal and preset on each instrument, with the samples and with the models.
 
 ### Phase 10 — Polish and release
 
@@ -309,6 +318,7 @@ The synth itself and its SoundFonts come in phase 6; this phase is what is built
 - [ ] Command palette
 - [ ] Customisable keyboard shortcuts
 - [ ] Batch file conversion
+- [ ] The pedals and amplifiers of Guitar Pro 6 and later, imported onto the tracks' chains and exported from them (left out in phase 9)
 - [ ] Preferences, themes, localisation scaffolding
 - [ ] Signed installers and auto-update for Windows, macOS, Linux. macOS installers have to be built on a Mac, so they come from a release workflow on GitHub's macOS runners, set up with the first release; nothing has been run on a Mac beyond the CI compile
 - [ ] Offline-capable web app with local file access

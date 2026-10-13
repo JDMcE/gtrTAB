@@ -170,6 +170,21 @@ impl Pedal {
         pedal
     }
 
+    /// A pedal of the kind with the knobs named set, the rest at their defaults.
+    ///
+    /// # Panics
+    /// If the kind has no knob of one of the names.
+    pub fn named(kind: PedalKind, knobs: &[(&str, u8)]) -> Pedal {
+        let mut pedal = Pedal::new(kind);
+        for &(name, value) in knobs {
+            let index = (kind.knobs().iter())
+                .position(|k| k.name == name)
+                .unwrap_or_else(|| panic!("{kind:?} has no {name} knob"));
+            pedal.knobs[index] = value;
+        }
+        pedal
+    }
+
     /// The setting of knob `index`, from 0.0 to 1.0.
     pub fn knob(&self, index: usize) -> f32 {
         let default = self.kind.knobs().get(index).map_or(0, |k| k.default);
@@ -185,6 +200,165 @@ impl Pedal {
     pub fn chain_is_valid(chain: &[Pedal]) -> bool {
         chain.len() <= Pedal::MAX_CHAIN && chain.iter().all(Pedal::is_valid)
     }
+}
+
+/// A chain ready to be put on a track or the mix, by name.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Preset {
+    pub name: &'static str,
+    /// For the whole mix rather than a track.
+    pub master: bool,
+    pub pedals: Vec<Pedal>,
+}
+
+/// The chains the app comes with: for a track, from clean to high gain and for bass and
+/// acoustic instruments, and for the mix, a room or a hall.
+pub fn presets() -> Vec<Preset> {
+    use PedalKind::*;
+    let track = |name, pedals| Preset {
+        name,
+        master: false,
+        pedals,
+    };
+    let cabinet = |size| Pedal::named(Cabinet, &[("Size", size)]);
+    vec![
+        track(
+            "Clean",
+            vec![
+                Pedal::named(Compressor, &[("Threshold", 55), ("Ratio", 30)]),
+                Pedal::named(Amp, &[("Gain", 20), ("Treble", 60)]),
+                cabinet(40),
+                Pedal::named(Reverb, &[("Size", 45), ("Mix", 20)]),
+            ],
+        ),
+        track(
+            "Chorus clean",
+            vec![
+                Pedal::named(Amp, &[("Gain", 20), ("Treble", 60)]),
+                cabinet(40),
+                Pedal::named(Chorus, &[("Rate", 25), ("Depth", 60), ("Mix", 60)]),
+                Pedal::named(Reverb, &[("Size", 55), ("Mix", 25)]),
+            ],
+        ),
+        track(
+            "Crunch",
+            vec![
+                Pedal::named(Amp, &[("Gain", 62), ("Middle", 60), ("Presence", 55)]),
+                cabinet(60),
+                Pedal::named(Reverb, &[("Size", 35), ("Mix", 15)]),
+            ],
+        ),
+        track(
+            "Blues lead",
+            vec![
+                Pedal::named(Overdrive, &[("Drive", 35), ("Tone", 55), ("Level", 65)]),
+                Pedal::named(Amp, &[("Gain", 55), ("Middle", 60)]),
+                cabinet(50),
+                Pedal::named(Delay, &[("Time", 30), ("Feedback", 25), ("Mix", 20)]),
+                Pedal::named(Reverb, &[("Size", 50), ("Mix", 20)]),
+            ],
+        ),
+        track(
+            "Rock rhythm",
+            vec![
+                Pedal::named(
+                    Amp,
+                    &[("Gain", 75), ("Bass", 55), ("Middle", 55), ("Treble", 60)],
+                ),
+                cabinet(85),
+                Pedal::named(Reverb, &[("Size", 30), ("Mix", 12)]),
+            ],
+        ),
+        track(
+            "Metal",
+            vec![
+                // A drive pedal with little gain and a lot of level tightens the low end
+                // of a high-gain amp.
+                Pedal::named(Overdrive, &[("Drive", 10), ("Tone", 60), ("Level", 80)]),
+                Pedal::named(
+                    Amp,
+                    &[("Gain", 88), ("Bass", 60), ("Middle", 35), ("Treble", 62)],
+                ),
+                cabinet(100),
+                Pedal::named(Eq, &[("Bass", 45), ("Middle", 55), ("Frequency", 60)]),
+            ],
+        ),
+        track(
+            "Solo",
+            vec![
+                Pedal::named(Distortion, &[("Gain", 55), ("Tone", 55), ("Level", 55)]),
+                Pedal::named(Amp, &[("Gain", 60), ("Middle", 65)]),
+                cabinet(80),
+                Pedal::named(Delay, &[("Time", 40), ("Feedback", 35), ("Mix", 30)]),
+                Pedal::named(Reverb, &[("Size", 60), ("Mix", 25)]),
+            ],
+        ),
+        track(
+            "Funk",
+            vec![
+                Pedal::named(Compressor, &[("Threshold", 40), ("Ratio", 60)]),
+                Pedal::named(Wah, &[("Pedal", 20), ("Auto", 55), ("Resonance", 70)]),
+                Pedal::named(Amp, &[("Gain", 25), ("Treble", 65)]),
+                cabinet(40),
+            ],
+        ),
+        track(
+            "Ambient",
+            vec![
+                Pedal::named(Compressor, &[("Threshold", 50)]),
+                Pedal::named(Amp, &[("Gain", 25)]),
+                cabinet(50),
+                Pedal::named(Chorus, &[("Rate", 15), ("Depth", 40), ("Mix", 40)]),
+                Pedal::named(
+                    Delay,
+                    &[("Time", 55), ("Feedback", 55), ("Tone", 45), ("Mix", 40)],
+                ),
+                Pedal::named(Reverb, &[("Size", 90), ("Damping", 40), ("Mix", 50)]),
+            ],
+        ),
+        track(
+            "Acoustic",
+            vec![
+                Pedal::named(Compressor, &[("Threshold", 60), ("Ratio", 25)]),
+                Pedal::named(Eq, &[("Bass", 45), ("Treble", 58)]),
+                Pedal::named(Reverb, &[("Size", 45), ("Mix", 22)]),
+            ],
+        ),
+        track(
+            "Bass",
+            vec![
+                Pedal::named(Compressor, &[("Threshold", 45), ("Ratio", 50)]),
+                Pedal::named(Eq, &[("Bass", 58), ("Middle", 45), ("Frequency", 30)]),
+            ],
+        ),
+        Preset {
+            name: "Room",
+            master: true,
+            pedals: vec![Pedal::named(
+                Reverb,
+                &[("Size", 30), ("Damping", 60), ("Mix", 15)],
+            )],
+        },
+        Preset {
+            name: "Hall",
+            master: true,
+            pedals: vec![Pedal::named(
+                Reverb,
+                &[("Size", 80), ("Damping", 40), ("Mix", 22)],
+            )],
+        },
+        Preset {
+            name: "Glue",
+            master: true,
+            pedals: vec![
+                Pedal::named(
+                    Compressor,
+                    &[("Threshold", 60), ("Ratio", 20), ("Attack", 40)],
+                ),
+                Pedal::named(Reverb, &[("Size", 40), ("Mix", 12)]),
+            ],
+        },
+    ]
 }
 
 #[cfg(test)]
@@ -219,6 +393,23 @@ mod tests {
             Pedal::new(PedalKind::Eq);
             Pedal::MAX_CHAIN + 1
         ]));
+    }
+
+    #[test]
+    fn presets_are_valid_chains_with_names_of_their_own() {
+        let presets = presets();
+        assert!(presets.iter().all(|p| Pedal::chain_is_valid(&p.pedals)));
+        let mut names: Vec<_> = presets.iter().map(|p| p.name).collect();
+        names.sort();
+        names.dedup();
+        assert_eq!(names.len(), presets.len());
+        assert!(presets.iter().any(|p| p.master) && presets.iter().any(|p| !p.master));
+    }
+
+    #[test]
+    #[should_panic(expected = "Reverb has no Drive knob")]
+    fn a_knob_named_wrongly_is_caught() {
+        Pedal::named(PedalKind::Reverb, &[("Drive", 1)]);
     }
 
     #[test]

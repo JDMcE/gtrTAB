@@ -37,11 +37,20 @@
     type EditorState,
     type Layout,
     type Mix,
+    type Pedal,
     type Score,
     type Timeline,
   } from './lib/model';
   import BeatLights from './lib/BeatLights.svelte';
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
+  import Pedalboard from './lib/Pedalboard.svelte';
+  import {
+    loadUserPresets,
+    saveUserPresets,
+    withPreset,
+    type PedalPreset,
+    type PedalSpec,
+  } from './lib/pedals';
   import ChordLibrary from './lib/ChordLibrary.svelte';
   import ScaleDialog from './lib/ScaleDialog.svelte';
   import TunerDialog from './lib/TunerDialog.svelte';
@@ -753,6 +762,48 @@
   );
   let chordLibraryOpen = $state(false);
   let tunerOpen = $state(false);
+
+  // --- Pedalboard ---
+
+  let pedalSpecs = $state.raw<PedalSpec[]>([]);
+  let pedalPresets = $state.raw<PedalPreset[]>([]);
+  let userPresets = $state.raw<PedalPreset[]>(loadUserPresets());
+  /** The pedalboard shows the mix's pedals rather than the cursor's track's. */
+  let pedalMaster = $state(false);
+  const pedalChain = $derived(
+    (pedalMaster ? score?.effects : score?.tracks[editor?.cursor.track ?? 0]?.effects) ?? [],
+  );
+  const pedalTrack = () => (pedalMaster ? undefined : trackIndex());
+
+  /** Lets what is playing be heard through the chain as a knob turns, before it is kept. */
+  function previewPedals(chain: Pedal[]) {
+    if (playing) void player.setEffects(pedalTrack() ?? null, Document.chainBytes(JSON.stringify(chain)));
+  }
+
+  const setPedals = (chain: Pedal[]) => edit((d) => d.setEffects(pedalTrack(), JSON.stringify(chain)));
+
+  function savePreset() {
+    const pedals = $state.snapshot(pedalChain) as Pedal[];
+    const master = pedalMaster;
+    prompt = {
+      title: 'Save as a preset',
+      hint: `The pedals of ${master ? 'the mix' : 'this track'}, to put on ${master ? 'the mix of another score' : 'another track'}. A preset of the same name is replaced.`,
+      field: { kind: 'text', label: 'Name', value: '' },
+      apply: (name: string) => {
+        name = name.trim();
+        if (!name) return;
+        userPresets = withPreset(userPresets, { name, master, pedals });
+        saveUserPresets(userPresets);
+        message = `Saved the preset ${name}`;
+      },
+    };
+  }
+
+  function deletePreset(preset: PedalPreset) {
+    userPresets = userPresets.filter((p) => p !== preset);
+    saveUserPresets(userPresets);
+    message = `Deleted the preset ${preset.name}`;
+  }
   let scaleLibrary = $state.raw<{ root: number; scale: number; found: { fits: Fit[]; source: string } | null } | null>(
     null,
   );
@@ -1221,6 +1272,26 @@
       active: () => prefs.instrument,
       run: () => (prefs.instrument = !prefs.instrument),
     },
+    pedalboard: {
+      label: 'Pedalboard',
+      icon: 'pedalboard',
+      active: () => prefs.pedalboard,
+      run: () => (prefs.pedalboard = !prefs.pedalboard),
+    },
+    trackEffects: {
+      label: 'Effects…',
+      run: () => {
+        pedalMaster = false;
+        prefs.pedalboard = true;
+      },
+    },
+    masterEffects: {
+      label: 'Master effects…',
+      run: () => {
+        pedalMaster = true;
+        prefs.pedalboard = true;
+      },
+    },
     tuner: {
       label: 'Tuner…',
       run: () => {
@@ -1404,6 +1475,7 @@
           cmd.play, cmd.metronome, cmd.countIn, cmd.loop, cmd.trainer, cmd.replayRepeats,
           { label: 'Playback speed', items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
           { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
+          cmd.masterEffects,
         ],
       },
       {
@@ -1413,7 +1485,7 @@
           '-',
           cmd.previousTrack, cmd.nextTrack,
           '-',
-          cmd.addTrack, cmd.trackSettings, cmd.drumKit, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
+          cmd.addTrack, cmd.trackSettings, cmd.drumKit, cmd.trackEffects, cmd.trackUp, cmd.trackDown, cmd.removeTrack,
           '-',
           cmd.mute, cmd.solo,
         ],
@@ -1425,7 +1497,7 @@
           ...notations,
           cmd.multitrack,
           '-',
-          cmd.instrument, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
+          cmd.instrument, cmd.pedalboard, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: 'Theme', items: themes },
         ],
       },
@@ -1609,6 +1681,8 @@
     run(async () => {
       await init();
       standardKit = JSON.parse(Document.drumKitJson());
+      pedalSpecs = JSON.parse(Document.pedalKindsJson());
+      pedalPresets = JSON.parse(Document.pedalPresetsJson());
       const autosave = readAutosave();
       if (autosave) {
         try {
@@ -1718,6 +1792,7 @@
         <span class="rule"></span>
         <ToolButton command={cmd.compact} />
         <ToolButton command={cmd.trackPane} />
+        <ToolButton command={cmd.pedalboard} />
         <ToolButton command={cmd.inspector} />
         <ToolButton command={cmd.shortcuts} />
         <button
@@ -1770,6 +1845,25 @@
             onclearmarks={() => (marks = null)}
             onclose={() => {
               prefs.instrument = false;
+              focusScore();
+            }}
+          />
+        {/if}
+        {#if prefs.pedalboard}
+          <Pedalboard
+            specs={pedalSpecs}
+            presets={pedalPresets}
+            {userPresets}
+            master={pedalMaster}
+            trackName={score.tracks[editor.cursor.track]?.name ?? ''}
+            chain={pedalChain}
+            onchoose={(master) => (pedalMaster = master)}
+            onpreview={previewPedals}
+            onset={setPedals}
+            onsavepreset={savePreset}
+            ondeletepreset={deletePreset}
+            onclose={() => {
+              prefs.pedalboard = false;
               focusScore();
             }}
           />

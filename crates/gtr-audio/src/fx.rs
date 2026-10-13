@@ -256,10 +256,13 @@ impl Compressor {
         self.ratio = 1.0 + 19.0 * pedal.knob(1).powi(2);
         self.envelope.attack = glide(sweep(pedal.knob(2), 0.0001, 0.1), rate);
         self.envelope.release = glide(sweep(pedal.knob(3), 0.02, 1.0), rate);
-        // Brought back up by half of what a note at full level loses, so that the pedal
+        // Brought back up by what a note at an everyday level loses, so that the pedal
         // does not simply make the track quieter.
-        let lost = (1.0 / self.threshold).powf(1.0 - 1.0 / self.ratio);
-        self.makeup = level(pedal.knob(4)) * lost.sqrt();
+        let everyday: f32 = 0.2;
+        let lost = (everyday / self.threshold)
+            .max(1.0)
+            .powf(1.0 - 1.0 / self.ratio);
+        self.makeup = level(pedal.knob(4)) * lost;
     }
 
     fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
@@ -420,7 +423,12 @@ impl Amp {
     fn set(&mut self, pedal: &Pedal, rate: f32) {
         let cut = |knob: f32| (knob - 0.5) * 24.0;
         self.gain = sweep(pedal.knob(0), 1.0, 150.0);
-        self.master = 0.35 * level(pedal.knob(5));
+        // More gain makes a note louder only until the valve clips: what comes out is
+        // brought down by what a note at an everyday level gains, so that the gain knob
+        // changes how hard the amp is driven more than how loud it is.
+        let everyday = 0.2;
+        let gained = (self.gain * everyday).tanh() / everyday;
+        self.master = 0.4 * level(pedal.knob(5)) / gained.sqrt();
         self.input
             .set(vec![Biquad::new(Shape::HighPass, 90.0, 0.7, rate)]);
         self.tone.set(vec![
@@ -908,6 +916,21 @@ mod tests {
             // A pedal changes the sound, but does not take it away or blow it up.
             let ratio = rms(&left[4_410..]) / rms(&note[4_410..]);
             assert!((0.3..3.0).contains(&ratio), "{kind:?} {ratio}");
+        }
+    }
+
+    #[test]
+    fn every_preset_keeps_a_note_near_its_level() {
+        let note = saw(110.0, 1.5, 0.2);
+        for preset in gtr_model::presets() {
+            let mut chain = Chain::default();
+            chain.set(&preset.pedals, RATE);
+            let (mut left, mut right) = (note.clone(), note.clone());
+            for (l, r) in left.chunks_mut(128).zip(right.chunks_mut(128)) {
+                chain.process(l, r);
+            }
+            let ratio = rms(&left[22_050..]) / rms(&note[22_050..]);
+            assert!((0.5..2.5).contains(&ratio), "{} {ratio}", preset.name);
         }
     }
 

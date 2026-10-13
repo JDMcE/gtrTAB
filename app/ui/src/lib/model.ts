@@ -55,6 +55,8 @@ export type { Note } from './generated/Note';
 export type { NoteEffects } from './generated/NoteEffects';
 export type { NoteValue } from './generated/NoteValue';
 export type { PickStroke } from './generated/PickStroke';
+export type { Pedal } from './generated/Pedal';
+export type { PedalKind } from './generated/PedalKind';
 export type { RowBox } from './generated/RowBox';
 export type { Score } from './generated/Score';
 export type { ScoreInfo } from './generated/ScoreInfo';

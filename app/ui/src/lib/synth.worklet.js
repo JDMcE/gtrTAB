@@ -60,6 +60,14 @@ class SynthProcessor extends AudioWorkletProcessor {
           this.wasm.gtr_set_mix(this.synth, index, track.audible ? 1 : 0, track.gain, track.pan);
         });
         break;
+      case 'effects': {
+        // A track's pedals, or with a track below zero the mix's, as a knob turns.
+        const chain = new Uint8Array(message.chain);
+        const at = this.wasm.gtr_input(this.synth, chain.length);
+        new Uint8Array(this.wasm.memory.buffer, at, chain.length).set(chain);
+        this.wasm.gtr_set_effects(this.synth, message.track);
+        break;
+      }
       case 'soundfont': {
         // The bank to play from, as the bytes of an .sf2 file, or nothing for the models.
         let error = 0;

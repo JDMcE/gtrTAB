@@ -704,6 +704,16 @@ impl Document {
         serde_json::Value::from(kinds).to_string()
     }
 
+    /// The chains the app comes with: `[{ name, master, pedals }]`, `master` true for one
+    /// meant for the whole mix.
+    #[wasm_bindgen(js_name = pedalPresetsJson)]
+    pub fn pedal_presets_json() -> Result<String, JsError> {
+        let presets: Vec<_> = (gtr_model::presets().into_iter())
+            .map(|p| serde_json::json!({ "name": p.name, "master": p.master, "pedals": p.pedals }))
+            .collect();
+        Ok(serde_json::to_string(&presets)?)
+    }
+
     /// A chain of pedals as the synth takes it while a knob is turned, from a list of
     /// `gtr_model::Pedal` values.
     #[wasm_bindgen(js_name = chainBytes)]

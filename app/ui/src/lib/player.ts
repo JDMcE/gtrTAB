@@ -195,6 +195,16 @@ export class Player {
     if (this.playing) (await this.synth)?.port.postMessage({ type: 'mix', mix });
   }
 
+  /**
+   * Changes the pedals of a track, or with `null` of the whole mix, in what is playing, as
+   * while a knob is turned. `chain` is the chain as `Document.chainBytes` gives it.
+   */
+  async setEffects(track: number | null, chain: Uint8Array): Promise<void> {
+    if (!this.playing) return;
+    const bytes = chain.buffer as ArrayBuffer;
+    (await this.synth)?.port.postMessage({ type: 'effects', track: track ?? -1, chain: bytes }, [bytes]);
+  }
+
   stop(): void {
     if (!this.playing) return;
     this.halt();

@@ -31,6 +31,8 @@ export interface Prefs {
   beatLights: boolean;
   /** The fretboard, keyboard or drum kit shown under the score. */
   instrument: boolean;
+  /** The pedalboard shown under the score. */
+  pedalboard: boolean;
 }
 
 const KEY = 'gtrtab.ui';
@@ -46,6 +48,7 @@ const DEFAULTS: Prefs = {
   sound: 'default',
   beatLights: false,
   instrument: false,
+  pedalboard: false,
 };
 
 export function loadPrefs(): Prefs {
