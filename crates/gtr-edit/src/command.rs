@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Score, ScoreInfo,
-    Staff, TimeSignature, Track, Tuning, Voice,
+    Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Pedal, Score,
+    ScoreInfo, Sound, Staff, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +119,20 @@ pub enum Command {
         track: usize,
         kit: Vec<KitPiece>,
     },
+    /// Sets the pedals a track's sound goes through, or with no track those of the whole mix.
+    SetEffects {
+        track: Option<usize>,
+        effects: Vec<Pedal>,
+    },
+    /// Gives the score an audio track, changes it, or with `None` takes it away.
+    SetAudio {
+        audio: Option<gtr_model::AudioTrack>,
+    },
+    /// Sets the other sounds a track can switch to.
+    SetSounds {
+        track: usize,
+        sounds: Vec<Sound>,
+    },
     /// Applies several commands as one undo step. If one fails, none are applied.
     Batch(Vec<Command>),
 }
@@ -170,6 +184,12 @@ pub enum EditError {
     InvalidKit,
     #[error("volume or pan is out of range")]
     InvalidMix,
+    #[error("too many pedals, or a knob turned past its end")]
+    InvalidEffects,
+    #[error("a sound needs a name, and a drum track's sounds must be drums and only its")]
+    InvalidSound,
+    #[error("the audio track's bars must start in the order they are played")]
+    InvalidAudio,
 }
 
 impl Command {
@@ -458,6 +478,9 @@ impl Command {
                 instrument,
             } => {
                 let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                if !Sound::list_is_valid(&target.sounds, instrument) {
+                    return Err(EditError::InvalidSound);
+                }
                 Ok(Command::SetTrackInfo {
                     track,
                     name: std::mem::replace(&mut target.name, name),
@@ -482,6 +505,41 @@ impl Command {
                 Ok(Command::SetKit {
                     track,
                     kit: std::mem::replace(&mut target.kit, kit),
+                })
+            }
+            Command::SetEffects { track, effects } => {
+                if !Pedal::chain_is_valid(&effects) {
+                    return Err(EditError::InvalidEffects);
+                }
+                let target = match track {
+                    Some(track) => {
+                        &mut (score.tracks.get_mut(track))
+                            .ok_or(EditError::InvalidLocation)?
+                            .effects
+                    }
+                    None => &mut score.effects,
+                };
+                Ok(Command::SetEffects {
+                    track,
+                    effects: std::mem::replace(target, effects),
+                })
+            }
+            Command::SetAudio { audio } => {
+                if audio.as_ref().is_some_and(|a| !a.is_valid()) {
+                    return Err(EditError::InvalidAudio);
+                }
+                Ok(Command::SetAudio {
+                    audio: std::mem::replace(&mut score.audio, audio),
+                })
+            }
+            Command::SetSounds { track, sounds } => {
+                let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                if !Sound::list_is_valid(&sounds, target.instrument) {
+                    return Err(EditError::InvalidSound);
+                }
+                Ok(Command::SetSounds {
+                    track,
+                    sounds: std::mem::replace(&mut target.sounds, sounds),
                 })
             }
             Command::Batch(commands) => {

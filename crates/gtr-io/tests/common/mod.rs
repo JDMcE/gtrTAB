@@ -282,6 +282,8 @@ pub fn band() -> Score {
         tempo: 120,
         master_bars: masters,
         tracks: vec![guitar, bass, piano, drums],
+        effects: Vec::new(),
+        audio: None,
     };
     // A pause is everybody's: every beat that starts at the same moment has it.
     let voices = (score.tracks.iter_mut().flat_map(|t| &mut t.staves))

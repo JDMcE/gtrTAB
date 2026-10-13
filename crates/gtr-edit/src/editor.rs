@@ -2,7 +2,7 @@ use gtr_model::{
     Bar, Beat, BeatEffects, ChordDiagram, Clef, Duration, Instrument, KitPiece, MasterBar, Mix,
     Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
-use gtr_model::{Rational, TempoChange};
+use gtr_model::{Pedal, Rational, Sound, TempoChange};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -991,13 +991,21 @@ impl Editor {
             && (old.staves.iter().zip(&tunings))
                 .all(|(s, t)| s.is_pitched() == t.strings.is_empty());
         if same_kind {
-            return self.keep_selection(|e| {
-                e.run(Command::SetTrackInfo {
+            // The sounds go before the instrument changes, so that undone, the instrument
+            // is back before they are.
+            let mut commands = Vec::new();
+            if !Sound::list_is_valid(&old.sounds, instrument) {
+                commands.push(Command::SetSounds {
                     track,
-                    name,
-                    instrument,
-                })
+                    sounds: Vec::new(),
+                });
+            }
+            commands.push(Command::SetTrackInfo {
+                track,
+                name,
+                instrument,
             });
+            return self.keep_selection(|e| e.run(Command::Batch(commands)));
         }
         let bar_count = self.score.master_bars.len();
         // Drums have nothing to say to a pitch, nor a pitch to drums.
@@ -1015,11 +1023,18 @@ impl Editor {
                 },
             )
             .collect();
+        // The other sounds go with the track, unless it has become drums or stopped being.
+        let sounds = match Sound::list_is_valid(&old.sounds, instrument) {
+            true => old.sounds.clone(),
+            false => Vec::new(),
+        };
         let replacement = Track {
             name,
             instrument,
             mix: old.mix,
             kit: old.kit.clone(),
+            effects: old.effects.clone(),
+            sounds,
             staves,
         };
         self.run(Command::ReplaceTrack {
@@ -1036,6 +1051,82 @@ impl Editor {
             return Ok(());
         }
         self.keep_selection(|e| e.run(Command::SetKit { track, kit }))
+    }
+
+    /// Sets the pedals a track's sound goes through, or with no track those of the mix.
+    pub fn set_effects(
+        &mut self,
+        track: Option<usize>,
+        effects: Vec<Pedal>,
+    ) -> Result<(), EditError> {
+        let current = match track {
+            Some(track) => self.score.tracks.get(track).map(|t| &t.effects),
+            None => Some(&self.score.effects),
+        };
+        if current == Some(&effects) {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetEffects { track, effects }))
+    }
+
+    /// Gives the score an audio track, changes its mix or sync points, or with `None`
+    /// takes it away.
+    pub fn set_audio(&mut self, audio: Option<gtr_model::AudioTrack>) -> Result<(), EditError> {
+        if self.score.audio == audio {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetAudio { audio }))
+    }
+
+    /// Sets the other sounds a track can switch to. To take one away, use
+    /// [`Editor::remove_sound`], which keeps the beats that switch to the others right.
+    pub fn set_sounds(&mut self, track: usize, sounds: Vec<Sound>) -> Result<(), EditError> {
+        if self
+            .score
+            .tracks
+            .get(track)
+            .is_some_and(|t| t.sounds == sounds)
+        {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetSounds { track, sounds }))
+    }
+
+    /// Takes away a track's other sound `index`, counted from 1 as a beat names it. A beat
+    /// that switched to it goes back to switching nowhere, and one that switched to a
+    /// sound after it is renumbered to the same sound, all in one step.
+    pub fn remove_sound(&mut self, track: usize, index: u8) -> Result<(), EditError> {
+        let target = (self.score.tracks.get(track)).ok_or(EditError::InvalidLocation)?;
+        if index == 0 || usize::from(index) > target.sounds.len() {
+            return Err(EditError::InvalidLocation);
+        }
+        let mut sounds = target.sounds.clone();
+        sounds.remove(usize::from(index) - 1);
+        let mut commands = vec![Command::SetSounds { track, sounds }];
+        for (staff, s) in target.staves.iter().enumerate() {
+            for (bar, b) in s.bars.iter().enumerate() {
+                for (voice, v) in b.voices.iter().enumerate() {
+                    for (beat, at) in v.beats.iter().enumerate() {
+                        let Some(sound) = at.effects.sound.filter(|&s| s >= index) else {
+                            continue;
+                        };
+                        let effects = BeatEffects {
+                            sound: (sound > index).then(|| sound - 1),
+                            ..at.effects.clone()
+                        };
+                        let at = BeatRef {
+                            track,
+                            staff,
+                            bar,
+                            voice,
+                            beat,
+                        };
+                        commands.push(Command::SetBeatEffects { at, effects });
+                    }
+                }
+            }
+        }
+        self.keep_selection(|e| e.run(Command::Batch(commands)))
     }
 
     pub fn set_mix(&mut self, track: usize, mix: Mix) -> Result<(), EditError> {

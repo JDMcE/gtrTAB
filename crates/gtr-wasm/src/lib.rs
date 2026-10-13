@@ -4,7 +4,8 @@ use gtr_audio::Options;
 use gtr_edit::{Editor, Move, Technique};
 use gtr_io::native;
 use gtr_model::{
-    Instrument, Mix, NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score,
+    Instrument, Mix, NoteValue, Pedal, PedalKind, Score, ScoreInfo, TimeSignature, Tuning, Tuplet,
+    demo_score,
 };
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
@@ -14,6 +15,9 @@ use wasm_bindgen::prelude::*;
 pub struct Document {
     editor: Editor,
     import_report: String,
+    /// The files of the recordings the score has had, by name, kept outside the score
+    /// and its history: an import undone and done again finds its recording here.
+    recordings: std::collections::HashMap<String, Vec<u8>>,
 }
 
 /// A passage ready to be played.
@@ -31,7 +35,9 @@ impl Passage {
         self.events.clone()
     }
 
-    /// JSON `{ beats: [{ bar, beat, time }], duration }`, times in seconds.
+    /// JSON `{ beats: [{ bar, beat, time }], pulses, duration, count_in, recording }`,
+    /// times in seconds; `recording` says where the score's recording plays from, if it
+    /// has one.
     #[wasm_bindgen(getter, js_name = timelineJson)]
     pub fn timeline_json(&self) -> String {
         self.timeline_json.clone()
@@ -143,7 +149,13 @@ impl Document {
 
     /// Opens a native `.gtrtab` file.
     pub fn load(bytes: &[u8]) -> Result<Document, JsError> {
-        Ok(Document::from_score(native::load(bytes)?))
+        let (score, recording) = native::load_with(bytes)?;
+        let name = score.audio.as_ref().map(|a| a.name.clone());
+        let mut document = Document::from_score(score);
+        if let (Some(name), Some(recording)) = (name, recording) {
+            document.recordings.insert(name, recording);
+        }
+        Ok(document)
     }
 
     /// Imports a file written by another program: Guitar Pro of any version, MusicXML,
@@ -166,7 +178,92 @@ impl Document {
 
     /// Serialises the score as a native `.gtrtab` file.
     pub fn save(&self) -> Result<Vec<u8>, JsError> {
+        Ok(native::save_with(
+            self.editor.score(),
+            self.recording().map(Vec::as_slice),
+        )?)
+    }
+
+    /// Saves the score without its recording, which can be large, as for keeping a copy
+    /// of the work in case the app closes before it is saved.
+    #[wasm_bindgen(js_name = saveWithoutRecording)]
+    pub fn save_without_recording(&self) -> Result<Vec<u8>, JsError> {
         Ok(native::save(self.editor.score())?)
+    }
+
+    /// Gives the score an audio track playing the file `name`, its first bar at the
+    /// recording's start and the rest as written; or if it has one, puts the file in place
+    /// of its recording, keeping where its bars start. `bytes` is the file as it is, which
+    /// is saved with the score.
+    #[wasm_bindgen(js_name = importRecording)]
+    pub fn import_recording(&mut self, name: &str, bytes: Vec<u8>) -> Result<(), JsError> {
+        let name: String = name.chars().take(gtr_model::AudioTrack::MAX_NAME).collect();
+        self.recordings.insert(name.clone(), bytes);
+        let audio = match self.editor.score().audio.clone() {
+            Some(audio) => gtr_model::AudioTrack { name, ..audio },
+            None => gtr_model::AudioTrack::new(name),
+        };
+        Ok(self.editor.set_audio(Some(audio))?)
+    }
+
+    /// Holds bar `place` of the play-through to `millis` into the recording, letting go of
+    /// any held bars that would then be out of order with it.
+    #[wasm_bindgen(js_name = syncRecording)]
+    pub fn sync_recording(&mut self, place: usize, millis: u32) -> Result<(), JsError> {
+        let Some(mut audio) = self.editor.score().audio.clone() else {
+            return Ok(());
+        };
+        audio.sync = audio.with_sync(gtr_model::SyncPoint { bar: place, millis });
+        Ok(self.editor.set_audio(Some(audio))?)
+    }
+
+    /// Lets go of bar `place` of the play-through, which is then fitted between the bars
+    /// either side that are held. The last held bar is kept.
+    #[wasm_bindgen(js_name = unsyncRecording)]
+    pub fn unsync_recording(&mut self, place: usize) -> Result<(), JsError> {
+        let Some(mut audio) = self.editor.score().audio.clone() else {
+            return Ok(());
+        };
+        if audio.sync.len() > 1 {
+            audio.sync.retain(|p| p.bar != place);
+        }
+        Ok(self.editor.set_audio(Some(audio))?)
+    }
+
+    /// The file of the score's recording, if it has one and the file is at hand.
+    #[wasm_bindgen(js_name = recordingFile)]
+    pub fn recording_file(&self) -> Option<Vec<u8>> {
+        self.recording().cloned()
+    }
+
+    /// Where each bar of the play-through starts in the recording and how long it lasts
+    /// there, in seconds: `[{ bar, place, start, length }]`, `place` counting the bars
+    /// played before it. Empty without a recording.
+    #[wasm_bindgen(js_name = recordingBarsJson)]
+    pub fn recording_bars_json(&self) -> String {
+        let score = self.editor.score();
+        let Some(audio) = &score.audio else {
+            return "[]".into();
+        };
+        let full = gtr_model::play_order(&score.master_bars, false);
+        let lengths: Vec<f64> = (gtr_model::timings(score, &full, 1.0).iter())
+            .map(|t| t.length)
+            .collect();
+        let fitted = gtr_model::synced(&lengths, &audio.sync);
+        let bars: Vec<_> = (full.iter().zip(&lengths).zip(&fitted).enumerate())
+            .map(|(place, ((bar, length), (start, factor)))| {
+                serde_json::json!({ "bar": bar, "place": place, "start": start, "length": length * factor })
+            })
+            .collect();
+        serde_json::Value::from(bars).to_string()
+    }
+
+    /// Changes the audio track's mix or sync points, or with `"null"` takes it away.
+    /// `audio_json` holds a `gtr_model::AudioTrack`.
+    #[wasm_bindgen(js_name = setAudio)]
+    pub fn set_audio(&mut self, audio_json: &str) -> Result<(), JsError> {
+        let audio: Option<gtr_model::AudioTrack> = serde_json::from_str(audio_json)?;
+        Ok(self.editor.set_audio(audio)?)
     }
 
     /// Writes the score as another program's file. `format` is one of `guitar_pro`,
@@ -337,6 +434,8 @@ impl Document {
                 "beats": timeline.beats,
                 "pulses": timeline.pulses,
                 "duration": timeline.duration,
+                "count_in": timeline.count_in,
+                "recording": timeline.recording,
             }))?,
             events: timeline.to_bytes(),
         })
@@ -358,6 +457,8 @@ impl Document {
                 "beats": timeline.beats,
                 "pulses": timeline.pulses,
                 "duration": timeline.duration,
+                "count_in": timeline.count_in,
+                "recording": timeline.recording,
             }))?,
             events: timeline.to_bytes(),
         })
@@ -680,6 +781,62 @@ impl Document {
         Ok(self.editor.set_mix(track, mix)?)
     }
 
+    /// Sets the pedals a track goes through, or with no track those of the whole mix.
+    /// `effects_json` holds a list of `gtr_model::Pedal` values.
+    #[wasm_bindgen(js_name = setEffects)]
+    pub fn set_effects(&mut self, track: Option<usize>, effects_json: &str) -> Result<(), JsError> {
+        let effects: Vec<Pedal> = serde_json::from_str(effects_json)?;
+        Ok(self.editor.set_effects(track, effects)?)
+    }
+
+    /// Sets the other sounds a track can switch to. `sounds_json` holds a list of
+    /// `gtr_model::Sound` values.
+    #[wasm_bindgen(js_name = setSounds)]
+    pub fn set_sounds(&mut self, track: usize, sounds_json: &str) -> Result<(), JsError> {
+        let sounds: Vec<gtr_model::Sound> = serde_json::from_str(sounds_json)?;
+        Ok(self.editor.set_sounds(track, sounds)?)
+    }
+
+    /// Takes away a track's other sound `index`, counted from 1, keeping the beats that
+    /// switch to the others right.
+    #[wasm_bindgen(js_name = removeSound)]
+    pub fn remove_sound(&mut self, track: usize, index: u8) -> Result<(), JsError> {
+        Ok(self.editor.remove_sound(track, index)?)
+    }
+
+    /// Every kind of pedal, in the order the synth numbers them, with its name and its
+    /// knobs: `[{ kind, name, knobs: [{ name, default }] }]`.
+    #[wasm_bindgen(js_name = pedalKindsJson)]
+    pub fn pedal_kinds_json() -> String {
+        let kinds: Vec<_> = (PedalKind::ALL.iter())
+            .map(|kind| {
+                let knobs: Vec<_> = (kind.knobs().iter())
+                    .map(|k| serde_json::json!({ "name": k.name, "default": k.default }))
+                    .collect();
+                serde_json::json!({ "kind": kind, "name": kind.name(), "knobs": knobs })
+            })
+            .collect();
+        serde_json::Value::from(kinds).to_string()
+    }
+
+    /// The chains the app comes with: `[{ name, master, pedals }]`, `master` true for one
+    /// meant for the whole mix.
+    #[wasm_bindgen(js_name = pedalPresetsJson)]
+    pub fn pedal_presets_json() -> Result<String, JsError> {
+        let presets: Vec<_> = (gtr_model::presets().into_iter())
+            .map(|p| serde_json::json!({ "name": p.name, "master": p.master, "pedals": p.pedals }))
+            .collect();
+        Ok(serde_json::to_string(&presets)?)
+    }
+
+    /// A chain of pedals as the synth takes it while a knob is turned, from a list of
+    /// `gtr_model::Pedal` values.
+    #[wasm_bindgen(js_name = chainBytes)]
+    pub fn chain_bytes(effects_json: &str) -> Result<Vec<u8>, JsError> {
+        let effects: Vec<Pedal> = serde_json::from_str(effects_json)?;
+        Ok(gtr_audio::chain_to_bytes(&effects))
+    }
+
     // --- Clipboard and history ---
 
     pub fn copy(&mut self) {
@@ -708,7 +865,14 @@ impl Document {
         Document {
             editor: Editor::new(score),
             import_report: String::new(),
+            recordings: Default::default(),
         }
+    }
+
+    /// The file of the score's recording, if it has one and the file is at hand.
+    fn recording(&self) -> Option<&Vec<u8>> {
+        let audio = self.editor.score().audio.as_ref()?;
+        self.recordings.get(&audio.name)
     }
 }
 

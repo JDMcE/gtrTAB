@@ -1,7 +1,7 @@
 use gtr_edit::{BeatRef, Command, History};
 use gtr_model::{
-    Beat, Duration, Instrument, Mix, Note, NoteValue, Score, TimeSignature, Track, Tuning, Tuplet,
-    demo_score,
+    Beat, Duration, Instrument, Mix, Note, NoteValue, Pedal, PedalKind, Score, Sound,
+    TimeSignature, Track, Tuning, Tuplet, demo_score,
 };
 use proptest::prelude::*;
 
@@ -51,7 +51,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
     if (170..190).contains(&kind) {
         let count = score.tracks.len();
         let instrument = Instrument::ALL[usize::from(b) % Instrument::ALL.len()];
-        return match a % 5 {
+        return match a % 8 {
             0 => Command::InsertTrack {
                 index: idx[0] % (count + 2),
                 // Now and then a track with the wrong number of bars, which must be refused.
@@ -72,6 +72,38 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
                 track: idx[0] % (count + 1),
                 name: format!("Track {b}"),
                 instrument,
+            },
+            4 => Command::SetEffects {
+                // Now and then the master's chain, and now and then a knob past its end.
+                track: (b % 4 != 0).then_some(idx[0] % (count + 1)),
+                effects: (0..usize::from(b % 4))
+                    .map(|i| {
+                        let kind = PedalKind::ALL[(usize::from(a) + i) % PedalKind::ALL.len()];
+                        Pedal::with(kind, &[b % 104])
+                    })
+                    .collect(),
+            },
+            6 => Command::SetAudio {
+                // Now and then sync points out of order, which must be refused.
+                audio: (b % 3 != 0).then(|| {
+                    let mut audio = gtr_model::AudioTrack::new("take.ogg");
+                    audio.sync.push(gtr_model::SyncPoint {
+                        bar: usize::from(b % 4),
+                        millis: u32::from(a) * 10,
+                    });
+                    audio
+                }),
+            },
+            5 => Command::SetSounds {
+                track: idx[0] % (count + 1),
+                // Now and then a drum kit, which only a drum track can have.
+                sounds: (0..usize::from(b % 3))
+                    .map(|i| Sound {
+                        name: format!("Sound {i}"),
+                        instrument,
+                        effects: Vec::new(),
+                    })
+                    .collect(),
             },
             _ => Command::SetMix {
                 track: idx[0] % (count + 1),

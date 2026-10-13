@@ -1,12 +1,14 @@
 //! A timeline as bytes, for handing to the synth on the audio thread. The format is private
 //! to one build of the app: nothing written with it is kept.
 
-use gtr_model::Fade;
+use gtr_model::{Fade, Pedal, PedalKind};
 
-use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone};
+use crate::{
+    Automation, BeatTime, Channel, Click, Cue, NoteEvent, Timbre, Timeline, Tone, Voicing,
+};
 
 /// First bytes of an encoded timeline.
-const MAGIC: &[u8; 4] = b"GTL1";
+const MAGIC: &[u8; 4] = b"GTL4";
 
 const TIMBRES: [Timbre; 11] = [
     Timbre::Steel,
@@ -47,6 +49,16 @@ impl Writer {
     fn f64(&mut self, value: f64) {
         self.0.extend_from_slice(&value.to_le_bytes());
     }
+
+    fn chain(&mut self, chain: &[Pedal]) {
+        self.count(chain.len());
+        for pedal in chain {
+            self.u8(code(&PedalKind::ALL, pedal.kind));
+            self.u8(pedal.on.into());
+            self.count(pedal.knobs.len());
+            self.0.extend_from_slice(&pedal.knobs);
+        }
+    }
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -84,6 +96,31 @@ impl Reader<'_> {
         }
         Some(list)
     }
+
+    fn chain(&mut self) -> Option<Vec<Pedal>> {
+        let chain = self.list(|r| {
+            Some(Pedal {
+                kind: *PedalKind::ALL.get(usize::from(r.u8()?))?,
+                on: r.u8()? != 0,
+                knobs: r.list(Reader::u8)?,
+            })
+        })?;
+        Pedal::chain_is_valid(&chain).then_some(chain)
+    }
+}
+
+/// A chain of pedals as bytes, as the page sends it to the synth while a knob turns.
+pub fn chain_to_bytes(chain: &[Pedal]) -> Vec<u8> {
+    let mut w = Writer(Vec::new());
+    w.chain(chain);
+    w.0
+}
+
+/// Reads what [`chain_to_bytes`] wrote, or nothing if the bytes are not that.
+pub fn chain_from_bytes(bytes: &[u8]) -> Option<Vec<Pedal>> {
+    let mut r = Reader(bytes);
+    let chain = r.chain()?;
+    r.0.is_empty().then_some(chain)
 }
 
 impl Timeline {
@@ -98,14 +135,24 @@ impl Timeline {
             w.u8(code(&TIMBRES, channel.timbre));
             w.f32(channel.gain);
             w.f32(channel.pan);
+            w.chain(&channel.effects);
+            w.count(channel.sounds.len());
+            for sound in &channel.sounds {
+                w.u8(code(&TIMBRES, sound.timbre));
+                w.chain(&sound.effects);
+            }
         }
+        w.chain(&self.effects);
         w.count(self.automation.len());
         for change in &self.automation {
             w.count(change.channel);
             w.f64(change.time);
-            w.u8(u8::from(change.gain.is_some()) | u8::from(change.pan.is_some()) << 1);
+            w.u8(u8::from(change.gain.is_some())
+                | u8::from(change.pan.is_some()) << 1
+                | u8::from(change.sound.is_some()) << 2);
             w.f32(change.gain.unwrap_or(0.0));
             w.f32(change.pan.unwrap_or(0.0));
+            w.u8(change.sound.unwrap_or(0));
         }
         w.count(self.notes.len());
         for note in &self.notes {
@@ -118,6 +165,7 @@ impl Timeline {
             w.f32(note.velocity);
             w.f32(note.vibrato);
             w.u8(note.fade.map_or(0, |fade| 1 + code(&FADES, fade)));
+            w.u8(note.sound);
             w.count(note.pitch_curve.len());
             for &(time, semitones) in &note.pitch_curve {
                 w.f32(time);
@@ -134,6 +182,14 @@ impl Timeline {
             w.count(beat.bar);
             w.count(beat.beat);
             w.f64(beat.time);
+        }
+        w.u8(self.recording.is_some().into());
+        if let Some(cue) = &self.recording {
+            w.f64(cue.start);
+            w.f64(cue.rate);
+            w.u8(cue.audible.into());
+            w.f32(cue.gain);
+            w.f32(cue.pan);
         }
         w.0
     }
@@ -153,16 +209,25 @@ impl Timeline {
                 timbre: *TIMBRES.get(usize::from(r.u8()?))?,
                 gain: r.f32()?,
                 pan: r.f32()?,
+                effects: r.chain()?,
+                sounds: r.list(|r| {
+                    Some(Voicing {
+                        timbre: *TIMBRES.get(usize::from(r.u8()?))?,
+                        effects: r.chain()?,
+                    })
+                })?,
             })
         })?;
+        let effects = r.chain()?;
         let automation = r.list(|r| {
             let (channel, time, set) = (r.count()?, r.f64()?, r.u8()?);
-            let (gain, pan) = (r.f32()?, r.f32()?);
+            let (gain, pan, sound) = (r.f32()?, r.f32()?, r.u8()?);
             Some(Automation {
                 channel,
                 time,
                 gain: (set & 1 != 0).then_some(gain),
                 pan: (set & 2 != 0).then_some(pan),
+                sound: (set & 4 != 0).then_some(sound),
             })
         })?;
         let notes = r.list(|r| {
@@ -179,6 +244,7 @@ impl Timeline {
                     0 => None,
                     kind => Some(*FADES.get(usize::from(kind - 1))?),
                 },
+                sound: r.u8()?,
                 pitch_curve: r.list(|r| Some((r.f32()?, r.f32()?)))?,
             })
         })?;
@@ -195,8 +261,19 @@ impl Timeline {
                 time: r.f64()?,
             })
         })?;
+        let recording = match r.u8()? {
+            0 => None,
+            _ => Some(Cue {
+                start: r.f64()?,
+                rate: r.f64()?,
+                audible: r.u8()? != 0,
+                gain: r.f32()?,
+                pan: r.f32()?,
+            }),
+        };
         r.0.is_empty().then_some(Timeline {
             channels,
+            effects,
             automation,
             notes,
             clicks,
@@ -206,6 +283,7 @@ impl Timeline {
             count_in,
             duration,
             looped,
+            recording,
         })
     }
 }
@@ -222,6 +300,7 @@ mod tests {
         note.soft = true;
         note.velocity = 1.3;
         note.vibrato = 0.5;
+        note.sound = 2;
         note.pitch_curve = vec![(0.0, 0.0), (0.1, 2.0)];
         let timeline = Timeline {
             channels: TIMBRES
@@ -231,7 +310,33 @@ mod tests {
                     gain: 0.7,
                     pan: -0.25,
                     timbre,
+                    effects: match timbre {
+                        Timbre::Distortion => vec![
+                            Pedal::with(PedalKind::Wah, &[10, 20]),
+                            Pedal {
+                                on: false,
+                                ..Pedal::new(PedalKind::Reverb)
+                            },
+                        ],
+                        _ => Vec::new(),
+                    },
+                    sounds: match timbre {
+                        Timbre::Steel => vec![
+                            Voicing {
+                                timbre: Timbre::Distortion,
+                                effects: vec![Pedal::new(PedalKind::Amp)],
+                            },
+                            Voicing {
+                                timbre: Timbre::Clean,
+                                effects: Vec::new(),
+                            },
+                        ],
+                        _ => Vec::new(),
+                    },
                 })
+                .collect(),
+            effects: (PedalKind::ALL.iter())
+                .map(|&kind| Pedal::new(kind))
                 .collect(),
             automation: vec![
                 Automation {
@@ -239,12 +344,14 @@ mod tests {
                     time: 0.5,
                     gain: Some(0.0),
                     pan: None,
+                    sound: None,
                 },
                 Automation {
                     channel: 0,
                     time: 1.0,
                     gain: None,
                     pan: Some(1.0),
+                    sound: Some(2),
                 },
             ],
             notes: (TONES.iter())
@@ -267,6 +374,13 @@ mod tests {
             count_in: 0.5,
             duration: 2.0,
             looped: true,
+            recording: Some(Cue {
+                start: -1.5,
+                rate: 0.75,
+                audible: false,
+                gain: 0.5,
+                pan: 0.25,
+            }),
         };
         let bytes = timeline.to_bytes();
         assert_eq!(Timeline::from_bytes(&bytes), Some(timeline));
@@ -291,5 +405,32 @@ mod tests {
         let mut lying = bytes.clone();
         lying[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(Timeline::from_bytes(&lying), None);
+    }
+
+    #[test]
+    fn a_chain_survives_the_trip_and_a_bad_one_is_refused() {
+        let chain = vec![
+            Pedal::with(PedalKind::Delay, &[1, 2, 3, 4]),
+            Pedal {
+                on: false,
+                knobs: Vec::new(),
+                kind: PedalKind::Amp,
+            },
+        ];
+        let bytes = chain_to_bytes(&chain);
+        assert_eq!(chain_from_bytes(&bytes), Some(chain.clone()));
+        assert_eq!(chain_from_bytes(&chain_to_bytes(&[])), Some(Vec::new()));
+        assert_eq!(chain_from_bytes(&bytes[..bytes.len() - 1]), None);
+        // A knob past its end, a kind that does not exist, or one knob too many.
+        assert_eq!(
+            chain_from_bytes(&chain_to_bytes(&[Pedal::with(PedalKind::Eq, &[101])])),
+            None
+        );
+        let mut unknown = bytes.clone();
+        unknown[4] = PedalKind::ALL.len() as u8;
+        assert_eq!(chain_from_bytes(&unknown), None);
+        let mut long = Pedal::new(PedalKind::Wah);
+        long.knobs.push(0);
+        assert_eq!(chain_from_bytes(&chain_to_bytes(&[long])), None);
     }
 }

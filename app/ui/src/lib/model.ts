@@ -15,6 +15,8 @@ import type { NoteValue } from './generated/NoteValue';
 import type { Target } from './generated/Target';
 import type { IconName } from './ui/icons';
 
+export type { AudioTrack } from './generated/AudioTrack';
+export type { SyncPoint } from './generated/SyncPoint';
 export type { Accent } from './generated/Accent';
 export type { Fade } from './generated/Fade';
 export type { Align } from './generated/Align';
@@ -55,10 +57,13 @@ export type { Note } from './generated/Note';
 export type { NoteEffects } from './generated/NoteEffects';
 export type { NoteValue } from './generated/NoteValue';
 export type { PickStroke } from './generated/PickStroke';
+export type { Pedal } from './generated/Pedal';
+export type { PedalKind } from './generated/PedalKind';
 export type { RowBox } from './generated/RowBox';
 export type { Score } from './generated/Score';
 export type { ScoreInfo } from './generated/ScoreInfo';
 export type { Slap } from './generated/Slap';
+export type { Sound } from './generated/Sound';
 export type { Slide } from './generated/Slide';
 export type { Staff } from './generated/Staff';
 export type { Strum } from './generated/Strum';
@@ -81,6 +86,10 @@ export interface Timeline {
   beats: BeatTime[];
   pulses: Pulse[];
   duration: number;
+  /** Seconds the count-in lasts, before the first bar starts. */
+  count_in: number;
+  /** Where the score's recording plays from, and at what speed, if it has one. */
+  recording: { start: number; rate: number } | null;
 }
 
 /** Instruments in the order they are offered, with the names `gtr_model::Instrument` gives. */

@@ -209,6 +209,23 @@ impl BarTiming {
         span.start + float(position - span.from) * span.rate
     }
 
+    /// The bar played `factor` times as long, as when it is fitted to a recording.
+    pub fn scaled(&self, factor: f64) -> BarTiming {
+        let spans = (self.spans.iter())
+            .map(|span| Span {
+                start: span.start * factor,
+                whole: span.whole * factor,
+                rate: span.rate * factor,
+                ..*span
+            })
+            .collect();
+        BarTiming {
+            spans,
+            length: self.length * factor,
+            ..self.clone()
+        }
+    }
+
     /// Seconds a whole note lasts at the tempo the bar starts in.
     pub fn whole(&self) -> f64 {
         self.spans[0].whole

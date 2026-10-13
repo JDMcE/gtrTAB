@@ -426,6 +426,8 @@ pub(super) fn read(text: &str, skipped: &mut Skipped) -> Result<Score, ImportErr
         tempo: tempo.unwrap_or(120),
         master_bars: masters,
         tracks,
+        effects: Vec::new(),
+        audio: None,
     })
 }
 

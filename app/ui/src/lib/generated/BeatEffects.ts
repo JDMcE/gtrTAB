@@ -54,6 +54,11 @@ volume?: number,
  */
 pan?: number, 
 /**
+ * The sound the track plays with from this beat on: 0 for its own, or one more than
+ * the place of one of its other sounds (see [`crate::Track::sounds`]).
+ */
+sound?: number, 
+/**
  * Free text written above the beat.
  */
 text?: string, 

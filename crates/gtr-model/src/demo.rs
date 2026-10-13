@@ -52,6 +52,8 @@ pub fn demo_score() -> Score {
                 ],
             }],
         )],
+        effects: Vec::new(),
+        audio: None,
     }
 }
 

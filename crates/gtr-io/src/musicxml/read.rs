@@ -194,6 +194,8 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score, ImportE
         tempo: global.tempo.unwrap_or(120),
         master_bars: global.masters,
         tracks,
+        effects: Vec::new(),
+        audio: None,
     })
 }
 

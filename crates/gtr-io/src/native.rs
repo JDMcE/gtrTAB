@@ -1,4 +1,5 @@
-//! The native `.gtrtab` format: a zip archive holding `score.json`.
+//! The native `.gtrtab` format: a zip archive holding `score.json`, and the file of the
+//! score's recording as it was imported, if it has one.
 
 use std::io::{Cursor, Read, Write};
 
@@ -10,9 +11,10 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 7;
+pub const FORMAT_VERSION: u64 = 10;
 
 const SCORE_ENTRY: &str = "score.json";
+const RECORDING_ENTRY: &str = "recording";
 
 #[derive(Debug, thiserror::Error)]
 pub enum NativeError {
@@ -37,6 +39,11 @@ struct Envelope<'a> {
 }
 
 pub fn save(score: &Score) -> Result<Vec<u8>, NativeError> {
+    save_with(score, None)
+}
+
+/// Saves the score with the file of its recording, which is kept as it is.
+pub fn save_with(score: &Score, recording: Option<&[u8]>) -> Result<Vec<u8>, NativeError> {
     let json = serde_json::to_vec(&Envelope {
         format_version: FORMAT_VERSION,
         score,
@@ -44,16 +51,39 @@ pub fn save(score: &Score) -> Result<Vec<u8>, NativeError> {
     let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
     zip.start_file(SCORE_ENTRY, SimpleFileOptions::default())?;
     zip.write_all(&json)?;
+    if let Some(recording) = recording {
+        // A recording is compressed already, and would only be made slower to open.
+        let stored = SimpleFileOptions::default()
+            .compression_method(zip::CompressionMethod::Stored)
+            .large_file(recording.len() >= u32::MAX as usize);
+        zip.start_file(RECORDING_ENTRY, stored)?;
+        zip.write_all(recording)?;
+    }
     Ok(zip.finish()?.into_inner())
 }
 
 pub fn load(bytes: &[u8]) -> Result<Score, NativeError> {
-    let mut json = Vec::new();
-    ZipArchive::new(Cursor::new(bytes))?
-        .by_name(SCORE_ENTRY)?
-        .read_to_end(&mut json)?;
+    Ok(load_with(bytes)?.0)
+}
 
-    let mut envelope: Value = serde_json::from_slice(&json)?;
+/// Loads the score and the file of its recording, if the archive has one.
+pub fn load_with(bytes: &[u8]) -> Result<(Score, Option<Vec<u8>>), NativeError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
+    let mut json = Vec::new();
+    archive.by_name(SCORE_ENTRY)?.read_to_end(&mut json)?;
+    let recording = match archive.by_name(RECORDING_ENTRY) {
+        Ok(mut entry) => {
+            let mut recording = Vec::new();
+            entry.read_to_end(&mut recording)?;
+            Some(recording)
+        }
+        Err(_) => None,
+    };
+    Ok((score_from(&json)?, recording))
+}
+
+fn score_from(json: &[u8]) -> Result<Score, NativeError> {
+    let mut envelope: Value = serde_json::from_slice(json)?;
     let version = envelope
         .get("format_version")
         .and_then(Value::as_u64)
@@ -128,6 +158,9 @@ fn migrate(from: u64, score: &mut Value) {
         // changes of tempo, none of which an older file can have.
         list_signs_and_jumps(score);
     }
+    // Version 8 added the pedals of each track and of the mix, version 9 a track's other
+    // sounds and the beats that switch to them, and version 10 the audio track, all as
+    // optional fields.
 }
 
 /// Version 7 lets a bar be several signs and have several jumps: what was one of each, if
@@ -250,6 +283,42 @@ mod tests {
         beat.duration.dots = 3;
         beat.duration.value = gtr_model::NoteValue::TwoHundredFiftySixth;
         assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+
+        // And what version 8 added.
+        use gtr_model::{Pedal, PedalKind};
+        score.tracks[0].effects = vec![
+            Pedal::with(PedalKind::Amp, &[80, 40]),
+            Pedal {
+                on: false,
+                ..Pedal::new(PedalKind::Delay)
+            },
+        ];
+        score.effects = vec![Pedal::new(PedalKind::Reverb)];
+        assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+
+        // And what version 9 added.
+        score.tracks[0].sounds = vec![gtr_model::Sound {
+            name: "Lead".into(),
+            instrument: gtr_model::Instrument::DistortionGuitar,
+            effects: vec![Pedal::new(PedalKind::Delay)],
+        }];
+        score.tracks[0].staves[0].bars[0].voices[0].beats[1]
+            .effects
+            .sound = Some(1);
+        assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+
+        // And what version 10 added, with the recording beside it.
+        let mut audio = gtr_model::AudioTrack::new("take 2.ogg");
+        audio.sync.push(gtr_model::SyncPoint {
+            bar: 1,
+            millis: 1_900,
+        });
+        audio.mix.volume = 60;
+        score.audio = Some(audio);
+        let recording = b"OggS and so on".to_vec();
+        let saved = save_with(&score, Some(&recording)).unwrap();
+        assert_eq!(load_with(&saved).unwrap(), (score.clone(), Some(recording)));
+        assert_eq!(load_with(&save(&score).unwrap()).unwrap(), (score, None));
     }
 
     #[test]

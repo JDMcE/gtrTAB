@@ -38,14 +38,25 @@ export async function confirmDialog(message: string): Promise<boolean> {
   return window.confirm(message);
 }
 
-/** Lets the user pick a file. Resolves to `null` if they cancel. */
-export async function openFile(): Promise<OpenedFile | null> {
-  const extensions = [EXTENSION, ...IMPORT_EXTENSIONS];
+/** Recordings an audio track can be made from: what browsers and the desktop's webviews can decode. */
+export const AUDIO_EXTENSIONS = ['mp3', 'ogg', 'oga', 'opus', 'wav', 'flac', 'm4a', 'aac', 'webm'];
+
+/** Lets the user pick a score. Resolves to `null` if they cancel. */
+export function openFile(): Promise<OpenedFile | null> {
+  return pickFile('Scores', [EXTENSION, ...IMPORT_EXTENSIONS]);
+}
+
+/** Lets the user pick a recording. Resolves to `null` if they cancel. */
+export function openAudioFile(): Promise<OpenedFile | null> {
+  return pickFile('Recordings', AUDIO_EXTENSIONS);
+}
+
+async function pickFile(kind: string, extensions: string[]): Promise<OpenedFile | null> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const path = await open({
       multiple: false,
-      filters: [{ name: 'Scores', extensions }],
+      filters: [{ name: kind, extensions }],
     });
     return path === null ? null : readPath(path);
   }

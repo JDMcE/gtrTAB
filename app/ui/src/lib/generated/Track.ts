@@ -2,6 +2,8 @@
 import type { Instrument } from "./Instrument";
 import type { KitPiece } from "./KitPiece";
 import type { Mix } from "./Mix";
+import type { Pedal } from "./Pedal";
+import type { Sound } from "./Sound";
 import type { Staff } from "./Staff";
 
 export type Track = { name: string, instrument: Instrument, mix: Mix, 
@@ -9,4 +11,12 @@ export type Track = { name: string, instrument: Instrument, mix: Mix,
  * The drum kit of a drum track that has one of its own: which pieces it has and how
  * each is written. Empty for the standard kit.
  */
-kit?: Array<KitPiece>, staves: Array<Staff>, };
+kit?: Array<KitPiece>, 
+/**
+ * The pedals the track's sound goes through on its way to the mix, in order.
+ */
+effects?: Array<Pedal>, 
+/**
+ * Other sounds the track can switch to part-way through (see [`BeatEffects::sound`]).
+ */
+sounds?: Array<Sound>, staves: Array<Staff>, };

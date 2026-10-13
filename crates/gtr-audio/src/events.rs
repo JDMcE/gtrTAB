@@ -1,6 +1,6 @@
 use gtr_model::{
-    Accent, BarTiming, Beat, Bend, Dynamic, Fade, Hairpin, Harmonic, Instrument, Note, Rational,
-    Score, Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
+    Accent, BarTiming, Beat, Bend, Dynamic, Fade, Hairpin, Harmonic, Instrument, Note, Pedal,
+    Rational, Score, Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -127,7 +127,7 @@ impl Timbre {
 
 /// How one track is mixed. The notes of a track that is not audible are in the timeline all
 /// the same, so that it can be brought back in while the music plays.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Channel {
     /// False for a track that is muted, or left out by another track's solo.
     pub audible: bool,
@@ -135,6 +135,28 @@ pub struct Channel {
     /// From -1.0 (left) to 1.0 (right).
     pub pan: f32,
     pub timbre: Timbre,
+    /// The pedals the track goes through before it is placed in the mix.
+    pub effects: Vec<Pedal>,
+    /// The other sounds the track's notes can be played with (see [`NoteEvent::sound`]).
+    pub sounds: Vec<Voicing>,
+}
+
+/// One of a track's other sounds: the character of the sound and its pedals.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Voicing {
+    pub timbre: Timbre,
+    pub effects: Vec<Pedal>,
+}
+
+impl Channel {
+    /// The character and the pedals of `sound`: 0 for the track's own, or one more than
+    /// the place of one of its others. A sound it does not have is its own.
+    pub fn voicing(&self, sound: u8) -> (Timbre, &[Pedal]) {
+        match (usize::from(sound).checked_sub(1)).and_then(|i| self.sounds.get(i)) {
+            Some(other) => (other.timbre, &other.effects),
+            None => (self.timbre, &self.effects),
+        }
+    }
 }
 
 impl Default for Channel {
@@ -144,6 +166,8 @@ impl Default for Channel {
             gain: 1.0,
             pan: 0.0,
             timbre: Timbre::default(),
+            effects: Vec::new(),
+            sounds: Vec::new(),
         }
     }
 }
@@ -171,6 +195,9 @@ pub struct NoteEvent {
     /// The note's volume is brought up from nothing, taken down to it, or both, over
     /// its length.
     pub fade: Option<Fade>,
+    /// The sound of its track it is played with: 0 for the track's own, or one more than
+    /// the place of one of its others (see [`Channel::voicing`]).
+    pub sound: u8,
 }
 
 impl NoteEvent {
@@ -187,6 +214,7 @@ impl NoteEvent {
             pitch_curve: Vec::new(),
             vibrato: 0.0,
             fade: None,
+            sound: 0,
         }
     }
 }
@@ -231,12 +259,31 @@ pub struct Automation {
     pub gain: Option<f32>,
     /// The track's pan from here on, from -1.0 (left) to 1.0 (right), if it changes.
     pub pan: Option<f32>,
+    /// The sound the track's notes are played with from here on, if it changes. The notes
+    /// say which they are played with; this is for what follows the timeline.
+    pub sound: Option<u8>,
+}
+
+/// Where the score's recording plays from in a passage, and how it is mixed.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Cue {
+    /// Seconds into the recording where the music starts, at the end of the count-in.
+    /// Under zero, the recording starts that much later.
+    pub start: f64,
+    /// Seconds of the recording played each second: the speed of playback.
+    pub rate: f64,
+    pub audible: bool,
+    pub gain: f32,
+    /// From -1.0 (left) to 1.0 (right).
+    pub pan: f32,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
 pub struct Timeline {
     /// One per track of the score.
     pub channels: Vec<Channel>,
+    /// The pedals the whole mix goes through.
+    pub effects: Vec<Pedal>,
     /// Changes to the channels' gain and pan, in time order.
     pub automation: Vec<Automation>,
     pub notes: Vec<NoteEvent>,
@@ -252,6 +299,8 @@ pub struct Timeline {
     pub duration: f64,
     /// Played again from the end of the count-in on reaching `duration`, until stopped.
     pub looped: bool,
+    /// The score's recording, played along with the passage.
+    pub recording: Option<Cue>,
 }
 
 /// Longest a let-ring note is allowed to sustain.
@@ -316,7 +365,8 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         }
     };
 
-    let any_solo = score.tracks.iter().any(|t| t.mix.solo);
+    let audio = score.audio.as_ref();
+    let any_solo = score.tracks.iter().any(|t| t.mix.solo) || audio.is_some_and(|a| a.mix.solo);
     let mut timeline = Timeline {
         channels: (score.tracks.iter())
             .map(|track| Channel {
@@ -324,8 +374,16 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
                 gain: track.mix.gain(),
                 pan: f32::from(track.mix.pan) / f32::from(gtr_model::Mix::MAX_PAN),
                 timbre: Timbre::of(track.instrument),
+                effects: track.effects.clone(),
+                sounds: (track.sounds.iter())
+                    .map(|sound| Voicing {
+                        timbre: Timbre::of(sound.instrument),
+                        effects: sound.effects.clone(),
+                    })
+                    .collect(),
             })
             .collect(),
+        effects: score.effects.clone(),
         automation: Vec::new(),
         notes: Vec::new(),
         clicks: Vec::new(),
@@ -334,11 +392,39 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
         count_in: 0.0,
         duration: 0.0,
         looped: options.looped,
+        recording: None,
     };
+    let mut bar_timings = timings(score, &order, speed);
+    if let Some(audio) = audio {
+        // The bars are timed as the recording plays them, and the recording played from
+        // where the passage starts in it.
+        let full = play_order(masters, false);
+        let written = timings(score, &full, 1.0);
+        let lengths: Vec<f64> = written.iter().map(|t| t.length).collect();
+        let fitted = gtr_model::synced(&lengths, &audio.sync);
+        let places = places_in(&full, &order);
+        for (timing, place) in bar_timings.iter_mut().zip(&places) {
+            if let Some(place) = *place {
+                *timing = written[place].scaled(fitted[place].1 / speed);
+            }
+        }
+        let start = places
+            .first()
+            .copied()
+            .flatten()
+            .map_or(0.0, |p| fitted[p].0);
+        timeline.recording = Some(Cue {
+            start,
+            rate: speed,
+            audible: !audio.mix.mute && (audio.mix.solo || !any_solo),
+            gain: audio.mix.gain(),
+            pan: f32::from(audio.mix.pan) / f32::from(gtr_model::Mix::MAX_PAN),
+        });
+    }
 
     let mut time = 0.0;
     let mut played = Vec::with_capacity(order.len());
-    for (position, timing) in timings(score, &order, speed).into_iter().enumerate() {
+    for (position, timing) in bar_timings.into_iter().enumerate() {
         let signature = masters[timing.bar].time_signature;
         let pulse = Rational::new(1, signature.denominator.into());
         let pulses = (0..signature.numerator).map(|i| (pulse * i64::from(i), i == 0));
@@ -397,7 +483,60 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
     timeline
         .automation
         .sort_by(|a, b| a.time.total_cmp(&b.time));
+    let first = order.first().copied().unwrap_or(0);
+    choose_sounds(&mut timeline, score, first);
     timeline
+}
+
+/// Where each bar of a passage, played in `order`, is in the play-through from the start
+/// (`full`): the next place of the bar after the one before it, or its first place if
+/// there is none after; `None` for a bar that is never reached.
+fn places_in(full: &[usize], order: &[usize]) -> Vec<Option<usize>> {
+    let first = |bar: usize| full.iter().position(|&b| b == bar);
+    let mut next = order.first().and_then(|&bar| first(bar)).unwrap_or(0);
+    (order.iter())
+        .map(|&bar| {
+            let found = (full[next.min(full.len())..].iter())
+                .position(|&b| b == bar)
+                .map(|i| next + i)
+                .or_else(|| first(bar));
+            if let Some(place) = found {
+                next = place + 1;
+            }
+            found
+        })
+        .collect()
+}
+
+/// Gives each note the sound its track has switched to by the time it is played: the last
+/// switch before it in the passage, or if there is none, the last written before the bar
+/// the passage starts from.
+fn choose_sounds(timeline: &mut Timeline, score: &Score, first_bar: usize) {
+    for (channel, track) in score.tracks.iter().enumerate() {
+        if track.sounds.is_empty() {
+            continue;
+        }
+        let before = (track.staves.iter())
+            .flat_map(|staff| {
+                staff.bars[..first_bar.min(staff.bars.len())]
+                    .iter()
+                    .enumerate()
+            })
+            .flat_map(|(bar, b)| b.voices.iter().map(move |v| (bar, v)))
+            .flat_map(|(bar, v)| v.beats.iter().enumerate().map(move |(i, b)| (bar, i, b)))
+            .filter_map(|(bar, i, b)| b.effects.sound.map(|s| ((bar, i), s)))
+            .max_by_key(|&(at, _)| at)
+            .map_or(0, |(_, sound)| sound);
+        let switches: Vec<(f64, u8)> = (timeline.automation.iter())
+            .filter(|change| change.channel == channel)
+            .filter_map(|change| change.sound.map(|sound| (change.time, sound)))
+            .collect();
+        for note in timeline.notes.iter_mut().filter(|n| n.channel == channel) {
+            // A note on the beat that switches is played with the new sound.
+            let made = switches.partition_point(|&(time, _)| time <= note.time + 1e-9);
+            note.sound = made.checked_sub(1).map_or(before, |i| switches[i].1);
+        }
+    }
 }
 
 /// Seconds that `length` whole notes last when one lasts `whole` seconds.
@@ -481,13 +620,15 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         time,
                     });
                 }
-                if beat.effects.volume.is_some() || beat.effects.pan.is_some() {
+                let effects = &beat.effects;
+                if effects.volume.is_some() || effects.pan.is_some() || effects.sound.is_some() {
                     timeline.automation.push(Automation {
                         channel: 0,
                         time,
                         gain: beat.effects.volume.map(gtr_model::Mix::gain_of),
                         pan: (beat.effects.pan)
                             .map(|pan| f32::from(pan) / f32::from(gtr_model::Mix::MAX_PAN)),
+                        sound: beat.effects.sound,
                     });
                 }
                 // When the beat's notes are struck, from its start; for how long; and how
@@ -851,6 +992,145 @@ mod tests {
     }
 
     #[test]
+    fn each_note_is_played_with_the_sound_switched_to_by_then() {
+        use gtr_model::{Instrument, MasterBar, Sound, TimeSignature};
+        let mut score = quarters(vec![Note::new(5, 0); 4]);
+        score.tracks[0].sounds = vec![
+            Sound {
+                name: "Lead".into(),
+                instrument: Instrument::DistortionGuitar,
+                effects: Vec::new(),
+            },
+            Sound {
+                name: "Clean".into(),
+                instrument: Instrument::CleanGuitar,
+                effects: Vec::new(),
+            },
+        ];
+        // A second bar like the first, and the switches: to the lead on the second beat and
+        // to the clean sound on the fourth.
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        score
+            .master_bars
+            .push(MasterBar::new(TimeSignature::COMMON));
+        score.tracks[0].staves[0].bars.push(bar);
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[1].effects.sound = Some(1);
+        beats[3].effects.sound = Some(2);
+        let t = compile(&score, 0, &Options::default());
+        let sounds: Vec<u8> = t.notes.iter().map(|n| n.sound).collect();
+        assert_eq!(sounds, [0, 1, 1, 2, 2, 2, 2, 2]);
+        assert_eq!(t.channels[0].voicing(1).0, Timbre::Distortion);
+        assert_eq!(t.channels[0].voicing(9).0, Timbre::Steel);
+        // Played from the second bar, the clean sound it was switched to still holds.
+        let options = Options {
+            from_bar: 1,
+            ..Options::default()
+        };
+        let t = compile(&score, 0, &options);
+        assert!(t.notes.iter().all(|n| n.sound == 2));
+        // Switched back to its own sound, the track has one switch to make.
+        let beats = &mut score.tracks[0].staves[0].bars[1].voices[0].beats;
+        beats[2].effects.sound = Some(0);
+        let t = compile(&score, 0, &options);
+        let sounds: Vec<u8> = t.notes.iter().map(|n| n.sound).collect();
+        assert_eq!(sounds, [2, 2, 0, 0]);
+    }
+
+    #[test]
+    fn with_a_recording_the_bars_are_timed_as_it_plays_them() {
+        use gtr_model::{AudioTrack, MasterBar, SyncPoint, TimeSignature};
+        // Four bars of four quarter notes, written at 120: two seconds each.
+        let mut score = quarters(vec![Note::new(5, 0); 4]);
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        for _ in 0..3 {
+            score
+                .master_bars
+                .push(MasterBar::new(TimeSignature::COMMON));
+            score.tracks[0].staves[0].bars.push(bar.clone());
+        }
+        // The recording has the first bar a second in, and the third at six seconds: the
+        // first two bars take five seconds between them, where they are written to take
+        // four, and the bars after go on as fast.
+        let mut audio = AudioTrack::new("song.ogg");
+        audio.sync = vec![
+            SyncPoint {
+                bar: 0,
+                millis: 1_000,
+            },
+            SyncPoint {
+                bar: 2,
+                millis: 6_000,
+            },
+        ];
+        score.audio = Some(audio);
+        let t = compile(&score, 0, &Options::default());
+        let starts: Vec<f64> = t.beats.iter().step_by(4).map(|b| b.time).collect();
+        let expected = [0.0, 2.5, 5.0, 7.5];
+        assert!(
+            starts
+                .iter()
+                .zip(expected)
+                .all(|(a, b)| (a - b).abs() < 1e-9),
+            "{starts:?}"
+        );
+        assert!((t.duration - 10.0).abs() < 1e-9);
+        let cue = t.recording.unwrap();
+        assert_eq!((cue.start, cue.rate, cue.audible), (1.0, 1.0, true));
+        // From the third bar at half the speed, with a count-in: the recording starts at
+        // six seconds, played at half the speed, and the bars take twice as long.
+        let options = Options {
+            from_bar: 2,
+            speed: 0.5,
+            count_in: true,
+            ..Options::default()
+        };
+        let t = compile(&score, 0, &options);
+        let cue = t.recording.unwrap();
+        assert_eq!((cue.start, cue.rate), (6.0, 0.5));
+        assert!((t.beats[4].time - t.beats[0].time - 5.0).abs() < 1e-9);
+        // Muted, it is cued all the same, to be brought in while it plays.
+        score.audio.as_mut().unwrap().mix.mute = true;
+        assert!(
+            !compile(&score, 0, &Options::default())
+                .recording
+                .unwrap()
+                .audible
+        );
+        // Soloed, the tracks are left out.
+        let audio = score.audio.as_mut().unwrap();
+        (audio.mix.mute, audio.mix.solo) = (false, true);
+        assert!(!compile(&score, 0, &Options::default()).channels[0].audible);
+    }
+
+    #[test]
+    fn a_bar_played_twice_has_a_place_for_each_time() {
+        // Bars 0 1 1 2 with bar 1 repeated: a passage from bar 1 to the end is the bars at
+        // places 1, 2 and 3; a range of bar 1 alone, played twice, the same two places.
+        let full = [0, 1, 1, 2];
+        assert_eq!(places_in(&full, &[1, 1, 2]), [Some(1), Some(2), Some(3)]);
+        assert_eq!(places_in(&full, &[1, 1]), [Some(1), Some(2)]);
+        // More times than the score has it: the first place again. Never played: nowhere.
+        assert_eq!(places_in(&full, &[1, 1, 1]), [Some(1), Some(2), Some(1)]);
+        assert_eq!(places_in(&full, &[5]), [None]);
+    }
+
+    #[test]
+    fn the_pedals_of_each_track_and_of_the_mix_are_carried() {
+        use gtr_model::PedalKind;
+        let mut score = demo_score();
+        score.tracks[0].effects = vec![Pedal::new(PedalKind::Overdrive)];
+        score.effects = vec![Pedal::new(PedalKind::Reverb)];
+        let t = compile(&score, 0, &Options::default());
+        assert_eq!(t.channels[0].effects, score.tracks[0].effects);
+        assert_eq!(t.effects, score.effects);
+        assert_eq!(
+            Timeline::from_bytes(&t.to_bytes()).unwrap().effects,
+            score.effects
+        );
+    }
+
+    #[test]
     fn mute_solo_and_mix_settings() {
         use gtr_model::{Mix, Track};
 
@@ -875,7 +1155,9 @@ mod tests {
                 audible: true,
                 gain: 0.0,
                 pan: -1.0,
-                timbre: Timbre::Bass
+                timbre: Timbre::Bass,
+                effects: Vec::new(),
+                sounds: Vec::new(),
             }
         );
         let audible = |score: &Score| -> Vec<bool> {
@@ -1085,6 +1367,7 @@ mod tests {
                 time: 0.5,
                 gain: Some(0.0),
                 pan: Some(0.5),
+                sound: None,
             }]
         );
     }

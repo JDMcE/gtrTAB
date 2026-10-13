@@ -55,11 +55,35 @@ class SynthProcessor extends AudioWorkletProcessor {
         if (this.wasm.gtr_queue(this.synth, 0)) this.queued = message.id;
         break;
       }
-      case 'mix':
+      case 'mix': {
         message.mix.forEach((track, index) => {
           this.wasm.gtr_set_mix(this.synth, index, track.audible ? 1 : 0, track.gain, track.pan);
         });
+        const recording = message.recording;
+        if (recording) this.wasm.gtr_set_recording_mix(this.synth, recording.audible ? 1 : 0, recording.gain, recording.pan);
         break;
+      }
+      case 'recording': {
+        // The score's recording, left and right in turn as sixteen bits, or nothing.
+        if (!message.samples) {
+          this.wasm.gtr_set_recording(this.synth, 1);
+          break;
+        }
+        const samples = new Int16Array(message.samples);
+        const at = this.wasm.gtr_recording_input(this.synth, samples.length / 2);
+        new Int16Array(this.wasm.memory.buffer, at, samples.length).set(samples);
+        this.wasm.gtr_set_recording(this.synth, 0);
+        break;
+      }
+      case 'effects': {
+        // The pedals of a track's sound, or with a track below zero the mix's, as a knob
+        // turns.
+        const chain = new Uint8Array(message.chain);
+        const at = this.wasm.gtr_input(this.synth, chain.length);
+        new Uint8Array(this.wasm.memory.buffer, at, chain.length).set(chain);
+        this.wasm.gtr_set_effects(this.synth, message.track, message.sound);
+        break;
+      }
       case 'soundfont': {
         // The bank to play from, as the bytes of an .sf2 file, or nothing for the models.
         let error = 0;
@@ -118,3 +142,60 @@ class SynthProcessor extends AudioWorkletProcessor {
 }
 
 registerProcessor('gtr-synth', SynthProcessor);
+
+/**
+ * A line in played through pedals (see linein.ts): what is heard on the input's first
+ * channel goes through the track's pedals and then the mix's, out on both sides.
+ */
+class LineProcessor extends AudioWorkletProcessor {
+  constructor(options) {
+    super();
+    const module = new WebAssembly.Module(options.processorOptions.wasm);
+    this.wasm = new WebAssembly.Instance(module, {}).exports;
+    this.line = this.wasm.gtr_line_new(sampleRate);
+    this.gain = 1;
+    this.blocks = 0;
+    /** The loudest sample in and out since the last report. */
+    this.peaks = [0, 0];
+    this.port.onmessage = (event) => this.receive(event.data);
+  }
+
+  receive(message) {
+    switch (message.type) {
+      case 'effects': {
+        const chain = new Uint8Array(message.chain);
+        const at = this.wasm.gtr_line_input(this.line, chain.length);
+        new Uint8Array(this.wasm.memory.buffer, at, chain.length).set(chain);
+        this.wasm.gtr_line_set(this.line, message.master ? 1 : 0);
+        break;
+      }
+      case 'gain':
+        this.gain = message.gain;
+        break;
+    }
+  }
+
+  process(inputs, outputs) {
+    const [left, right] = outputs[0];
+    const heard = inputs[0]?.[0];
+    if (!left) return true;
+    const frames = left.length;
+    const at = this.wasm.gtr_line_heard(this.line, frames);
+    const into = new Float32Array(this.wasm.memory.buffer, at, frames);
+    if (heard) into.set(heard);
+    else into.fill(0);
+    for (const sample of into) this.peaks[0] = Math.max(this.peaks[0], Math.abs(sample * this.gain));
+    this.wasm.gtr_line_process(this.line, this.gain);
+    const { buffer } = this.wasm.memory;
+    left.set(new Float32Array(buffer, this.wasm.gtr_line_left(this.line), frames));
+    (right ?? left).set(new Float32Array(buffer, this.wasm.gtr_line_right(this.line), frames));
+    for (const sample of left) this.peaks[1] = Math.max(this.peaks[1], Math.abs(sample));
+    if (++this.blocks % REPORT_EVERY === 0) {
+      this.port.postMessage({ type: 'level', input: this.peaks[0], output: this.peaks[1] });
+      this.peaks = [0, 0];
+    }
+    return true;
+  }
+}
+
+registerProcessor('gtr-line', LineProcessor);
