@@ -64,6 +64,8 @@
     problem: string;
     /** The bar at the cursor. */
     cursorBar: number;
+    /** The theme, which the waveform is drawn again in when it changes. */
+    theme: string;
     /** Seconds into the recording now sounding, while it plays. */
     now: number | null;
     /** Bar `place` of the play-through starts at `millis` in the recording. */
@@ -77,7 +79,7 @@
     onclose: () => void;
   }
 
-  let { audio, bars, peaks, problem, cursorBar, now, onsync, onunsync, onseek, onmix, onreplace, onremove, onclose }: Props =
+  let { audio, bars, peaks, problem, cursorBar, theme, now, onsync, onunsync, onseek, onmix, onreplace, onremove, onclose }: Props =
     $props();
 
   const HEIGHT = 96;
@@ -109,89 +111,115 @@
     return (clientX - box.left + left - 20) / scale;
   };
 
-  function colour(name: string): string {
-    return getComputedStyle(canvas!).getPropertyValue(name).trim() || '#888';
+  let probe: HTMLSpanElement;
+
+  /**
+   * A theme colour as the canvas can take it, at `alpha`. The theme's variables use
+   * light-dark(), which not every WebView accepts on a canvas, so CSS resolves each to
+   * rgb() first.
+   */
+  function colour(name: string, alpha = 1): string {
+    probe.style.color = `var(${name})`;
+    const [r, g, b, a = 1] = (getComputedStyle(probe).color.match(/[\d.]+/g) ?? ['128', '128', '128']).map(Number);
+    return `rgb(${r} ${g} ${b} / ${a * alpha})`;
   }
 
   function draw() {
-    if (!canvas || !scroller) return;
+    if (!canvas || !scroller || !probe) return;
     const ratio = window.devicePixelRatio || 1;
     view = scroller.clientWidth;
     canvas.width = Math.round(view * ratio);
     canvas.height = Math.round(HEIGHT * ratio);
     const g = canvas.getContext('2d')!;
     g.setTransform(ratio, 0, 0, ratio, 0, 0);
-    g.clearRect(0, 0, view, HEIGHT);
-    const middle = HEIGHT / 2 + 6;
+    const top = 16;
+    const middle = (top + HEIGHT) / 2;
+    const half = (HEIGHT - top) / 2 - 4;
+
+    // The recording on the score's paper, under a strip for the bar numbers.
+    g.fillStyle = colour('--panel');
+    g.fillRect(0, 0, view, HEIGHT);
+    g.fillStyle = colour('--paper');
+    g.fillRect(0, top, view, HEIGHT - top);
 
     // The cursor's bar, wherever it is played.
-    g.fillStyle = colour('--select');
+    g.fillStyle = colour('--accent', 0.12);
     for (const bar of bars.filter((b) => b.bar === cursorBar)) {
-      g.fillRect(x(bar.start), 14, bar.length * scale, HEIGHT - 14);
+      g.fillRect(x(bar.start), top, bar.length * scale, HEIGHT - top);
     }
 
-    // The waveform.
+    // A line through the middle, where the recording is silent.
+    g.fillStyle = colour('--border');
+    g.fillRect(0, Math.round(middle), view, 1);
+
+    // The waveform, filled from its lowest to its highest sample in each column, and
+    // brighter where it has been played.
     if (peaks) {
-      g.strokeStyle = colour('--muted');
-      g.beginPath();
-      for (let px = 0; px < view; px++) {
-        const from = Math.floor(((px + left - 20) / scale) * peaks.rate);
-        const to = Math.max(from + 1, Math.floor(((px + 1 + left - 20) / scale) * peaks.rate));
-        if (to <= 0 || from >= peaks.low.length) continue;
-        let [low, high] = [0, 0];
-        for (let i = Math.max(0, from); i < Math.min(peaks.low.length, to); i++) {
-          low = Math.min(low, peaks.low[i]);
-          high = Math.max(high, peaks.high[i]);
+      const played = now === null ? -Infinity : x(now);
+      const waves = [colour('--accent', 0.85), colour('--muted', 0.75)];
+      for (const [index, fill] of waves.entries()) {
+        g.fillStyle = fill;
+        g.beginPath();
+        const columns: [number, number, number][] = [];
+        for (let px = 0; px < view; px++) {
+          if ((px < played) !== (index === 0)) continue;
+          const from = Math.floor(((px + left - 20) / scale) * peaks.rate);
+          const to = Math.max(from + 1, Math.floor(((px + 1 + left - 20) / scale) * peaks.rate));
+          if (to <= 0 || from >= peaks.low.length) continue;
+          let [low, high] = [0, 0];
+          for (let i = Math.max(0, from); i < Math.min(peaks.low.length, to); i++) {
+            low = Math.min(low, peaks.low[i]);
+            high = Math.max(high, peaks.high[i]);
+          }
+          columns.push([px, middle - high * half, middle - low * half]);
         }
-        const half = (HEIGHT - 20) / 2;
-        g.moveTo(px + 0.5, middle - high * half);
-        g.lineTo(px + 0.5, middle - low * half + 1);
+        for (const [px, high, low] of columns) g.rect(px, high, 1, Math.max(1, low - high));
+        g.fill();
       }
-      g.stroke();
     }
 
-    // A line where each bar starts, numbered where there is room; heavier where the bar
-    // is held to the recording.
+    // A line where each bar starts, numbered where there is room; in the accent colour,
+    // with a handle, where the bar is held to the recording.
     const every = Math.max(1, Math.ceil(28 / Math.max(1, (bars[0]?.length ?? 2) * scale)));
-    g.font = '10px system-ui, sans-serif';
+    g.font = '600 10px system-ui, sans-serif';
+    g.textBaseline = 'middle';
+    const line = colour('--staff', 0.6);
+    const accent = colour('--accent');
+    const muted = colour('--muted');
     for (const bar of bars) {
       const start = dragging?.place === bar.place ? dragging.seconds : bar.start;
       const at = Math.round(x(start)) + 0.5;
       if (at < -40 || at > view + 40) continue;
       const fixed = held.has(bar.place);
-      g.strokeStyle = colour(fixed ? '--accent' : '--staff');
+      g.strokeStyle = fixed ? accent : line;
       g.lineWidth = fixed ? 2 : 1;
       g.beginPath();
-      g.moveTo(at, 14);
+      g.moveTo(at, top);
       g.lineTo(at, HEIGHT);
       g.stroke();
       if (fixed) {
-        g.fillStyle = colour('--accent');
+        g.fillStyle = accent;
         g.beginPath();
-        g.moveTo(at - 5, 14);
-        g.lineTo(at + 5, 14);
-        g.lineTo(at, 20);
+        g.moveTo(at - 5, top);
+        g.lineTo(at + 5, top);
+        g.lineTo(at, top + 6);
         g.fill();
       }
       if (fixed || bar.place % every === 0) {
-        g.fillStyle = colour(fixed ? '--accent' : '--muted');
-        g.fillText(String(bar.bar + 1), at + 3, 11);
+        g.fillStyle = fixed || bar.bar === cursorBar ? accent : muted;
+        g.fillText(String(bar.bar + 1), at + 3, top / 2);
       }
     }
     g.lineWidth = 1;
 
     if (now !== null) {
-      g.strokeStyle = colour('--focus');
-      g.lineWidth = 2;
-      g.beginPath();
-      g.moveTo(Math.round(x(now)), 0);
-      g.lineTo(Math.round(x(now)), HEIGHT);
-      g.stroke();
+      g.fillStyle = colour('--focus');
+      g.fillRect(Math.round(x(now)) - 1, 0, 2, HEIGHT);
     }
   }
 
   $effect(() => {
-    void [bars, peaks, scale, left, cursorBar, now, dragging, held];
+    void [bars, peaks, scale, left, cursorBar, now, dragging, held, theme];
     draw();
   });
 
@@ -318,6 +346,7 @@
       ></canvas>
     </div>
   </div>
+  <span bind:this={probe} hidden></span>
 </section>
 
 <style>
