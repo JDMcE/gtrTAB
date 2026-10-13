@@ -19,7 +19,7 @@ pub use effects::{
     interval_label,
 };
 pub use instrument::{Clef, Instrument, Mix};
-pub use pedal::{Knob, Pedal, PedalKind, Preset, presets};
+pub use pedal::{Knob, Pedal, PedalKind, Preset, Sound, presets};
 pub use playback::{
     BarTiming, TempoPoint, bar_times, gradual_change, play_order, range_order, tempo_points,
     timings,

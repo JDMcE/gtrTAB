@@ -202,6 +202,42 @@ impl Pedal {
     }
 }
 
+/// Another sound a track can switch to part-way through, from a beat on: the sound of an
+/// instrument, played through a chain of pedals of its own. What is written stays as it
+/// is; only how it sounds changes.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export)]
+pub struct Sound {
+    pub name: String,
+    pub instrument: crate::Instrument,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Pedal>>")]
+    pub effects: Vec<Pedal>,
+}
+
+impl Sound {
+    /// The most sounds a track can have besides its own.
+    pub const MAX_SOUNDS: usize = 8;
+    /// Longest name of a sound, in characters.
+    pub const MAX_NAME: usize = 40;
+
+    /// True for a sound a track playing `instrument` can have: one with a name and a valid
+    /// chain, and a drum kit only for drums and drums for nothing else, since a drum track
+    /// and a pitched one write their notes in different ways.
+    pub fn is_valid_for(&self, instrument: crate::Instrument) -> bool {
+        let name = self.name.trim().chars().count();
+        (1..=Sound::MAX_NAME).contains(&name)
+            && Pedal::chain_is_valid(&self.effects)
+            && (self.instrument == crate::Instrument::Drums)
+                == (instrument == crate::Instrument::Drums)
+    }
+
+    /// True for a list of sounds a track playing `instrument` can have.
+    pub fn list_is_valid(sounds: &[Sound], instrument: crate::Instrument) -> bool {
+        sounds.len() <= Sound::MAX_SOUNDS && sounds.iter().all(|s| s.is_valid_for(instrument))
+    }
+}
+
 /// A chain ready to be put on a track or the mix, by name.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Preset {

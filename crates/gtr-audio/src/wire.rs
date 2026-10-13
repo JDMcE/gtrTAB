@@ -3,10 +3,10 @@
 
 use gtr_model::{Fade, Pedal, PedalKind};
 
-use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone};
+use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone, Voicing};
 
 /// First bytes of an encoded timeline.
-const MAGIC: &[u8; 4] = b"GTL2";
+const MAGIC: &[u8; 4] = b"GTL3";
 
 const TIMBRES: [Timbre; 11] = [
     Timbre::Steel,
@@ -134,15 +134,23 @@ impl Timeline {
             w.f32(channel.gain);
             w.f32(channel.pan);
             w.chain(&channel.effects);
+            w.count(channel.sounds.len());
+            for sound in &channel.sounds {
+                w.u8(code(&TIMBRES, sound.timbre));
+                w.chain(&sound.effects);
+            }
         }
         w.chain(&self.effects);
         w.count(self.automation.len());
         for change in &self.automation {
             w.count(change.channel);
             w.f64(change.time);
-            w.u8(u8::from(change.gain.is_some()) | u8::from(change.pan.is_some()) << 1);
+            w.u8(u8::from(change.gain.is_some())
+                | u8::from(change.pan.is_some()) << 1
+                | u8::from(change.sound.is_some()) << 2);
             w.f32(change.gain.unwrap_or(0.0));
             w.f32(change.pan.unwrap_or(0.0));
+            w.u8(change.sound.unwrap_or(0));
         }
         w.count(self.notes.len());
         for note in &self.notes {
@@ -155,6 +163,7 @@ impl Timeline {
             w.f32(note.velocity);
             w.f32(note.vibrato);
             w.u8(note.fade.map_or(0, |fade| 1 + code(&FADES, fade)));
+            w.u8(note.sound);
             w.count(note.pitch_curve.len());
             for &(time, semitones) in &note.pitch_curve {
                 w.f32(time);
@@ -191,17 +200,24 @@ impl Timeline {
                 gain: r.f32()?,
                 pan: r.f32()?,
                 effects: r.chain()?,
+                sounds: r.list(|r| {
+                    Some(Voicing {
+                        timbre: *TIMBRES.get(usize::from(r.u8()?))?,
+                        effects: r.chain()?,
+                    })
+                })?,
             })
         })?;
         let effects = r.chain()?;
         let automation = r.list(|r| {
             let (channel, time, set) = (r.count()?, r.f64()?, r.u8()?);
-            let (gain, pan) = (r.f32()?, r.f32()?);
+            let (gain, pan, sound) = (r.f32()?, r.f32()?, r.u8()?);
             Some(Automation {
                 channel,
                 time,
                 gain: (set & 1 != 0).then_some(gain),
                 pan: (set & 2 != 0).then_some(pan),
+                sound: (set & 4 != 0).then_some(sound),
             })
         })?;
         let notes = r.list(|r| {
@@ -218,6 +234,7 @@ impl Timeline {
                     0 => None,
                     kind => Some(*FADES.get(usize::from(kind - 1))?),
                 },
+                sound: r.u8()?,
                 pitch_curve: r.list(|r| Some((r.f32()?, r.f32()?)))?,
             })
         })?;
@@ -262,6 +279,7 @@ mod tests {
         note.soft = true;
         note.velocity = 1.3;
         note.vibrato = 0.5;
+        note.sound = 2;
         note.pitch_curve = vec![(0.0, 0.0), (0.1, 2.0)];
         let timeline = Timeline {
             channels: TIMBRES
@@ -281,6 +299,19 @@ mod tests {
                         ],
                         _ => Vec::new(),
                     },
+                    sounds: match timbre {
+                        Timbre::Steel => vec![
+                            Voicing {
+                                timbre: Timbre::Distortion,
+                                effects: vec![Pedal::new(PedalKind::Amp)],
+                            },
+                            Voicing {
+                                timbre: Timbre::Clean,
+                                effects: Vec::new(),
+                            },
+                        ],
+                        _ => Vec::new(),
+                    },
                 })
                 .collect(),
             effects: (PedalKind::ALL.iter())
@@ -292,12 +323,14 @@ mod tests {
                     time: 0.5,
                     gain: Some(0.0),
                     pan: None,
+                    sound: None,
                 },
                 Automation {
                     channel: 0,
                     time: 1.0,
                     gain: None,
                     pan: Some(1.0),
+                    sound: Some(2),
                 },
             ],
             notes: (TONES.iter())

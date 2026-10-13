@@ -118,7 +118,9 @@ impl Lanes {
             mark(Lane::Fade, beat.effects.fade.is_some());
             mark(Lane::Chord, beat.effects.chord.is_some());
             mark(Lane::Diagram, beat.effects.diagram.is_some());
-            let mixed = beat.effects.volume.is_some() || beat.effects.pan.is_some();
+            let effects = &beat.effects;
+            let mixed =
+                effects.volume.is_some() || effects.pan.is_some() || effects.sound.is_some();
             mark(Lane::Mix, mixed);
             mark(Lane::Text, beat.effects.text.is_some());
             mark(Lane::Stroke, beat.effects.stroke.is_some());
@@ -297,6 +299,8 @@ fn half_width(note: &Note) -> f64 {
 /// One voice of one staff on one line of music.
 pub(crate) struct System<'a> {
     pub staff: &'a Staff,
+    /// The other sounds of the staff's track, for the names of the ones switched to.
+    pub sounds: &'a [gtr_model::Sound],
     pub voice: usize,
     /// X of every beat of this voice, per bar, for the bars laid out so far.
     pub xs: &'a [Vec<f64>],
@@ -671,6 +675,15 @@ impl System<'_> {
             draw_diagram(diagram, x - 1.0, lane(Lane::Diagram), items);
         }
         let mut changes = Vec::new();
+        if let Some(sound) = beat.effects.sound {
+            let other = usize::from(sound)
+                .checked_sub(1)
+                .and_then(|i| self.sounds.get(i));
+            changes.push(match other {
+                Some(other) => format!("sound: {}", other.name),
+                None => "own sound".into(),
+            });
+        }
         if let Some(volume) = beat.effects.volume {
             changes.push(format!("vol {volume}"));
         }

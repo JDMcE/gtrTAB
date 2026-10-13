@@ -3,6 +3,7 @@ import type { Instrument } from "./Instrument";
 import type { KitPiece } from "./KitPiece";
 import type { Mix } from "./Mix";
 import type { Pedal } from "./Pedal";
+import type { Sound } from "./Sound";
 import type { Staff } from "./Staff";
 
 export type Track = { name: string, instrument: Instrument, mix: Mix, 
@@ -14,4 +15,8 @@ kit?: Array<KitPiece>,
 /**
  * The pedals the track's sound goes through on its way to the mix, in order.
  */
-effects?: Array<Pedal>, staves: Array<Staff>, };
+effects?: Array<Pedal>, 
+/**
+ * Other sounds the track can switch to part-way through (see [`BeatEffects::sound`]).
+ */
+sounds?: Array<Sound>, staves: Array<Staff>, };

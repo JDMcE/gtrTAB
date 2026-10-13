@@ -36,6 +36,7 @@
     type Target,
     type EditorState,
     type Layout,
+    type Instrument,
     type Mix,
     type Pedal,
     type Score,
@@ -44,6 +45,7 @@
   import BeatLights from './lib/BeatLights.svelte';
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
   import Pedalboard from './lib/Pedalboard.svelte';
+  import SoundDialog from './lib/SoundDialog.svelte';
   import LineInDialog, { loadLineSettings, saveLineSettings, type LineSettings } from './lib/LineInDialog.svelte';
   import { LineIn, type Levels } from './lib/linein';
   import {
@@ -772,17 +774,54 @@
   let userPresets = $state.raw<PedalPreset[]>(loadUserPresets());
   /** The pedalboard shows the mix's pedals rather than the cursor's track's. */
   let pedalMaster = $state(false);
-  const pedalChain = $derived(
-    (pedalMaster ? score?.effects : score?.tracks[editor?.cursor.track ?? 0]?.effects) ?? [],
+  /** Which of the track's sounds the pedalboard shows: 0 for its own. */
+  let pedalSound = $state(0);
+  const pedalTrackOf = $derived(score?.tracks[editor?.cursor.track ?? 0]);
+  const trackSounds = $derived(pedalTrackOf?.sounds ?? []);
+  /** The sound shown, back to the track's own on a track that does not have it. */
+  const soundShown = $derived(pedalSound <= trackSounds.length ? pedalSound : 0);
+  /** The chain of the sound shown on the cursor's track. */
+  const soundChain = $derived(
+    (soundShown === 0 ? pedalTrackOf?.effects : trackSounds[soundShown - 1]?.effects) ?? [],
   );
+  const pedalChain = $derived((pedalMaster ? score?.effects : soundChain) ?? []);
   const pedalTrack = () => (pedalMaster ? undefined : trackIndex());
 
   /** Lets what is playing be heard through the chain as a knob turns, before it is kept. */
   function previewPedals(chain: Pedal[]) {
-    if (playing) void player.setEffects(pedalTrack() ?? null, Document.chainBytes(JSON.stringify(chain)));
+    const bytes = Document.chainBytes(JSON.stringify(chain));
+    if (playing) void player.setEffects(pedalTrack() ?? null, pedalMaster ? 0 : soundShown, bytes);
   }
 
-  const setPedals = (chain: Pedal[]) => edit((d) => d.setEffects(pedalTrack(), JSON.stringify(chain)));
+  function setPedals(chain: Pedal[]) {
+    const track = pedalTrack();
+    if (track === undefined || soundShown === 0) {
+      edit((d) => d.setEffects(track, JSON.stringify(chain)));
+      return;
+    }
+    const sounds = trackSounds.map((s, i) => (i === soundShown - 1 ? { ...s, effects: chain } : s));
+    edit((d) => d.setSounds(track, JSON.stringify(sounds)));
+  }
+
+  /** The sound being named: 0 for a new one, or which of the track's others. */
+  let soundDialog = $state<number | null>(null);
+
+  function nameSound(name: string, instrument: Instrument) {
+    const track = trackIndex();
+    const editing = soundDialog ?? 0;
+    const sounds =
+      editing === 0
+        ? [...trackSounds, { name, instrument }]
+        : trackSounds.map((s, i) => (i === editing - 1 ? { ...s, name, instrument } : s));
+    edit((d) => d.setSounds(track, JSON.stringify(sounds)));
+    if (editing === 0) pedalSound = sounds.length;
+  }
+
+  function removeSound() {
+    const removed = soundShown;
+    edit((d) => d.removeSound(trackIndex(), removed));
+    pedalSound = removed - 1;
+  }
 
   function savePreset() {
     const pedals = $state.snapshot(pedalChain) as Pedal[];
@@ -822,7 +861,7 @@
     try {
       await lineIn.start(
         settings.device,
-        chainBytes(lineTrack?.effects),
+        chainBytes(soundChain),
         chainBytes(score?.effects),
         decibels(settings.gain),
       );
@@ -848,9 +887,10 @@
     message = 'Stopped the line in';
   }
 
-  // The line follows the pedals of the cursor's track and of the mix as they change.
+  // The line follows the pedals of the cursor's track, in the sound shown on the
+  // pedalboard, and of the mix as they change.
   $effect(() => {
-    if (lineOn) lineIn.setEffects(false, chainBytes(lineTrack?.effects));
+    if (lineOn) lineIn.setEffects(false, chainBytes(soundChain));
   });
   $effect(() => {
     if (lineOn) lineIn.setEffects(true, chainBytes(score?.effects));
@@ -1329,6 +1369,32 @@
       active: () => prefs.instrument,
       run: () => (prefs.instrument = !prefs.instrument),
     },
+    soundChange: {
+      label: 'Change of sound…',
+      icon: 'soundChange',
+      active: () => beatEffects.sound !== undefined,
+      run: () => {
+        const track = score?.tracks[trackIndex()];
+        const others = track?.sounds ?? [];
+        prompt = {
+          title: 'Change of sound',
+          hint: others.length
+            ? 'The track plays with this sound from this beat on, until the next change. What is written stays as it is.'
+            : 'The track has no other sound to change to yet: add one on the pedalboard, with the + beside its sounds.',
+          field: {
+            kind: 'choice',
+            label: 'From this beat on',
+            value: beatEffects.sound ?? null,
+            options: [
+              { value: null, label: 'No change here' },
+              { value: 0, label: `Its own sound (${track?.name ?? ''})` },
+              ...others.map((s, i) => ({ value: i + 1, label: s.name })),
+            ],
+          },
+          apply: (sound: number | null) => setBeatEffect('sound', sound),
+        };
+      },
+    },
     pedalboard: {
       label: 'Pedalboard',
       icon: 'pedalboard',
@@ -1524,7 +1590,7 @@
           cmd.chordName, cmd.beatText, cmd.lyrics, cmd.fermata,
           '-',
           { label: 'Fade', items: fades },
-          cmd.volumeChange, cmd.panChange,
+          cmd.volumeChange, cmd.panChange, cmd.soundChange,
         ],
       },
       {
@@ -1926,8 +1992,14 @@
             {userPresets}
             master={pedalMaster}
             trackName={score.tracks[editor.cursor.track]?.name ?? ''}
+            sounds={trackSounds}
+            sound={soundShown}
             chain={pedalChain}
             onchoose={(master) => (pedalMaster = master)}
+            onsound={(sound) => (pedalSound = sound)}
+            onaddsound={() => (soundDialog = 0)}
+            oneditsound={() => (soundDialog = soundShown)}
+            onremovesound={removeSound}
             onpreview={previewPedals}
             onset={setPedals}
             onsavepreset={savePreset}
@@ -2080,11 +2152,20 @@
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
 {/if}
 
+{#if soundDialog !== null && pedalTrackOf}
+  <SoundDialog
+    sound={soundDialog > 0 ? (trackSounds[soundDialog - 1] ?? null) : null}
+    instrument={pedalTrackOf.instrument}
+    onapply={nameSound}
+    onclose={() => (soundDialog = null)}
+  />
+{/if}
+
 {#if lineDialog}
   <LineInDialog
     running={lineOn}
-    trackName={lineTrack?.name ?? ''}
-    trackPedals={pedalNames(lineTrack?.effects)}
+    trackName={soundShown > 0 ? `${lineTrack?.name}: ${trackSounds[soundShown - 1]?.name}` : (lineTrack?.name ?? '')}
+    trackPedals={pedalNames(soundChain)}
     masterPedals={pedalNames(score?.effects)}
     levels={lineLevels}
     latency={lineLatency}

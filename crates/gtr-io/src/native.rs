@@ -10,7 +10,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 8;
+pub const FORMAT_VERSION: u64 = 9;
 
 const SCORE_ENTRY: &str = "score.json";
 
@@ -128,7 +128,8 @@ fn migrate(from: u64, score: &mut Value) {
         // changes of tempo, none of which an older file can have.
         list_signs_and_jumps(score);
     }
-    // Version 8 added the pedals of each track and of the mix, as optional fields.
+    // Version 8 added the pedals of each track and of the mix, and version 9 a track's
+    // other sounds and the beats that switch to them, all as optional fields.
 }
 
 /// Version 7 lets a bar be several signs and have several jumps: what was one of each, if
@@ -262,6 +263,17 @@ mod tests {
             },
         ];
         score.effects = vec![Pedal::new(PedalKind::Reverb)];
+        assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+
+        // And what version 9 added.
+        score.tracks[0].sounds = vec![gtr_model::Sound {
+            name: "Lead".into(),
+            instrument: gtr_model::Instrument::DistortionGuitar,
+            effects: vec![Pedal::new(PedalKind::Delay)],
+        }];
+        score.tracks[0].staves[0].bars[0].voices[0].beats[1]
+            .effects
+            .sound = Some(1);
         assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
     }
 

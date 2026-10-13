@@ -61,6 +61,7 @@ export type { RowBox } from './generated/RowBox';
 export type { Score } from './generated/Score';
 export type { ScoreInfo } from './generated/ScoreInfo';
 export type { Slap } from './generated/Slap';
+export type { Sound } from './generated/Sound';
 export type { Slide } from './generated/Slide';
 export type { Staff } from './generated/Staff';
 export type { Strum } from './generated/Strum';

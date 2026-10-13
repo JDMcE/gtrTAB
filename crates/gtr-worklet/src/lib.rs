@@ -141,20 +141,20 @@ pub unsafe extern "C" fn gtr_set_mix(
     synth.engine.set_mix(channel, audible != 0, gain, pan);
 }
 
-/// Changes the pedals of a track while it plays, or with a `channel` below zero those of
-/// the whole mix, to the chain written to [`gtr_input`]. Returns 0 if the bytes
-/// are not a chain.
+/// Changes the pedals of one of a track's sounds while it plays (`sound` 0 for its own),
+/// or with a `channel` below zero those of the whole mix, to the chain written to
+/// [`gtr_input`]. Returns 0 if the bytes are not a chain.
 ///
 /// # Safety
 /// See [`gtr_input`].
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn gtr_set_effects(synth: *mut Synth, channel: i32) -> u32 {
+pub unsafe extern "C" fn gtr_set_effects(synth: *mut Synth, channel: i32, sound: u32) -> u32 {
     let synth = unsafe { &mut *synth };
     let Some(chain) = chain_from_bytes(&synth.input) else {
         return 0;
     };
     let channel = usize::try_from(channel).ok();
-    synth.engine.set_effects(channel, chain);
+    synth.engine.set_effects(channel, sound as usize, chain);
     1
 }
 

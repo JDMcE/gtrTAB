@@ -185,6 +185,11 @@
     if (e.volume !== undefined) {
       rows.push({ icon: 'volumeChange', label: 'Volume from here', value: `${e.volume}`, remove: clear('volume') });
     }
+    if (e.sound !== undefined) {
+      const track = score.tracks[editor.cursor.track];
+      const name = e.sound === 0 ? 'Its own' : (track?.sounds?.[e.sound - 1]?.name ?? 'Its own');
+      rows.push({ icon: 'soundChange', label: 'Sound from here', value: name, remove: clear('sound') });
+    }
     if (e.pan !== undefined) {
       const side = e.pan === 0 ? 'centre' : `${Math.abs(e.pan)} ${e.pan < 0 ? 'left' : 'right'}`;
       rows.push({ icon: 'panChange', label: 'Pan from here', value: side, remove: clear('pan') });

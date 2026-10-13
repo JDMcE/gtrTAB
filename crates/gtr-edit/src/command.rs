@@ -1,6 +1,6 @@
 use gtr_model::{
     Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Pedal, Score,
-    ScoreInfo, Staff, TimeSignature, Track, Tuning, Voice,
+    ScoreInfo, Sound, Staff, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -124,6 +124,11 @@ pub enum Command {
         track: Option<usize>,
         effects: Vec<Pedal>,
     },
+    /// Sets the other sounds a track can switch to.
+    SetSounds {
+        track: usize,
+        sounds: Vec<Sound>,
+    },
     /// Applies several commands as one undo step. If one fails, none are applied.
     Batch(Vec<Command>),
 }
@@ -177,6 +182,8 @@ pub enum EditError {
     InvalidMix,
     #[error("too many pedals, or a knob turned past its end")]
     InvalidEffects,
+    #[error("a sound needs a name, and a drum track's sounds must be drums and only its")]
+    InvalidSound,
 }
 
 impl Command {
@@ -465,6 +472,9 @@ impl Command {
                 instrument,
             } => {
                 let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                if !Sound::list_is_valid(&target.sounds, instrument) {
+                    return Err(EditError::InvalidSound);
+                }
                 Ok(Command::SetTrackInfo {
                     track,
                     name: std::mem::replace(&mut target.name, name),
@@ -506,6 +516,16 @@ impl Command {
                 Ok(Command::SetEffects {
                     track,
                     effects: std::mem::replace(target, effects),
+                })
+            }
+            Command::SetSounds { track, sounds } => {
+                let target = (score.tracks.get_mut(track)).ok_or(EditError::InvalidLocation)?;
+                if !Sound::list_is_valid(&sounds, target.instrument) {
+                    return Err(EditError::InvalidSound);
+                }
+                Ok(Command::SetSounds {
+                    track,
+                    sounds: std::mem::replace(&mut target.sounds, sounds),
                 })
             }
             Command::Batch(commands) => {

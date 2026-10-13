@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { fret, keys, twoTracks, start } from './app';
+import { fret, keys, start, twoTracks } from './app';
 
 // The pedalboard, which the plan's ninth phase asks for: a chain of pedals for each track
 // and for the whole mix, with presets, kept with the score and heard in what is played
@@ -113,4 +113,71 @@ test('a chain saved as a preset is put on another track, and deleted', async ({ 
   await expect(page.getByRole('status')).toHaveText('Deleted the preset Mine');
   await expect(board(page).getByRole('option', { name: 'Mine' })).toHaveCount(0);
   await expect(pedals(page)).toHaveCount(5);
+});
+
+/** The score exported as WAV, as the samples of its left side. */
+async function exportWav(page: Page, path: string): Promise<Int16Array> {
+  const download = page.waitForEvent('download');
+  await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Audio (WAV)…', exact: true }).click();
+  await (await download).saveAs(path);
+  const bytes = readFileSync(path);
+  const frames = bytes.readUInt32LE(40) / 4;
+  return Int16Array.from({ length: frames }, (_, i) => bytes.readInt16LE(44 + i * 4));
+}
+
+test('a track switches to another sound from a beat on, which plays through its own pedals', async ({ page }, testInfo) => {
+  await start(page);
+  for (const number of [0, 3, 5, 7]) {
+    await fret(page, number);
+    await keys(page, 'ArrowRight');
+  }
+  await showPedalboard(page);
+
+  // A second sound, of a distorted guitar, with the pedals of a preset.
+  await board(page).getByRole('button', { name: 'Add a sound…' }).click();
+  const named = page.getByRole('dialog', { name: 'Add a sound' });
+  await named.getByLabel('Name').fill('Lead');
+  await expect(named.getByLabel('The sound of')).toHaveValue('distortion_guitar');
+  await named.getByRole('button', { name: 'OK' }).click();
+  const sound = board(page).getByRole('combobox', { name: 'Sound' });
+  await expect(sound.locator('option:checked')).toHaveText('Lead');
+  await expect(pedals(page)).toHaveCount(0);
+  await board(page).getByRole('combobox', { name: 'Put on a preset' }).selectOption({ label: 'Solo' });
+  await expect(pedals(page)).toHaveText(['Distortion', 'Amp', 'Cabinet', 'Delay', 'Reverb']);
+  // The track's own sound keeps its own pedals: none.
+  await sound.selectOption({ label: 'Its own sound' });
+  await expect(pedals(page)).toHaveCount(0);
+
+  const before = await exportWav(page, testInfo.outputPath('before.wav'));
+  // From the second beat on, the lead.
+  await keys(page, 'Control+Home', 'ArrowRight');
+  await page.getByRole('menuitem', { name: 'Beat', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Change of sound…' }).click();
+  const change = page.getByRole('dialog', { name: 'Change of sound' });
+  await change.getByLabel('From this beat on').selectOption({ label: 'Lead' });
+  await change.getByRole('button', { name: 'OK' }).click();
+  await page.getByRole('button', { name: 'Inspector' }).click();
+  const inspector = page.locator('.inspector');
+  await expect(inspector).toContainText('Sound from hereLead');
+  const after = await exportWav(page, testInfo.outputPath('after.wav'));
+  // The first beat, half a second, sounds as it did; what follows does not.
+  const same = (from: number, to: number) => before.subarray(from, to).every((s, i) => s === after[from + i]);
+  expect(same(0, 22_000)).toBe(true);
+  expect(same(22_050, 88_200)).toBe(false);
+
+  // Renamed, and taken away: the beat no longer switches. Undone, it does again.
+  await sound.selectOption({ label: 'Lead' });
+  await board(page).getByRole('button', { name: 'Name and instrument of the sound…' }).click();
+  const renamed = page.getByRole('dialog', { name: 'Sound' });
+  await renamed.getByLabel('Name').fill('Solo lead');
+  await renamed.getByRole('button', { name: 'OK' }).click();
+  await expect(sound.locator('option:checked')).toHaveText('Solo lead');
+  await board(page).getByRole('button', { name: 'Remove the sound' }).click();
+  await expect(sound.locator('option')).toHaveText(['Its own sound']);
+  await expect(inspector).not.toContainText('Sound from here');
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await expect(sound.locator('option')).toHaveText(['Its own sound', 'Solo lead']);
+  await expect(inspector).toContainText('Sound from hereSolo lead');
 });

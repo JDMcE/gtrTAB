@@ -137,6 +137,26 @@ pub struct Channel {
     pub timbre: Timbre,
     /// The pedals the track goes through before it is placed in the mix.
     pub effects: Vec<Pedal>,
+    /// The other sounds the track's notes can be played with (see [`NoteEvent::sound`]).
+    pub sounds: Vec<Voicing>,
+}
+
+/// One of a track's other sounds: the character of the sound and its pedals.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct Voicing {
+    pub timbre: Timbre,
+    pub effects: Vec<Pedal>,
+}
+
+impl Channel {
+    /// The character and the pedals of `sound`: 0 for the track's own, or one more than
+    /// the place of one of its others. A sound it does not have is its own.
+    pub fn voicing(&self, sound: u8) -> (Timbre, &[Pedal]) {
+        match (usize::from(sound).checked_sub(1)).and_then(|i| self.sounds.get(i)) {
+            Some(other) => (other.timbre, &other.effects),
+            None => (self.timbre, &self.effects),
+        }
+    }
 }
 
 impl Default for Channel {
@@ -147,6 +167,7 @@ impl Default for Channel {
             pan: 0.0,
             timbre: Timbre::default(),
             effects: Vec::new(),
+            sounds: Vec::new(),
         }
     }
 }
@@ -174,6 +195,9 @@ pub struct NoteEvent {
     /// The note's volume is brought up from nothing, taken down to it, or both, over
     /// its length.
     pub fade: Option<Fade>,
+    /// The sound of its track it is played with: 0 for the track's own, or one more than
+    /// the place of one of its others (see [`Channel::voicing`]).
+    pub sound: u8,
 }
 
 impl NoteEvent {
@@ -190,6 +214,7 @@ impl NoteEvent {
             pitch_curve: Vec::new(),
             vibrato: 0.0,
             fade: None,
+            sound: 0,
         }
     }
 }
@@ -234,6 +259,9 @@ pub struct Automation {
     pub gain: Option<f32>,
     /// The track's pan from here on, from -1.0 (left) to 1.0 (right), if it changes.
     pub pan: Option<f32>,
+    /// The sound the track's notes are played with from here on, if it changes. The notes
+    /// say which they are played with; this is for what follows the timeline.
+    pub sound: Option<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default, Serialize)]
@@ -330,6 +358,12 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
                 pan: f32::from(track.mix.pan) / f32::from(gtr_model::Mix::MAX_PAN),
                 timbre: Timbre::of(track.instrument),
                 effects: track.effects.clone(),
+                sounds: (track.sounds.iter())
+                    .map(|sound| Voicing {
+                        timbre: Timbre::of(sound.instrument),
+                        effects: sound.effects.clone(),
+                    })
+                    .collect(),
             })
             .collect(),
         effects: score.effects.clone(),
@@ -404,7 +438,40 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
     timeline
         .automation
         .sort_by(|a, b| a.time.total_cmp(&b.time));
+    let first = order.first().copied().unwrap_or(0);
+    choose_sounds(&mut timeline, score, first);
     timeline
+}
+
+/// Gives each note the sound its track has switched to by the time it is played: the last
+/// switch before it in the passage, or if there is none, the last written before the bar
+/// the passage starts from.
+fn choose_sounds(timeline: &mut Timeline, score: &Score, first_bar: usize) {
+    for (channel, track) in score.tracks.iter().enumerate() {
+        if track.sounds.is_empty() {
+            continue;
+        }
+        let before = (track.staves.iter())
+            .flat_map(|staff| {
+                staff.bars[..first_bar.min(staff.bars.len())]
+                    .iter()
+                    .enumerate()
+            })
+            .flat_map(|(bar, b)| b.voices.iter().map(move |v| (bar, v)))
+            .flat_map(|(bar, v)| v.beats.iter().enumerate().map(move |(i, b)| (bar, i, b)))
+            .filter_map(|(bar, i, b)| b.effects.sound.map(|s| ((bar, i), s)))
+            .max_by_key(|&(at, _)| at)
+            .map_or(0, |(_, sound)| sound);
+        let switches: Vec<(f64, u8)> = (timeline.automation.iter())
+            .filter(|change| change.channel == channel)
+            .filter_map(|change| change.sound.map(|sound| (change.time, sound)))
+            .collect();
+        for note in timeline.notes.iter_mut().filter(|n| n.channel == channel) {
+            // A note on the beat that switches is played with the new sound.
+            let made = switches.partition_point(|&(time, _)| time <= note.time + 1e-9);
+            note.sound = made.checked_sub(1).map_or(before, |i| switches[i].1);
+        }
+    }
 }
 
 /// Seconds that `length` whole notes last when one lasts `whole` seconds.
@@ -488,13 +555,15 @@ fn add_staff(timeline: &mut Timeline, staff: &Staff, played: &[Played], followed
                         time,
                     });
                 }
-                if beat.effects.volume.is_some() || beat.effects.pan.is_some() {
+                let effects = &beat.effects;
+                if effects.volume.is_some() || effects.pan.is_some() || effects.sound.is_some() {
                     timeline.automation.push(Automation {
                         channel: 0,
                         time,
                         gain: beat.effects.volume.map(gtr_model::Mix::gain_of),
                         pan: (beat.effects.pan)
                             .map(|pan| f32::from(pan) / f32::from(gtr_model::Mix::MAX_PAN)),
+                        sound: beat.effects.sound,
                     });
                 }
                 // When the beat's notes are struck, from its start; for how long; and how
@@ -858,6 +927,52 @@ mod tests {
     }
 
     #[test]
+    fn each_note_is_played_with_the_sound_switched_to_by_then() {
+        use gtr_model::{Instrument, MasterBar, Sound, TimeSignature};
+        let mut score = quarters(vec![Note::new(5, 0); 4]);
+        score.tracks[0].sounds = vec![
+            Sound {
+                name: "Lead".into(),
+                instrument: Instrument::DistortionGuitar,
+                effects: Vec::new(),
+            },
+            Sound {
+                name: "Clean".into(),
+                instrument: Instrument::CleanGuitar,
+                effects: Vec::new(),
+            },
+        ];
+        // A second bar like the first, and the switches: to the lead on the second beat and
+        // to the clean sound on the fourth.
+        let bar = score.tracks[0].staves[0].bars[0].clone();
+        score
+            .master_bars
+            .push(MasterBar::new(TimeSignature::COMMON));
+        score.tracks[0].staves[0].bars.push(bar);
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[1].effects.sound = Some(1);
+        beats[3].effects.sound = Some(2);
+        let t = compile(&score, 0, &Options::default());
+        let sounds: Vec<u8> = t.notes.iter().map(|n| n.sound).collect();
+        assert_eq!(sounds, [0, 1, 1, 2, 2, 2, 2, 2]);
+        assert_eq!(t.channels[0].voicing(1).0, Timbre::Distortion);
+        assert_eq!(t.channels[0].voicing(9).0, Timbre::Steel);
+        // Played from the second bar, the clean sound it was switched to still holds.
+        let options = Options {
+            from_bar: 1,
+            ..Options::default()
+        };
+        let t = compile(&score, 0, &options);
+        assert!(t.notes.iter().all(|n| n.sound == 2));
+        // Switched back to its own sound, the track has one switch to make.
+        let beats = &mut score.tracks[0].staves[0].bars[1].voices[0].beats;
+        beats[2].effects.sound = Some(0);
+        let t = compile(&score, 0, &options);
+        let sounds: Vec<u8> = t.notes.iter().map(|n| n.sound).collect();
+        assert_eq!(sounds, [2, 2, 0, 0]);
+    }
+
+    #[test]
     fn the_pedals_of_each_track_and_of_the_mix_are_carried() {
         use gtr_model::PedalKind;
         let mut score = demo_score();
@@ -899,6 +1014,7 @@ mod tests {
                 pan: -1.0,
                 timbre: Timbre::Bass,
                 effects: Vec::new(),
+                sounds: Vec::new(),
             }
         );
         let audible = |score: &Score| -> Vec<bool> {
@@ -1108,6 +1224,7 @@ mod tests {
                 time: 0.5,
                 gain: Some(0.0),
                 pan: Some(0.5),
+                sound: None,
             }]
         );
     }

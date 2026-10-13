@@ -689,6 +689,21 @@ impl Document {
         Ok(self.editor.set_effects(track, effects)?)
     }
 
+    /// Sets the other sounds a track can switch to. `sounds_json` holds a list of
+    /// `gtr_model::Sound` values.
+    #[wasm_bindgen(js_name = setSounds)]
+    pub fn set_sounds(&mut self, track: usize, sounds_json: &str) -> Result<(), JsError> {
+        let sounds: Vec<gtr_model::Sound> = serde_json::from_str(sounds_json)?;
+        Ok(self.editor.set_sounds(track, sounds)?)
+    }
+
+    /// Takes away a track's other sound `index`, counted from 1, keeping the beats that
+    /// switch to the others right.
+    #[wasm_bindgen(js_name = removeSound)]
+    pub fn remove_sound(&mut self, track: usize, index: u8) -> Result<(), JsError> {
+        Ok(self.editor.remove_sound(track, index)?)
+    }
+
     /// Every kind of pedal, in the order the synth numbers them, with its name and its
     /// knobs: `[{ kind, name, knobs: [{ name, default }] }]`.
     #[wasm_bindgen(js_name = pedalKindsJson)]

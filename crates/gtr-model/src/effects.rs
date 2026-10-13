@@ -537,6 +537,11 @@ pub struct BeatEffects {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub pan: Option<i8>,
+    /// The sound the track plays with from this beat on: 0 for its own, or one more than
+    /// the place of one of its other sounds (see [`crate::Track::sounds`]).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub sound: Option<u8>,
     /// Free text written above the beat.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
@@ -569,6 +574,9 @@ impl BeatEffects {
             && self.chord.as_ref().is_none_or(short)
             && self.diagram.as_ref().is_none_or(ChordDiagram::is_valid)
             && self.volume.is_none_or(|v| v <= crate::Mix::MAX_VOLUME)
+            && self
+                .sound
+                .is_none_or(|s| usize::from(s) <= crate::Sound::MAX_SOUNDS)
             && self
                 .pan
                 .is_none_or(|p| p.unsigned_abs() <= crate::Mix::MAX_PAN.unsigned_abs())

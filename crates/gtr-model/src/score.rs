@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BeatEffects, Duration, Instrument, KitPiece, Mix, NoteEffects, Pedal, Rational, Tuning,
+    BeatEffects, Duration, Instrument, KitPiece, Mix, NoteEffects, Pedal, Rational, Sound, Tuning,
     kit_is_valid, standard_kit,
 };
 
@@ -348,6 +348,10 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(optional, as = "Option<Vec<Pedal>>")]
     pub effects: Vec<Pedal>,
+    /// Other sounds the track can switch to part-way through (see [`BeatEffects::sound`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Sound>>")]
+    pub sounds: Vec<Sound>,
     pub staves: Vec<Staff>,
 }
 
@@ -368,6 +372,7 @@ impl Track {
             mix: Mix::default(),
             kit: Vec::new(),
             effects: Vec::new(),
+            sounds: Vec::new(),
             staves,
         }
     }
@@ -698,6 +703,7 @@ impl Score {
                 || !t.mix.is_valid()
                 || !kit_is_valid(&t.kit)
                 || !Pedal::chain_is_valid(&t.effects)
+                || !Sound::list_is_valid(&t.sounds, t.instrument)
             {
                 return Err(ModelError::InvalidTrack { track });
             }

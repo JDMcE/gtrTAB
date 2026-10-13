@@ -4,7 +4,7 @@
   // Pedals are added, switched on and off, moved and taken away, their knobs turned, and a
   // chain can be put on from a preset or saved as one. A turn of a knob is heard at once
   // and kept, as one step to undo, when it is let go.
-  import type { Pedal } from './model';
+  import type { Pedal, Sound } from './model';
   import {
     MAX_CHAIN,
     addPedal,
@@ -25,9 +25,16 @@
     userPresets: PedalPreset[];
     master: boolean;
     trackName: string;
+    /** The track's other sounds, and which of its sounds is shown: 0 for its own. */
+    sounds: Sound[];
+    sound: number;
     chain: Pedal[];
     /** Shows the track's chain, or with `true` the mix's. */
     onchoose: (master: boolean) => void;
+    onsound: (sound: number) => void;
+    onaddsound: () => void;
+    oneditsound: () => void;
+    onremovesound: () => void;
     /** The chain as it is while a knob turns, to be heard but not yet kept. */
     onpreview: (chain: Pedal[]) => void;
     /** The chain to keep. */
@@ -43,8 +50,14 @@
     userPresets,
     master,
     trackName,
+    sounds,
+    sound,
     chain,
     onchoose,
+    onsound,
+    onaddsound,
+    oneditsound,
+    onremovesound,
     onpreview,
     onset,
     onsavepreset,
@@ -114,6 +127,23 @@
       <button type="button" class="seg" aria-pressed={!master} onclick={() => onchoose(false)}>{trackName}</button>
       <button type="button" class="seg" aria-pressed={master} onclick={() => onchoose(true)}>Master</button>
     </div>
+    {#if !master}
+      <select aria-label="Sound" value={sound} onchange={(e) => onsound(Number(e.currentTarget.value))}>
+        <option value={0}>Its own sound</option>
+        {#each sounds as other, i}<option value={i + 1}>{other.name}</option>{/each}
+      </select>
+      <button type="button" class="tool" aria-label="Add a sound…" title="Add a sound…" onclick={onaddsound}>
+        <Icon name="addSound" size={16} />
+      </button>
+      {#if sound > 0}
+        <button type="button" class="tool" aria-label="Name and instrument of the sound…" title="Name and instrument of the sound…" onclick={oneditsound}>
+          <Icon name="editValue" size={15} />
+        </button>
+        <button type="button" class="tool" aria-label="Remove the sound" title="Remove the sound" onclick={onremovesound}>
+          <Icon name="removeTrack" size={15} />
+        </button>
+      {/if}
+    {/if}
     <span class="rule"></span>
     <select aria-label="Put on a preset" onchange={choosePreset}>
       <option value="">Preset…</option>
@@ -151,7 +181,7 @@
   <div class="scroller" bind:this={board}>
     {#if shown.length === 0}
       <p class="empty">
-        No pedals: {master ? 'the mix is heard' : `${trackName} goes to the mix`} as it is. Add a pedal, or put on a preset.
+        No pedals: {master ? 'the mix is heard' : sound > 0 ? `${sounds[sound - 1]?.name} goes to the mix` : `${trackName} goes to the mix`} as it is. Add a pedal, or put on a preset.
       </p>
     {/if}
     <ol class="chain" aria-label="{master ? 'The mix' : trackName}: pedals in the order the sound goes through them">

@@ -7,7 +7,9 @@
     /** A whole number; left empty it is `null`. */
     | { kind: 'number'; label: string; value: number | null; min: number; max: number }
     /** A choice of any of the numbers from 1 to `count`, as one bit each. */
-    | { kind: 'bits'; label: string; value: number; count: number };
+    | { kind: 'bits'; label: string; value: number; count: number }
+    /** One of a list, each a value and what it is called. */
+    | { kind: 'choice'; label: string; value: number | null; options: { value: number | null; label: string }[] };
 
   export interface Prompt {
     title: string;
@@ -37,6 +39,8 @@
   );
   let number = $state(field.kind === 'number' ? field.value : null);
   let bits = $state(field.kind === 'bits' ? field.value : 0);
+  /** The place in the list of the option chosen. */
+  let chosen = $state(field.kind === 'choice' ? Math.max(0, field.options.findIndex((o) => o.value === field.value)) : 0);
 
   function submit() {
     const apply = prompt.apply as (value: unknown) => void;
@@ -46,6 +50,7 @@
       while (lines.length && !lines[lines.length - 1]) lines.pop();
       apply(lines);
     } else if (field.kind === 'number') apply(number);
+    else if (field.kind === 'choice') apply(field.options[chosen]?.value ?? null);
     else apply(bits);
     onclose();
   }
@@ -63,6 +68,13 @@
     <label>
       {field.label}
       <input type="number" min={field.min} max={field.max} bind:value={number} />
+    </label>
+  {:else if field.kind === 'choice'}
+    <label>
+      {field.label}
+      <select bind:value={chosen}>
+        {#each field.options as option, i}<option value={i}>{option.label}</option>{/each}
+      </select>
     </label>
   {:else}
     <fieldset>

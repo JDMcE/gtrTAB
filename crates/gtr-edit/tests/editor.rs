@@ -868,3 +868,58 @@ fn a_chord_shape_goes_on_a_beat_in_one_edit() {
     assert!(e.put_shape(&[-1; 6], None).is_err());
     assert!(e.put_shape(&[40, -1, -1, -1, -1, -1], None).is_err());
 }
+
+#[test]
+fn a_track_switches_sound_part_way_and_a_sound_taken_away_keeps_the_others_right() {
+    use gtr_model::{Pedal, PedalKind, Sound};
+    let sound = |name: &str, instrument| Sound {
+        name: name.into(),
+        instrument,
+        effects: vec![Pedal::new(PedalKind::Amp)],
+    };
+    let mut e = Editor::new(demo_score());
+    let sounds = vec![
+        sound("Clean", Instrument::CleanGuitar),
+        sound("Lead", Instrument::DistortionGuitar),
+        sound("Bass", Instrument::Bass),
+    ];
+    e.set_sounds(0, sounds.clone()).unwrap();
+    assert_eq!(e.score().tracks[0].sounds, sounds);
+    // A drum kit is not a sound a guitar can have, nor is a sound without a name.
+    assert!(
+        e.set_sounds(0, vec![sound("Kit", Instrument::Drums)])
+            .is_err()
+    );
+    assert!(e.set_sounds(0, vec![sound(" ", Instrument::Bass)]).is_err());
+
+    // The first beat goes to the lead sound and the second to the bass.
+    let value = |n: u8| serde_json::json!(n);
+    e.set_cursor(0, 0, 0, false);
+    e.set_beat_effect("sound", &value(2)).unwrap();
+    e.set_cursor(0, 1, 0, false);
+    e.set_beat_effect("sound", &value(3)).unwrap();
+    e.score().validate().unwrap();
+
+    // Taking away the clean sound: the lead and the bass are now the first two, and the
+    // beats still switch to them. Undone, all of it comes back in one step.
+    let before = e.score().clone();
+    e.remove_sound(0, 1).unwrap();
+    assert_eq!(e.score().tracks[0].sounds, sounds[1..]);
+    let switches = |e: &Editor| [0, 1].map(|beat| beats(e, 0)[beat].effects.sound);
+    assert_eq!(switches(&e), [Some(1), Some(2)]);
+    // Taking away the lead: the beat that went to it no longer switches.
+    e.remove_sound(0, 1).unwrap();
+    assert_eq!(switches(&e), [None, Some(1)]);
+    assert!(e.remove_sound(0, 2).is_err());
+    e.undo().unwrap();
+    e.undo().unwrap();
+    assert_eq!(*e.score(), before);
+
+    // Become a drum track, the guitar's sounds go.
+    e.set_track_info(0, "Kit", Instrument::Drums).unwrap();
+    assert!(e.score().tracks[0].sounds.is_empty());
+    e.undo().unwrap();
+    // Become a bass, they stay.
+    e.set_track_info(0, "Bass", Instrument::Bass).unwrap();
+    assert_eq!(e.score().tracks[0].sounds.len(), 3);
+}

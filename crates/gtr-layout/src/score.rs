@@ -70,6 +70,8 @@ struct Part<'a> {
     last: bool,
     name: &'a str,
     staff: &'a Staff,
+    /// The track's other sounds, which a beat can switch to.
+    sounds: &'a [gtr_model::Sound],
     clef: Clef,
     /// Whether the staff is shown as standard notation, and whether as tab. A staff
     /// without strings has no tab to show, and gets notation in its place.
@@ -133,6 +135,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 last: staff_index + 1 == track.staves.len(),
                 name: &track.name,
                 staff,
+                sounds: &track.sounds,
                 clef,
                 standard,
                 tab,
@@ -391,6 +394,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
                     let system = System {
                         staff: part.staff,
+                        sounds: part.sounds,
                         voice: v,
                         xs,
                         bars: &bars,
@@ -443,6 +447,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
                     let system = System {
                         staff: part.staff,
+                        sounds: part.sounds,
                         voice: v,
                         xs,
                         bars: &bars,
@@ -1414,6 +1419,23 @@ mod tests {
             marked.systems[0].y - plain.systems[0].y,
             14.0 + MARK_BAND + 13.0 + 52.0
         );
+
+        // A switch of sound is written by the sound's name, in the same lane.
+        score.tracks[0].sounds = vec![gtr_model::Sound {
+            name: "Lead".into(),
+            instrument: gtr_model::Instrument::DistortionGuitar,
+            effects: Vec::new(),
+        }];
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        beats[0].effects.sound = Some(1);
+        beats[1].effects.sound = Some(0);
+        let switched = layout(&score, &view(Notation::Tab), 1000.0);
+        let found = texts(&switched);
+        for label in ["sound: Lead, vol 40, pan 30 L", "own sound"] {
+            assert!(found.contains(&label), "missing {label:?} in {found:?}");
+        }
+        let beats = &mut score.tracks[0].staves[0].bars[0].voices[0].beats;
+        (beats[0].effects.sound, beats[1].effects.sound) = (None, None);
 
         // A chord up the neck says which fret it starts at and mutes a string.
         score.tracks[0].staves[0].bars[0].voices[0].beats[0]

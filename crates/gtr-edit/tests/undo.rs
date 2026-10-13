@@ -1,7 +1,7 @@
 use gtr_edit::{BeatRef, Command, History};
 use gtr_model::{
-    Beat, Duration, Instrument, Mix, Note, NoteValue, Pedal, PedalKind, Score, TimeSignature,
-    Track, Tuning, Tuplet, demo_score,
+    Beat, Duration, Instrument, Mix, Note, NoteValue, Pedal, PedalKind, Score, Sound,
+    TimeSignature, Track, Tuning, Tuplet, demo_score,
 };
 use proptest::prelude::*;
 
@@ -51,7 +51,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
     if (170..190).contains(&kind) {
         let count = score.tracks.len();
         let instrument = Instrument::ALL[usize::from(b) % Instrument::ALL.len()];
-        return match a % 6 {
+        return match a % 7 {
             0 => Command::InsertTrack {
                 index: idx[0] % (count + 2),
                 // Now and then a track with the wrong number of bars, which must be refused.
@@ -80,6 +80,17 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
                     .map(|i| {
                         let kind = PedalKind::ALL[(usize::from(a) + i) % PedalKind::ALL.len()];
                         Pedal::with(kind, &[b % 104])
+                    })
+                    .collect(),
+            },
+            5 => Command::SetSounds {
+                track: idx[0] % (count + 1),
+                // Now and then a drum kit, which only a drum track can have.
+                sounds: (0..usize::from(b % 3))
+                    .map(|i| Sound {
+                        name: format!("Sound {i}"),
+                        instrument,
+                        effects: Vec::new(),
                     })
                     .collect(),
             },

@@ -52,15 +52,23 @@ struct Strip {
     /// Gains for the two sides: where they are heading and where they have got to.
     target: (f32, f32),
     current: (f32, f32),
+    /// One for each of the track's sounds, its own first.
+    parts: Vec<Part>,
+}
+
+/// One sound of a track at work. Notes go on sounding through the sound they started
+/// with, and its echoes ring on, after the track has switched to another.
+#[derive(Default)]
+struct Part {
     /// The amplifier's filter, carried from block to block.
     amp: f32,
-    /// How loud its sampled voices have been, for evening out a driven track.
+    /// How loud its sampled voices have been, for evening out a driven sound.
     level: f32,
-    /// The track's samples for the block being made: what its modelled voices make, which
-    /// goes through the amplifier, and the two sides of what its sampled voices make.
+    /// The samples for the block being made: what its modelled voices make, which goes
+    /// through the amplifier, and the two sides of what its sampled voices make.
     bus: Vec<f32>,
     sides: (Vec<f32>, Vec<f32>),
-    /// The track's pedals, which both are joined into before they go through.
+    /// The sound's pedals, which both are joined into before they go through.
     chain: Chain,
 }
 
@@ -72,11 +80,7 @@ impl Strip {
             scored_pan: None,
             target: (0.0, 0.0),
             current: (0.0, 0.0),
-            amp: 0.0,
-            level: 0.0,
-            bus: Vec::new(),
-            sides: (Vec::new(), Vec::new()),
-            chain: Chain::default(),
+            parts: vec![Part::default()],
         };
         strip.aim();
         strip.current = strip.target;
@@ -106,6 +110,8 @@ impl Strip {
 /// A voice of a track, and how many samples it is from starting.
 struct Sounding {
     channel: usize,
+    /// Which of the track's sounds it is played with.
+    sound: usize,
     wait: usize,
     voice: Voice,
     /// A fade over the voice: its kind, the samples it takes, and how far through it is.
@@ -245,7 +251,8 @@ impl Engine {
     /// pedals after them.
     fn measure(&mut self) {
         let tracks = (self.timeline.channels.iter())
-            .map(|c| fx::tail(&c.effects))
+            .flat_map(|c| std::iter::once(&c.effects).chain(c.sounds.iter().map(|s| &s.effects)))
+            .map(|effects| fx::tail(effects))
             .fold(0.0, f64::max);
         let tail = TAIL + tracks + fx::tail(&self.timeline.effects);
         self.total =
@@ -278,7 +285,12 @@ impl Engine {
             }
             let strip = &mut self.strips[index];
             // A pedal that stays keeps its echoes and the tail of its reverb.
-            strip.chain.set(&mixer.effects, rate);
+            strip
+                .parts
+                .resize_with(1 + mixer.sounds.len(), Part::default);
+            for (sound, part) in strip.parts.iter_mut().enumerate() {
+                part.chain.set(mixer.voicing(sound as u8).1, rate);
+            }
             strip.mixer = mixer;
             (strip.scored_gain, strip.scored_pan) = (None, None);
         }
@@ -303,20 +315,23 @@ impl Engine {
         }
     }
 
-    /// Changes the pedals of a track while it plays, or with no track those of the whole
-    /// mix, as when a knob is turned. Pedals that stay where they were ring on. Ignored
-    /// for a track the passage lacks.
-    pub fn set_effects(&mut self, channel: Option<usize>, effects: Vec<Pedal>) {
+    /// Changes the pedals of one of a track's sounds while it plays (0 for its own), or
+    /// with no track those of the whole mix, as when a knob is turned. Pedals that stay
+    /// where they were ring on. Ignored for a track or a sound the passage lacks.
+    pub fn set_effects(&mut self, channel: Option<usize>, sound: usize, effects: Vec<Pedal>) {
         let rate = self.sample_rate as f32;
         match channel {
             Some(channel) => {
-                let Some(strip) = self.strips.get_mut(channel) else {
+                let part = (self.strips.get_mut(channel)).and_then(|s| s.parts.get_mut(sound));
+                let kept = (self.timeline.channels.get_mut(channel)).and_then(|c| match sound {
+                    0 => Some(&mut c.effects),
+                    _ => c.sounds.get_mut(sound - 1).map(|s| &mut s.effects),
+                });
+                let (Some(part), Some(kept)) = (part, kept) else {
                     return;
                 };
-                strip.chain.set(&effects, rate);
-                if let Some(kept) = self.timeline.channels.get_mut(channel) {
-                    kept.effects = effects;
-                }
+                part.chain.set(&effects, rate);
+                *kept = effects;
             }
             None => {
                 self.master.set(&effects, rate);
@@ -373,8 +388,8 @@ impl Engine {
         }
         let rate = self.sample_rate as f32;
         let end = self.position + frames;
-        for strip in &mut self.strips {
-            for bus in [&mut strip.bus, &mut strip.sides.0, &mut strip.sides.1] {
+        for part in self.strips.iter_mut().flat_map(|s| &mut s.parts) {
+            for bus in [&mut part.bus, &mut part.sides.0, &mut part.sides.1] {
                 bus.clear();
                 bus.resize(frames, 0.0);
             }
@@ -392,8 +407,13 @@ impl Engine {
             if start < self.position {
                 continue;
             }
-            let timbre = (self.timeline.channels.get(note.channel)).map(|c| c.timbre);
-            let timbre = timbre.unwrap_or_default();
+            let channel = self.timeline.channels.get(note.channel);
+            let timbre = channel.map_or_else(Timbre::default, |c| c.voicing(note.sound).0);
+            // A sound the track does not have is its own.
+            let sound = match channel.is_some_and(|c| usize::from(note.sound) <= c.sounds.len()) {
+                true => usize::from(note.sound),
+                false => 0,
+            };
             let limit = self.total - start;
             // From the SoundFont if it has the instrument and a sample for the note, and
             // from the instrument's model if not.
@@ -431,6 +451,7 @@ impl Engine {
                 let length = ((note.duration * f64::from(rate)) as usize).max(1);
                 self.voices.push(Sounding {
                     channel: note.channel,
+                    sound,
                     wait: start - self.position,
                     voice,
                     fade: note.fade.map(|fade| (fade, length, 0)),
@@ -442,11 +463,11 @@ impl Engine {
         self.voices.retain_mut(|sounding| {
             let from = sounding.wait.min(frames);
             sounding.wait -= from;
-            let strip = &mut strips[sounding.channel];
-            let (left, right) = (&mut strip.sides.0, &mut strip.sides.1);
+            let part = &mut strips[sounding.channel].parts[sounding.sound];
+            let (left, right) = (&mut part.sides.0, &mut part.sides.1);
             let Some((fade, length, at)) = &mut sounding.fade else {
                 return (sounding.voice).render(
-                    &mut strip.bus[from..],
+                    &mut part.bus[from..],
                     &mut left[from..],
                     &mut right[from..],
                 );
@@ -460,7 +481,7 @@ impl Engine {
             let alive = sounding.voice.render(bus, own_left, own_right);
             for i in 0..frames - from {
                 let gain = fade_gain(*fade, (*at + i) as f32 / *length as f32);
-                strip.bus[from + i] += bus[i] * gain;
+                part.bus[from + i] += bus[i] * gain;
                 left[from + i] += own_left[i] * gain;
                 right[from + i] += own_right[i] * gain;
             }
@@ -475,21 +496,36 @@ impl Engine {
         let changes = &changes[..changes.partition_point(|c| self.sample(c.time) < end)];
         let glide = 1.0 - (-1.0 / (MIX_GLIDE * rate)).exp();
         for (index, strip) in self.strips.iter_mut().enumerate() {
-            let timbre = self.timeline.channels.get(index).map(|c| c.timbre);
-            let timbre = timbre.unwrap_or_default();
-            shape(&mut strip.bus, timbre, rate, &mut strip.amp);
-            let (sampled_left, sampled_right) = (&mut strip.sides.0, &mut strip.sides.1);
-            squeeze(sampled_left, sampled_right, timbre, rate, &mut strip.level);
-            // Both kinds of voice together, through the track's pedals.
-            for ((left, right), mono) in sampled_left
-                .iter_mut()
-                .zip(sampled_right.iter_mut())
-                .zip(&strip.bus)
-            {
-                *left += mono;
-                *right += mono;
+            let channel = self.timeline.channels.get(index);
+            for (sound, part) in strip.parts.iter_mut().enumerate() {
+                let timbre = channel.map_or_else(Timbre::default, |c| c.voicing(sound as u8).0);
+                shape(&mut part.bus, timbre, rate, &mut part.amp);
+                let (sampled_left, sampled_right) = (&mut part.sides.0, &mut part.sides.1);
+                squeeze(sampled_left, sampled_right, timbre, rate, &mut part.level);
+                // Both kinds of voice together, through the sound's pedals.
+                for ((left, right), mono) in sampled_left
+                    .iter_mut()
+                    .zip(sampled_right.iter_mut())
+                    .zip(&part.bus)
+                {
+                    *left += mono;
+                    *right += mono;
+                }
+                part.chain.process(sampled_left, sampled_right);
             }
-            strip.chain.process(sampled_left, sampled_right);
+            // The track's sounds together, in its own sound's place. They are set aside
+            // while the strip moves through the block, and put back after.
+            let mut parts = std::mem::take(&mut strip.parts);
+            let (own, others) = parts.split_first_mut().expect("a track has its own sound");
+            for other in others {
+                for (mixed, more) in own.sides.0.iter_mut().zip(&other.sides.0) {
+                    *mixed += more;
+                }
+                for (mixed, more) in own.sides.1.iter_mut().zip(&other.sides.1) {
+                    *mixed += more;
+                }
+            }
+            let sides = &own.sides;
             let mut pending = (changes.iter())
                 .filter(|change| change.channel == index)
                 .map(|change| ((change.time * f64::from(self.sample_rate)) as usize, change))
@@ -500,9 +536,10 @@ impl Engine {
                 }
                 strip.current.0 = toward(strip.current.0, strip.target.0, glide);
                 strip.current.1 = toward(strip.current.1, strip.target.1, glide);
-                left[i] += strip.current.0 * strip.sides.0[i];
-                right[i] += strip.current.1 * strip.sides.1[i];
+                left[i] += strip.current.0 * sides.0[i];
+                right[i] += strip.current.1 * sides.1[i];
             }
+            strip.parts = parts;
         }
         self.next_change += changes.len();
         self.master
@@ -678,6 +715,7 @@ mod tests {
                 time: 0.4,
                 gain: Some(0.5),
                 pan: Some(-0.5),
+                sound: None,
             }],
             notes: vec![NoteEvent::plain(0.0, 0.5, 45), bent, snare, kick],
             clicks: vec![
@@ -745,6 +783,65 @@ mod tests {
     }
 
     #[test]
+    fn each_sound_of_a_track_goes_through_its_own_pedals() {
+        use crate::Voicing;
+        use gtr_model::PedalKind;
+        let quiet = vec![Pedal::with(PedalKind::Eq, &[50, 50, 50, 50, 0])];
+        let reverb = vec![Pedal::with(PedalKind::Reverb, &[80, 30, 80])];
+        let channel = Channel {
+            sounds: vec![
+                Voicing {
+                    timbre: Timbre::Steel,
+                    effects: quiet,
+                },
+                Voicing {
+                    timbre: Timbre::Steel,
+                    effects: reverb,
+                },
+            ],
+            ..Channel::default()
+        };
+        let played = |sound| {
+            let note = NoteEvent {
+                sound,
+                ..NoteEvent::plain(0.0, 0.3, 52)
+            };
+            render(&timeline_of(vec![note], vec![channel.clone()], 0.3), 44_100)
+        };
+        let (own, second) = (played(0), played(1));
+        let length = 44_100 / 5;
+        assert!(energy(&second.left[..length]) < energy(&own.left[..length]) * 0.2);
+        // A sound the track does not have is its own.
+        assert_eq!(played(7).left[..length], own.left[..length]);
+        // The note on the third sound rings on through its reverb after the track has
+        // switched back to its own sound for the next note.
+        let mut next = NoteEvent::plain(0.5, 0.3, 52);
+        next.fade = Some(Fade::In);
+        let notes = vec![
+            NoteEvent {
+                sound: 2,
+                ..NoteEvent::plain(0.0, 0.3, 52)
+            },
+            next,
+        ];
+        let both = render(&timeline_of(notes, vec![channel.clone()], 0.8), 44_100);
+        let at = 44_100 / 2;
+        assert!(energy(&both.left[at..at + 2_000]) > 1e-3);
+        // A knob of one sound turned while it plays leaves the others as they were.
+        let mut engine = Engine::new(44_100);
+        engine.load(timeline_of(
+            vec![NoteEvent::plain(0.0, 1.0, 52)],
+            vec![channel],
+            1.0,
+        ));
+        engine.set_effects(Some(0), 1, Vec::new());
+        engine.set_effects(Some(0), 5, Vec::new());
+        let (mut left, mut right) = (vec![0.0; 4_410], vec![0.0; 4_410]);
+        engine.process(&mut left, &mut right);
+        assert!(energy(&left) > 0.01);
+    }
+
+    #[test]
     fn pedals_change_while_the_music_plays() {
         use gtr_model::PedalKind;
         let timeline = timeline_of(
@@ -761,18 +858,23 @@ mod tests {
         // The track turned right down by its EQ, and then the mix by its own.
         engine.set_effects(
             Some(0),
+            0,
             vec![Pedal::with(PedalKind::Eq, &[50, 50, 50, 50, 0])],
         );
         engine.process(&mut left, &mut right);
         assert!(energy(&left[4_410..]) < before * 0.2);
-        engine.set_effects(Some(0), Vec::new());
-        engine.set_effects(None, vec![Pedal::with(PedalKind::Eq, &[50, 50, 50, 50, 0])]);
+        engine.set_effects(Some(0), 0, Vec::new());
+        engine.set_effects(
+            None,
+            0,
+            vec![Pedal::with(PedalKind::Eq, &[50, 50, 50, 50, 0])],
+        );
         engine.process(&mut left, &mut right);
         assert!(energy(&left[4_410..]) < before * 0.2);
         // A delay makes the passage longer, for its echoes; a track it lacks is ignored.
-        engine.set_effects(None, vec![Pedal::new(PedalKind::Delay)]);
+        engine.set_effects(None, 0, vec![Pedal::new(PedalKind::Delay)]);
         assert!(engine.length() > length);
-        engine.set_effects(Some(3), vec![Pedal::new(PedalKind::Delay)]);
+        engine.set_effects(Some(3), 0, vec![Pedal::new(PedalKind::Delay)]);
     }
 
     #[test]
@@ -1111,6 +1213,7 @@ mod tests {
             time: 0.5,
             gain: None,
             pan: Some(-1.0),
+            sound: None,
         }];
         let mix = render(&timeline, 44_100);
         // Centred for the first half second, then hard left.
@@ -1134,6 +1237,7 @@ mod tests {
             time: 0.5,
             gain: Some(0.5),
             pan: Some(-0.5),
+            sound: None,
         }];
         let written = render(&timeline, 44_100);
         // With the slider at half, the whole passage is at half of what it was: before
