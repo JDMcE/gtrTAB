@@ -5,6 +5,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  Cable,
   Drum,
   Piano,
   Timer,
@@ -111,6 +112,7 @@ export const ICONS = {
   chevronLeft: { lucide: ChevronLeft },
   chevronRight: { lucide: ChevronRight },
   pedalboard: { lucide: SlidersVertical },
+  lineIn: { lucide: Cable },
 
   // Tracks
   trackPane: { lucide: PanelBottom },

@@ -44,6 +44,8 @@
   import BeatLights from './lib/BeatLights.svelte';
   import InstrumentView, { type Marks } from './lib/InstrumentView.svelte';
   import Pedalboard from './lib/Pedalboard.svelte';
+  import LineInDialog, { loadLineSettings, saveLineSettings, type LineSettings } from './lib/LineInDialog.svelte';
+  import { LineIn, type Levels } from './lib/linein';
   import {
     loadUserPresets,
     saveUserPresets,
@@ -799,6 +801,61 @@
     };
   }
 
+  // --- Line in ---
+
+  const lineIn = new LineIn();
+  let lineOn = $state(false);
+  let lineDialog = $state(false);
+  let lineSettings = $state(loadLineSettings());
+  let lineLevels = $state.raw<Levels>({ input: 0, output: 0 });
+  let lineLatency = $state(0);
+  lineIn.onlevels = (levels) => (lineLevels = levels);
+  const lineTrack = $derived(score?.tracks[editor?.cursor.track ?? 0]);
+  const pedalNames = (chain: Pedal[] | undefined) =>
+    (chain ?? []).filter((p) => p.on !== false).map((p) => pedalSpecs.find((s) => s.kind === p.kind)?.name ?? p.kind);
+  const chainBytes = (chain: Pedal[] | undefined) => Document.chainBytes(JSON.stringify(chain ?? []));
+  const decibels = (db: number) => 10 ** (db / 20);
+
+  async function startLine(settings: LineSettings): Promise<string | null> {
+    lineSettings = settings;
+    saveLineSettings(settings);
+    try {
+      await lineIn.start(
+        settings.device,
+        chainBytes(lineTrack?.effects),
+        chainBytes(score?.effects),
+        decibels(settings.gain),
+      );
+    } catch (error) {
+      return `The input could not be opened: ${error instanceof Error ? error.message : String(error)}`;
+    }
+    lineOn = true;
+    lineLatency = lineIn.latency;
+    message = 'Playing the line in through the pedals';
+    return null;
+  }
+
+  function setLineGain(gain: number) {
+    lineSettings = { ...lineSettings, gain };
+    saveLineSettings(lineSettings);
+    lineIn.setGain(decibels(gain));
+  }
+
+  function stopLine() {
+    lineIn.stop();
+    lineOn = false;
+    lineLevels = { input: 0, output: 0 };
+    message = 'Stopped the line in';
+  }
+
+  // The line follows the pedals of the cursor's track and of the mix as they change.
+  $effect(() => {
+    if (lineOn) lineIn.setEffects(false, chainBytes(lineTrack?.effects));
+  });
+  $effect(() => {
+    if (lineOn) lineIn.setEffects(true, chainBytes(score?.effects));
+  });
+
   function deletePreset(preset: PedalPreset) {
     userPresets = userPresets.filter((p) => p !== preset);
     saveUserPresets(userPresets);
@@ -1292,6 +1349,18 @@
         prefs.pedalboard = true;
       },
     },
+    lineIn: {
+      label: 'Line in…',
+      icon: 'lineIn',
+      run: () => (lineDialog = true),
+    },
+    /** In the transport bar while the line in plays. */
+    lineInOn: {
+      label: 'Line in: playing',
+      icon: 'lineIn',
+      active: () => lineOn,
+      run: () => (lineDialog = true),
+    },
     tuner: {
       label: 'Tuner…',
       run: () => {
@@ -1501,7 +1570,7 @@
           { label: 'Theme', items: themes },
         ],
       },
-      { label: 'Tools', items: [cmd.tuner, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
+      { label: 'Tools', items: [cmd.tuner, cmd.lineIn, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
       { label: 'Help', items: [cmd.shortcuts] },
     ];
   });
@@ -1760,6 +1829,7 @@
             countIn={pulse?.count_in ?? false}
           />
         {/if}
+        {#if lineOn}<ToolButton command={cmd.lineInOn} />{/if}
         <ToolButton command={cmd.loop} />
         <ToolButton command={cmd.trainer} />
         <button
@@ -2008,6 +2078,27 @@
 
 {#if prompt}
   <PromptDialog {prompt} onclose={() => (prompt = null)} />
+{/if}
+
+{#if lineDialog}
+  <LineInDialog
+    running={lineOn}
+    trackName={lineTrack?.name ?? ''}
+    trackPedals={pedalNames(lineTrack?.effects)}
+    masterPedals={pedalNames(score?.effects)}
+    levels={lineLevels}
+    latency={lineLatency}
+    settings={lineSettings}
+    onstart={startLine}
+    ongain={setLineGain}
+    onstop={stopLine}
+    onpedals={() => {
+      lineDialog = false;
+      pedalMaster = false;
+      prefs.pedalboard = true;
+    }}
+    onclose={() => (lineDialog = false)}
+  />
 {/if}
 
 {#if tunerOpen}

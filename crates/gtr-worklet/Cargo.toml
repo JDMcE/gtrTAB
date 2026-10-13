@@ -9,3 +9,6 @@ crate-type = ["cdylib"]
 
 [dependencies]
 gtr-audio.workspace = true
+
+[dev-dependencies]
+gtr-model.workspace = true

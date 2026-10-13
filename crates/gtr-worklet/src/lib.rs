@@ -2,7 +2,7 @@
 //! glue code `wasm-bindgen` generates, so this is a plain C interface with no imports: the
 //! worklet copies bytes and samples in and out of the module's memory itself.
 
-use gtr_audio::{Engine, SoundFont, SoundFontError, Timeline, chain_from_bytes};
+use gtr_audio::{Engine, Rack, SoundFont, SoundFontError, Timeline, chain_from_bytes};
 
 /// The synth and the memory it shares with the worklet.
 pub struct Synth {
@@ -195,6 +195,99 @@ pub unsafe extern "C" fn gtr_seconds(synth: *const Synth) -> f64 {
     unsafe { &*synth }.engine.seconds()
 }
 
+/// A line in played through pedals, and the memory it shares with its worklet.
+pub struct Line {
+    rack: Rack,
+    /// A chain on its way in.
+    input: Vec<u8>,
+    /// The block of samples heard on the line, and then the two sides of what comes out.
+    heard: Vec<f32>,
+    left: Vec<f32>,
+    right: Vec<f32>,
+}
+
+/// Makes a line. It lives for as long as the worklet does and is never freed.
+#[unsafe(no_mangle)]
+pub extern "C" fn gtr_line_new(sample_rate: u32) -> *mut Line {
+    Box::into_raw(Box::new(Line {
+        rack: Rack::new(sample_rate),
+        input: Vec::new(),
+        heard: Vec::new(),
+        left: Vec::new(),
+        right: Vec::new(),
+    }))
+}
+
+/// Makes room for `length` bytes of chain and says where to write them.
+///
+/// # Safety
+/// `line` must come from [`gtr_line_new`], as for every `gtr_line_` function.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_input(line: *mut Line, length: usize) -> *mut u8 {
+    let line = unsafe { &mut *line };
+    line.input.clear();
+    line.input.resize(length, 0);
+    line.input.as_mut_ptr()
+}
+
+/// Sets the pedals of the track, or with `master` set those of the mix, to the chain
+/// written to [`gtr_line_input`]. Returns 0 if the bytes are not a chain.
+///
+/// # Safety
+/// See [`gtr_line_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_set(line: *mut Line, master: u32) -> u32 {
+    let line = unsafe { &mut *line };
+    let Some(chain) = chain_from_bytes(&line.input) else {
+        return 0;
+    };
+    line.rack.set(master != 0, &chain);
+    1
+}
+
+/// Makes room for `frames` samples heard on the line and says where to write them.
+///
+/// # Safety
+/// See [`gtr_line_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_heard(line: *mut Line, frames: usize) -> *mut f32 {
+    let line = unsafe { &mut *line };
+    line.heard.resize(frames, 0.0);
+    line.heard.as_mut_ptr()
+}
+
+/// Runs what was written to [`gtr_line_heard`], brought up or down by `gain`, through the
+/// pedals, to be read from [`gtr_line_left`] and [`gtr_line_right`].
+///
+/// # Safety
+/// See [`gtr_line_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_process(line: *mut Line, gain: f32) {
+    let line = unsafe { &mut *line };
+    line.left.clear();
+    line.left.extend(line.heard.iter().map(|s| s * gain));
+    line.right.clone_from(&line.left);
+    line.rack.process(&mut line.left, &mut line.right);
+    // What comes out is rounded off as the score's playback is, rather than clipped.
+    for sample in line.left.iter_mut().chain(&mut line.right) {
+        *sample = sample.tanh();
+    }
+}
+
+/// # Safety
+/// See [`gtr_line_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_left(line: *const Line) -> *const f32 {
+    unsafe { &*line }.left.as_ptr()
+}
+
+/// # Safety
+/// See [`gtr_line_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_line_right(line: *const Line) -> *const f32 {
+    unsafe { &*line }.right.as_ptr()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -238,6 +331,50 @@ mod tests {
             assert_eq!(blocks, (0.5f64 * 44_100.0 / 128.0).ceil() as usize - 1);
             assert!((std::slice::from_raw_parts(gtr_left(synth), 128).iter()).all(|&s| s == 0.0));
             drop(Box::from_raw(synth));
+        }
+    }
+
+    #[test]
+    fn a_line_goes_through_its_pedals() {
+        use gtr_audio::chain_to_bytes;
+        use gtr_model::{Pedal, PedalKind};
+        unsafe {
+            let line = gtr_line_new(44_100);
+            let write = |bytes: &[u8]| {
+                let input = gtr_line_input(line, bytes.len());
+                std::slice::from_raw_parts_mut(input, bytes.len()).copy_from_slice(bytes);
+            };
+            let play = |gain| {
+                let heard = std::slice::from_raw_parts_mut(gtr_line_heard(line, 128), 128);
+                for (i, sample) in heard.iter_mut().enumerate() {
+                    *sample = if i % 64 < 32 { 0.1 } else { -0.1 };
+                }
+                gtr_line_process(line, gain);
+                let left = std::slice::from_raw_parts(gtr_line_left(line), 128);
+                let right = std::slice::from_raw_parts(gtr_line_right(line), 128);
+                (left.to_vec(), right.to_vec())
+            };
+            // With no pedals, what is heard comes out on both sides, brought up by the gain.
+            let (left, right) = play(2.0);
+            assert_eq!(left, right);
+            assert!((left[0] - 0.2f32.tanh()).abs() < 1e-6);
+            // A chorus on the track and nothing on the mix: the sides part.
+            write(&chain_to_bytes(&[Pedal::with(
+                PedalKind::Chorus,
+                &[50, 100, 100],
+            )]));
+            assert_eq!(gtr_line_set(line, 0), 1);
+            write(&chain_to_bytes(&[]));
+            assert_eq!(gtr_line_set(line, 1), 1);
+            for _ in 0..20 {
+                play(1.0);
+            }
+            let (left, right) = play(1.0);
+            assert!(left != right);
+            // Bytes that are not a chain are refused.
+            write(b"no");
+            assert_eq!(gtr_line_set(line, 0), 0);
+            drop(Box::from_raw(line));
         }
     }
 

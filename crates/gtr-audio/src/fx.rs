@@ -853,6 +853,39 @@ impl Chain {
     }
 }
 
+/// Pedals to play something other than the score through, such as a guitar plugged into
+/// a line in: the chain of a track and then the chain of the mix, as the track's notes go.
+pub struct Rack {
+    track: Chain,
+    master: Chain,
+    rate: f32,
+}
+
+impl Rack {
+    pub fn new(sample_rate: u32) -> Rack {
+        Rack {
+            track: Chain::default(),
+            master: Chain::default(),
+            rate: sample_rate as f32,
+        }
+    }
+
+    /// Sets the pedals of the track, or with `master` those of the mix. Pedals that stay
+    /// where they were keep their echoes.
+    pub fn set(&mut self, master: bool, pedals: &[Pedal]) {
+        match master {
+            false => self.track.set(pedals, self.rate),
+            true => self.master.set(pedals, self.rate),
+        }
+    }
+
+    /// Runs a block of both sides through the track's pedals and then the mix's.
+    pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
+        self.track.process(left, right);
+        self.master.process(left, right);
+    }
+}
+
 /// Seconds a chain can still be heard for after the last note has stopped: the echoes of
 /// a delay until they are 60 dB down, or the tail of a reverb.
 pub(crate) fn tail(pedals: &[Pedal]) -> f64 {
@@ -1035,6 +1068,25 @@ mod tests {
         assert!(tail(&[delay]) > f64::from(time) * 3.0);
         assert!(tail(&[Pedal::with(PedalKind::Reverb, &[100])]) >= 7.0);
         assert_eq!(tail(&[Pedal::new(PedalKind::Eq)]), 0.0);
+    }
+
+    #[test]
+    fn a_rack_runs_the_track_and_then_the_mix() {
+        let note = saw(110.0, 0.5, 0.2);
+        let mut rack = Rack::new(44_100);
+        let (mut left, mut right) = (note.clone(), note.clone());
+        rack.process(&mut left, &mut right);
+        assert_eq!(left, note);
+        // Turned down by the track's EQ, and down again by the mix's.
+        let quiet = Pedal::with(PedalKind::Eq, &[50, 50, 50, 50, 0]);
+        rack.set(false, std::slice::from_ref(&quiet));
+        let (mut left, mut right) = (note.clone(), note.clone());
+        rack.process(&mut left, &mut right);
+        let once = rms(&left);
+        rack.set(true, &[quiet]);
+        let (mut left, mut right) = (note.clone(), note.clone());
+        rack.process(&mut left, &mut right);
+        assert!(once < rms(&note) * 0.3 && rms(&left) < once * 0.3);
     }
 
     #[test]

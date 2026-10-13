@@ -20,5 +20,6 @@ pub use events::{
     Automation, BeatTime, Channel, Click, NoteEvent, Options, Pulse, Timbre, Timeline, Tone,
     audition, compile,
 };
+pub use fx::Rack;
 pub use wav::wav;
 pub use wire::{chain_from_bytes, chain_to_bytes};

@@ -301,7 +301,7 @@ The synth itself and its SoundFonts come in phase 6; this phase is what is built
 - [ ] Per-track sound banks with switching mid-score via automation
 - [x] Master track effects. The mix has a chain of its own (`Score::effects`), run after the tracks are added up and before the limiter, and shown on the pedalboard under Master, or from Score > Master effects…
 - [ ] Audio track: import an audio file and sync the score to it with tempo mapping
-- [ ] Line-in: play a real guitar through the track's effects
+- [x] Line-in: play a real guitar through the track's effects. Tools > Line in… opens the default input or another chosen, with the browser's cleaning-up for speech turned off, and plays it through the pedals of the cursor's track and then those of the mix (`gtr_audio::Rack`), in an AudioWorklet of its own beside the synth's (`gtr-line` in `synth.worklet.js`, `linein.ts`), so that it can be played along with the score. Its gain is set in decibels before the pedals, and meters show the level going in and coming out. It carries on once the dialog is closed, with a button in the transport bar to come back to it, and follows the pedals as they are changed on the pedalboard or the cursor goes to another track. The dialog says how late the sound is heard, from what the input and the output report of their latency: about 20 ms in Chromium on Linux with a stand-in input. The input and gain are kept for next time. `e2e/linein.spec.ts`; a guitar through a real line in on each system is a check owed by hand
 - [ ] Native audio backend on desktop if AudioWorklet latency is not good enough
 
 Known simplifications, each with the phase that removes it:
