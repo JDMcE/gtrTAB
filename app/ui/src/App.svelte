@@ -2067,6 +2067,7 @@
             peaks={recordingPeaks}
             problem={recordingProblem}
             cursorBar={editor.cursor.bar}
+            theme={prefs.theme}
             now={recordingNow}
             onsync={(place, millis) => edit((d) => d.syncRecording(place, millis))}
             onunsync={(place) => edit((d) => d.unsyncRecording(place))}
