@@ -1,9 +1,12 @@
 name: CI
 
+# Run by hand only, from the Actions tab, to save the account's CI minutes. To run on every
+# push to main and every pull request again, put back:
+#   push:
+#     branches: [main, master]
+#   pull_request:
 on:
-  push:
-    branches: [main, master]
-  pull_request:
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
