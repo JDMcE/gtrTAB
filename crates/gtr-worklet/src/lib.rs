@@ -2,7 +2,7 @@
 //! glue code `wasm-bindgen` generates, so this is a plain C interface with no imports: the
 //! worklet copies bytes and samples in and out of the module's memory itself.
 
-use gtr_audio::{Engine, SoundFont, SoundFontError, Timeline};
+use gtr_audio::{Engine, SoundFont, SoundFontError, Timeline, chain_from_bytes};
 
 /// The synth and the memory it shares with the worklet.
 pub struct Synth {
@@ -139,6 +139,23 @@ pub unsafe extern "C" fn gtr_set_mix(
 ) {
     let synth = unsafe { &mut *synth };
     synth.engine.set_mix(channel, audible != 0, gain, pan);
+}
+
+/// Changes the pedals of a track while it plays, or with a `channel` below zero those of
+/// the whole mix, to the chain written to [`gtr_input`]. Returns 0 if the bytes
+/// are not a chain.
+///
+/// # Safety
+/// See [`gtr_input`].
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn gtr_set_effects(synth: *mut Synth, channel: i32) -> u32 {
+    let synth = unsafe { &mut *synth };
+    let Some(chain) = chain_from_bytes(&synth.input) else {
+        return 0;
+    };
+    let channel = usize::try_from(channel).ok();
+    synth.engine.set_effects(channel, chain);
+    1
 }
 
 /// Makes the next `frames` samples, to be read from [`gtr_left`] and [`gtr_right`].

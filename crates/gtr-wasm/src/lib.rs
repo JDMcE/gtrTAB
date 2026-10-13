@@ -4,7 +4,8 @@ use gtr_audio::Options;
 use gtr_edit::{Editor, Move, Technique};
 use gtr_io::native;
 use gtr_model::{
-    Instrument, Mix, NoteValue, Score, ScoreInfo, TimeSignature, Tuning, Tuplet, demo_score,
+    Instrument, Mix, NoteValue, Pedal, PedalKind, Score, ScoreInfo, TimeSignature, Tuning, Tuplet,
+    demo_score,
 };
 use serde::de::DeserializeOwned;
 use wasm_bindgen::prelude::*;
@@ -678,6 +679,37 @@ impl Document {
     pub fn set_mix(&mut self, track: usize, mix_json: &str) -> Result<(), JsError> {
         let mix: Mix = serde_json::from_str(mix_json)?;
         Ok(self.editor.set_mix(track, mix)?)
+    }
+
+    /// Sets the pedals a track goes through, or with no track those of the whole mix.
+    /// `effects_json` holds a list of `gtr_model::Pedal` values.
+    #[wasm_bindgen(js_name = setEffects)]
+    pub fn set_effects(&mut self, track: Option<usize>, effects_json: &str) -> Result<(), JsError> {
+        let effects: Vec<Pedal> = serde_json::from_str(effects_json)?;
+        Ok(self.editor.set_effects(track, effects)?)
+    }
+
+    /// Every kind of pedal, in the order the synth numbers them, with its name and its
+    /// knobs: `[{ kind, name, knobs: [{ name, default }] }]`.
+    #[wasm_bindgen(js_name = pedalKindsJson)]
+    pub fn pedal_kinds_json() -> String {
+        let kinds: Vec<_> = (PedalKind::ALL.iter())
+            .map(|kind| {
+                let knobs: Vec<_> = (kind.knobs().iter())
+                    .map(|k| serde_json::json!({ "name": k.name, "default": k.default }))
+                    .collect();
+                serde_json::json!({ "kind": kind, "name": kind.name(), "knobs": knobs })
+            })
+            .collect();
+        serde_json::Value::from(kinds).to_string()
+    }
+
+    /// A chain of pedals as the synth takes it while a knob is turned, from a list of
+    /// `gtr_model::Pedal` values.
+    #[wasm_bindgen(js_name = chainBytes)]
+    pub fn chain_bytes(effects_json: &str) -> Result<Vec<u8>, JsError> {
+        let effects: Vec<Pedal> = serde_json::from_str(effects_json)?;
+        Ok(gtr_audio::chain_to_bytes(&effects))
     }
 
     // --- Clipboard and history ---

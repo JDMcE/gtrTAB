@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BeatEffects, Duration, Instrument, KitPiece, Mix, NoteEffects, Rational, Tuning, kit_is_valid,
-    standard_kit,
+    BeatEffects, Duration, Instrument, KitPiece, Mix, NoteEffects, Pedal, Rational, Tuning,
+    kit_is_valid, standard_kit,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -15,6 +15,10 @@ pub struct Score {
     /// Bar properties shared by every track. Each staff has exactly one bar per master bar.
     pub master_bars: Vec<MasterBar>,
     pub tracks: Vec<Track>,
+    /// The pedals the whole mix goes through, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Pedal>>")]
+    pub effects: Vec<Pedal>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -340,6 +344,10 @@ pub struct Track {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[ts(optional, as = "Option<Vec<KitPiece>>")]
     pub kit: Vec<KitPiece>,
+    /// The pedals the track's sound goes through on its way to the mix, in order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[ts(optional, as = "Option<Vec<Pedal>>")]
+    pub effects: Vec<Pedal>,
     pub staves: Vec<Staff>,
 }
 
@@ -359,6 +367,7 @@ impl Track {
             instrument,
             mix: Mix::default(),
             kit: Vec::new(),
+            effects: Vec::new(),
             staves,
         }
     }
@@ -639,7 +648,9 @@ pub enum ModelError {
     InvalidTempo,
     #[error("bar {bar} has an invalid time or key signature")]
     InvalidTimeSignature { bar: usize },
-    #[error("track {track} has no staff, or mixer settings that are out of range")]
+    #[error("the master effects are not valid")]
+    InvalidEffects,
+    #[error("track {track} has no staff, or settings that are out of range")]
     InvalidTrack { track: usize },
     #[error("track {track} staff {staff} has too many strings")]
     TooManyStrings { track: usize, staff: usize },
@@ -666,6 +677,7 @@ impl Score {
             tempo: 120,
             master_bars: vec![MasterBar::new(TimeSignature::COMMON)],
             tracks: vec![Track::empty("Guitar", Instrument::default(), 1)],
+            effects: Vec::new(),
         }
     }
 
@@ -678,8 +690,15 @@ impl Score {
         if let Some(bar) = self.master_bars.iter().position(|m| !m.is_valid()) {
             return Err(ModelError::InvalidTimeSignature { bar });
         }
+        if !Pedal::chain_is_valid(&self.effects) {
+            return Err(ModelError::InvalidEffects);
+        }
         for (track, t) in self.tracks.iter().enumerate() {
-            if t.staves.is_empty() || !t.mix.is_valid() || !kit_is_valid(&t.kit) {
+            if t.staves.is_empty()
+                || !t.mix.is_valid()
+                || !kit_is_valid(&t.kit)
+                || !Pedal::chain_is_valid(&t.effects)
+            {
                 return Err(ModelError::InvalidTrack { track });
             }
             for (staff, s) in t.staves.iter().enumerate() {

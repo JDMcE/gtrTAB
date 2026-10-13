@@ -1,6 +1,6 @@
 use gtr_model::{
-    Accent, BarTiming, Beat, Bend, Dynamic, Fade, Hairpin, Harmonic, Instrument, Note, Rational,
-    Score, Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
+    Accent, BarTiming, Beat, Bend, Dynamic, Fade, Hairpin, Harmonic, Instrument, Note, Pedal,
+    Rational, Score, Slap, Slide, Staff, Strum, Vibrato, play_order, range_order, timings,
 };
 use serde::{Deserialize, Serialize};
 
@@ -127,7 +127,7 @@ impl Timbre {
 
 /// How one track is mixed. The notes of a track that is not audible are in the timeline all
 /// the same, so that it can be brought back in while the music plays.
-#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Channel {
     /// False for a track that is muted, or left out by another track's solo.
     pub audible: bool,
@@ -135,6 +135,8 @@ pub struct Channel {
     /// From -1.0 (left) to 1.0 (right).
     pub pan: f32,
     pub timbre: Timbre,
+    /// The pedals the track goes through before it is placed in the mix.
+    pub effects: Vec<Pedal>,
 }
 
 impl Default for Channel {
@@ -144,6 +146,7 @@ impl Default for Channel {
             gain: 1.0,
             pan: 0.0,
             timbre: Timbre::default(),
+            effects: Vec::new(),
         }
     }
 }
@@ -237,6 +240,8 @@ pub struct Automation {
 pub struct Timeline {
     /// One per track of the score.
     pub channels: Vec<Channel>,
+    /// The pedals the whole mix goes through.
+    pub effects: Vec<Pedal>,
     /// Changes to the channels' gain and pan, in time order.
     pub automation: Vec<Automation>,
     pub notes: Vec<NoteEvent>,
@@ -324,8 +329,10 @@ pub fn compile(score: &Score, follow: usize, options: &Options) -> Timeline {
                 gain: track.mix.gain(),
                 pan: f32::from(track.mix.pan) / f32::from(gtr_model::Mix::MAX_PAN),
                 timbre: Timbre::of(track.instrument),
+                effects: track.effects.clone(),
             })
             .collect(),
+        effects: score.effects.clone(),
         automation: Vec::new(),
         notes: Vec::new(),
         clicks: Vec::new(),
@@ -851,6 +858,21 @@ mod tests {
     }
 
     #[test]
+    fn the_pedals_of_each_track_and_of_the_mix_are_carried() {
+        use gtr_model::PedalKind;
+        let mut score = demo_score();
+        score.tracks[0].effects = vec![Pedal::new(PedalKind::Overdrive)];
+        score.effects = vec![Pedal::new(PedalKind::Reverb)];
+        let t = compile(&score, 0, &Options::default());
+        assert_eq!(t.channels[0].effects, score.tracks[0].effects);
+        assert_eq!(t.effects, score.effects);
+        assert_eq!(
+            Timeline::from_bytes(&t.to_bytes()).unwrap().effects,
+            score.effects
+        );
+    }
+
+    #[test]
     fn mute_solo_and_mix_settings() {
         use gtr_model::{Mix, Track};
 
@@ -875,7 +897,8 @@ mod tests {
                 audible: true,
                 gain: 0.0,
                 pan: -1.0,
-                timbre: Timbre::Bass
+                timbre: Timbre::Bass,
+                effects: Vec::new(),
             }
         );
         let audible = |score: &Score| -> Vec<bool> {

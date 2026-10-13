@@ -2,7 +2,7 @@ use gtr_model::{
     Bar, Beat, BeatEffects, ChordDiagram, Clef, Duration, Instrument, KitPiece, MasterBar, Mix,
     Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
-use gtr_model::{Rational, TempoChange};
+use gtr_model::{Pedal, Rational, TempoChange};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -1020,6 +1020,7 @@ impl Editor {
             instrument,
             mix: old.mix,
             kit: old.kit.clone(),
+            effects: old.effects.clone(),
             staves,
         };
         self.run(Command::ReplaceTrack {
@@ -1036,6 +1037,22 @@ impl Editor {
             return Ok(());
         }
         self.keep_selection(|e| e.run(Command::SetKit { track, kit }))
+    }
+
+    /// Sets the pedals a track's sound goes through, or with no track those of the mix.
+    pub fn set_effects(
+        &mut self,
+        track: Option<usize>,
+        effects: Vec<Pedal>,
+    ) -> Result<(), EditError> {
+        let current = match track {
+            Some(track) => self.score.tracks.get(track).map(|t| &t.effects),
+            None => Some(&self.score.effects),
+        };
+        if current == Some(&effects) {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetEffects { track, effects }))
     }
 
     pub fn set_mix(&mut self, track: usize, mix: Mix) -> Result<(), EditError> {

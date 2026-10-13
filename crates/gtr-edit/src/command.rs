@@ -1,6 +1,6 @@
 use gtr_model::{
-    Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Score, ScoreInfo,
-    Staff, TimeSignature, Track, Tuning, Voice,
+    Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Pedal, Score,
+    ScoreInfo, Staff, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -119,6 +119,11 @@ pub enum Command {
         track: usize,
         kit: Vec<KitPiece>,
     },
+    /// Sets the pedals a track's sound goes through, or with no track those of the whole mix.
+    SetEffects {
+        track: Option<usize>,
+        effects: Vec<Pedal>,
+    },
     /// Applies several commands as one undo step. If one fails, none are applied.
     Batch(Vec<Command>),
 }
@@ -170,6 +175,8 @@ pub enum EditError {
     InvalidKit,
     #[error("volume or pan is out of range")]
     InvalidMix,
+    #[error("too many pedals, or a knob turned past its end")]
+    InvalidEffects,
 }
 
 impl Command {
@@ -482,6 +489,23 @@ impl Command {
                 Ok(Command::SetKit {
                     track,
                     kit: std::mem::replace(&mut target.kit, kit),
+                })
+            }
+            Command::SetEffects { track, effects } => {
+                if !Pedal::chain_is_valid(&effects) {
+                    return Err(EditError::InvalidEffects);
+                }
+                let target = match track {
+                    Some(track) => {
+                        &mut (score.tracks.get_mut(track))
+                            .ok_or(EditError::InvalidLocation)?
+                            .effects
+                    }
+                    None => &mut score.effects,
+                };
+                Ok(Command::SetEffects {
+                    track,
+                    effects: std::mem::replace(target, effects),
                 })
             }
             Command::Batch(commands) => {

@@ -7,6 +7,7 @@
 
 mod engine;
 mod events;
+mod fx;
 mod soundfont;
 mod voice;
 mod wav;
@@ -20,3 +21,4 @@ pub use events::{
     audition, compile,
 };
 pub use wav::wav;
+pub use wire::{chain_from_bytes, chain_to_bytes};

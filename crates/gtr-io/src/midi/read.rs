@@ -368,6 +368,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score, ImportE
         tempo: start_tempo,
         master_bars: masters,
         tracks,
+        effects: Vec::new(),
     })
 }
 

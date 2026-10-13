@@ -5,6 +5,7 @@ mod drums;
 mod duration;
 mod effects;
 mod instrument;
+mod pedal;
 mod playback;
 mod score;
 mod tuning;
@@ -18,6 +19,7 @@ pub use effects::{
     interval_label,
 };
 pub use instrument::{Clef, Instrument, Mix};
+pub use pedal::{Knob, Pedal, PedalKind};
 pub use playback::{
     BarTiming, TempoPoint, bar_times, gradual_change, play_order, range_order, tempo_points,
     timings,

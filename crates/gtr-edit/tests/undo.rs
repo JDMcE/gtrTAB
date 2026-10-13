@@ -1,7 +1,7 @@
 use gtr_edit::{BeatRef, Command, History};
 use gtr_model::{
-    Beat, Duration, Instrument, Mix, Note, NoteValue, Score, TimeSignature, Track, Tuning, Tuplet,
-    demo_score,
+    Beat, Duration, Instrument, Mix, Note, NoteValue, Pedal, PedalKind, Score, TimeSignature,
+    Track, Tuning, Tuplet, demo_score,
 };
 use proptest::prelude::*;
 
@@ -51,7 +51,7 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
     if (170..190).contains(&kind) {
         let count = score.tracks.len();
         let instrument = Instrument::ALL[usize::from(b) % Instrument::ALL.len()];
-        return match a % 5 {
+        return match a % 6 {
             0 => Command::InsertTrack {
                 index: idx[0] % (count + 2),
                 // Now and then a track with the wrong number of bars, which must be refused.
@@ -72,6 +72,16 @@ fn build(score: &Score, (kind, idx, a, b): Seed) -> Command {
                 track: idx[0] % (count + 1),
                 name: format!("Track {b}"),
                 instrument,
+            },
+            4 => Command::SetEffects {
+                // Now and then the master's chain, and now and then a knob past its end.
+                track: (b % 4 != 0).then_some(idx[0] % (count + 1)),
+                effects: (0..usize::from(b % 4))
+                    .map(|i| {
+                        let kind = PedalKind::ALL[(usize::from(a) + i) % PedalKind::ALL.len()];
+                        Pedal::with(kind, &[b % 104])
+                    })
+                    .collect(),
             },
             _ => Command::SetMix {
                 track: idx[0] % (count + 1),

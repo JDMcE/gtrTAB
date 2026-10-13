@@ -1,12 +1,12 @@
 //! A timeline as bytes, for handing to the synth on the audio thread. The format is private
 //! to one build of the app: nothing written with it is kept.
 
-use gtr_model::Fade;
+use gtr_model::{Fade, Pedal, PedalKind};
 
 use crate::{Automation, BeatTime, Channel, Click, NoteEvent, Timbre, Timeline, Tone};
 
 /// First bytes of an encoded timeline.
-const MAGIC: &[u8; 4] = b"GTL1";
+const MAGIC: &[u8; 4] = b"GTL2";
 
 const TIMBRES: [Timbre; 11] = [
     Timbre::Steel,
@@ -47,6 +47,16 @@ impl Writer {
     fn f64(&mut self, value: f64) {
         self.0.extend_from_slice(&value.to_le_bytes());
     }
+
+    fn chain(&mut self, chain: &[Pedal]) {
+        self.count(chain.len());
+        for pedal in chain {
+            self.u8(code(&PedalKind::ALL, pedal.kind));
+            self.u8(pedal.on.into());
+            self.count(pedal.knobs.len());
+            self.0.extend_from_slice(&pedal.knobs);
+        }
+    }
 }
 
 struct Reader<'a>(&'a [u8]);
@@ -84,6 +94,31 @@ impl Reader<'_> {
         }
         Some(list)
     }
+
+    fn chain(&mut self) -> Option<Vec<Pedal>> {
+        let chain = self.list(|r| {
+            Some(Pedal {
+                kind: *PedalKind::ALL.get(usize::from(r.u8()?))?,
+                on: r.u8()? != 0,
+                knobs: r.list(Reader::u8)?,
+            })
+        })?;
+        Pedal::chain_is_valid(&chain).then_some(chain)
+    }
+}
+
+/// A chain of pedals as bytes, as the page sends it to the synth while a knob turns.
+pub fn chain_to_bytes(chain: &[Pedal]) -> Vec<u8> {
+    let mut w = Writer(Vec::new());
+    w.chain(chain);
+    w.0
+}
+
+/// Reads what [`chain_to_bytes`] wrote, or nothing if the bytes are not that.
+pub fn chain_from_bytes(bytes: &[u8]) -> Option<Vec<Pedal>> {
+    let mut r = Reader(bytes);
+    let chain = r.chain()?;
+    r.0.is_empty().then_some(chain)
 }
 
 impl Timeline {
@@ -98,7 +133,9 @@ impl Timeline {
             w.u8(code(&TIMBRES, channel.timbre));
             w.f32(channel.gain);
             w.f32(channel.pan);
+            w.chain(&channel.effects);
         }
+        w.chain(&self.effects);
         w.count(self.automation.len());
         for change in &self.automation {
             w.count(change.channel);
@@ -153,8 +190,10 @@ impl Timeline {
                 timbre: *TIMBRES.get(usize::from(r.u8()?))?,
                 gain: r.f32()?,
                 pan: r.f32()?,
+                effects: r.chain()?,
             })
         })?;
+        let effects = r.chain()?;
         let automation = r.list(|r| {
             let (channel, time, set) = (r.count()?, r.f64()?, r.u8()?);
             let (gain, pan) = (r.f32()?, r.f32()?);
@@ -197,6 +236,7 @@ impl Timeline {
         })?;
         r.0.is_empty().then_some(Timeline {
             channels,
+            effects,
             automation,
             notes,
             clicks,
@@ -231,7 +271,20 @@ mod tests {
                     gain: 0.7,
                     pan: -0.25,
                     timbre,
+                    effects: match timbre {
+                        Timbre::Distortion => vec![
+                            Pedal::with(PedalKind::Wah, &[10, 20]),
+                            Pedal {
+                                on: false,
+                                ..Pedal::new(PedalKind::Reverb)
+                            },
+                        ],
+                        _ => Vec::new(),
+                    },
                 })
+                .collect(),
+            effects: (PedalKind::ALL.iter())
+                .map(|&kind| Pedal::new(kind))
                 .collect(),
             automation: vec![
                 Automation {
@@ -291,5 +344,32 @@ mod tests {
         let mut lying = bytes.clone();
         lying[20..24].copy_from_slice(&u32::MAX.to_le_bytes());
         assert_eq!(Timeline::from_bytes(&lying), None);
+    }
+
+    #[test]
+    fn a_chain_survives_the_trip_and_a_bad_one_is_refused() {
+        let chain = vec![
+            Pedal::with(PedalKind::Delay, &[1, 2, 3, 4]),
+            Pedal {
+                on: false,
+                knobs: Vec::new(),
+                kind: PedalKind::Amp,
+            },
+        ];
+        let bytes = chain_to_bytes(&chain);
+        assert_eq!(chain_from_bytes(&bytes), Some(chain.clone()));
+        assert_eq!(chain_from_bytes(&chain_to_bytes(&[])), Some(Vec::new()));
+        assert_eq!(chain_from_bytes(&bytes[..bytes.len() - 1]), None);
+        // A knob past its end, a kind that does not exist, or one knob too many.
+        assert_eq!(
+            chain_from_bytes(&chain_to_bytes(&[Pedal::with(PedalKind::Eq, &[101])])),
+            None
+        );
+        let mut unknown = bytes.clone();
+        unknown[4] = PedalKind::ALL.len() as u8;
+        assert_eq!(chain_from_bytes(&unknown), None);
+        let mut long = Pedal::new(PedalKind::Wah);
+        long.knobs.push(0);
+        assert_eq!(chain_from_bytes(&chain_to_bytes(&[long])), None);
     }
 }
