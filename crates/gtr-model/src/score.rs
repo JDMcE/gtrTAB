@@ -353,6 +353,15 @@ impl TimeSignature {
         self.numerator > 0 && self.denominator.is_power_of_two() && self.denominator <= 64
     }
 
+    /// How many beats a bar of it is felt in: its numerator, or in a compound time such as
+    /// 6/8 or 12/8 a third of it, as each beat is three of its notes.
+    pub fn felt_beats(&self) -> u8 {
+        match self.denominator >= 8 && self.numerator > 3 && self.numerator.is_multiple_of(3) {
+            true => self.numerator / 3,
+            false => self.numerator,
+        }
+    }
+
     /// Length of a full bar in whole notes. Panics if the denominator is zero.
     pub fn bar_length(&self) -> Rational {
         Rational::new(self.numerator.into(), self.denominator.into())

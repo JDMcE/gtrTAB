@@ -153,6 +153,43 @@ pub fn moved(
     kept
 }
 
+/// Sync points holding each bar of the play-through to the beat it starts on, from the
+/// `beats` heard in the recording, in seconds, and how many beats each bar has (`counts`,
+/// in the order the bars are played). `anchor` is a bar's place and where in the recording
+/// it is held now: it starts on the beat nearest there, and the bars before and after it
+/// are counted out from it, beat by beat. Bars that start before the first beat heard or
+/// after the last are not held.
+pub fn on_beats(beats: &[f64], counts: &[usize], anchor: (usize, f64)) -> Vec<SyncPoint> {
+    let Some(nearest) = (0..beats.len()).min_by(|&a, &b| {
+        (beats[a] - anchor.1)
+            .abs()
+            .total_cmp(&(beats[b] - anchor.1).abs())
+    }) else {
+        return Vec::new();
+    };
+    let (place, at) = (anchor.0.min(counts.len()), nearest as i64);
+    // The beat each bar starts on, counted back and on from the anchor's.
+    let mut starts = vec![0i64; counts.len()];
+    for p in (0..place).rev() {
+        starts[p] = starts.get(p + 1).copied().unwrap_or(at) - counts[p] as i64;
+    }
+    let mut beat = at;
+    for (p, count) in counts.iter().enumerate().skip(place) {
+        starts[p] = beat;
+        beat += *count as i64;
+    }
+    (starts.iter().enumerate())
+        .filter_map(|(bar, &start)| {
+            let time = beats.get(usize::try_from(start).ok()?)?;
+            Some(SyncPoint {
+                bar,
+                millis: (time * 1000.0).round().max(0.0) as u32,
+            })
+        })
+        .take(AudioTrack::MAX_SYNC)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -278,5 +315,24 @@ mod tests {
             moved(&held, &[0, 1, 2, 3], &[0, 3, 1, 2], &identity),
             [at(2, 2_000)]
         );
+    }
+
+    #[test]
+    fn bars_are_held_to_the_beats_counted_out_from_the_one_held() {
+        // A beat every half second from a quarter of a second in.
+        let beats: Vec<f64> = (0..14).map(|k| 0.25 + 0.5 * k as f64).collect();
+        // Bars of four, then one of three, then of four.
+        let counts = [4, 4, 3, 4, 4];
+        assert_eq!(
+            on_beats(&beats, &counts, (0, 0.0)),
+            [at(0, 250), at(1, 2_250), at(2, 4_250), at(3, 5_750)]
+        );
+        // Held further in, the bars before it are counted back; those before the first
+        // beat heard, and after the last, are not held.
+        assert_eq!(
+            on_beats(&beats, &counts, (1, 1.3)),
+            [at(1, 1_250), at(2, 3_250), at(3, 4_750), at(4, 6_750)]
+        );
+        assert!(on_beats(&[], &counts, (0, 0.0)).is_empty());
     }
 }

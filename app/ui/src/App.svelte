@@ -1091,6 +1091,7 @@
     if (readFor.doc === current && readFor.name === name) return;
     readFor = { doc: current, name };
     recordingPeaks = null;
+    recordingSamples = null;
     recordingProblem = '';
     const bytes = name && current ? current.recordingFile() : undefined;
     if (!name || !bytes) {
@@ -1102,6 +1103,7 @@
       const decoded = await player.decode(bytes);
       if (readFor.doc !== current || readFor.name !== name) return;
       recordingPeaks = peaksOf(decoded);
+      recordingSamples = decoded;
       await player.setRecording(decoded);
     } catch {
       recordingProblem = `${name} could not be read as a recording.`;
@@ -1122,6 +1124,23 @@
     });
 
   const setAudio = (audio: AudioTrack | null) => edit((d) => d.setAudio(JSON.stringify(audio)));
+
+  /** The recording as it was read, to listen to for its beat. */
+  let recordingSamples: AudioBuffer | null = null;
+
+  /** Listens for the recording's beat and holds each bar to the beat it starts on. */
+  const findBars = () =>
+    edit((d) => {
+      const recording = recordingSamples;
+      if (!recording) return;
+      const mono = new Float32Array(recording.length);
+      for (let channel = 0; channel < recording.numberOfChannels; channel++) {
+        const side = recording.getChannelData(channel);
+        for (let i = 0; i < mono.length; i++) mono[i] += side[i] / recording.numberOfChannels;
+      }
+      const held = d.findBars(mono, recording.sampleRate);
+      message = tn(held, 'Held {count} bar to the beat it starts on', 'Held {count} bars to the beats they start on');
+    });
 
   /** The audio track as the track pane shows it: the bars heard over the recording. */
   const audioRow = $derived.by((): AudioRow | null => {
@@ -2375,6 +2394,7 @@
             onunsync={(place) => edit((d) => d.unsyncRecording(place))}
             onseek={(bar) => edit((d) => d.goToBar(bar))}
             onmix={(mix) => score?.audio && setAudio({ ...score.audio, mix })}
+            onfind={findBars}
             onreplace={importRecording}
             onremove={() => setAudio(null)}
             onclose={() => {

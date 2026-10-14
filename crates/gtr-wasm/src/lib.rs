@@ -304,6 +304,42 @@ impl Document {
         serde_json::Value::from(bars).to_string()
     }
 
+    /// Listens for the beat of the recording, whose samples are given at `rate` with its
+    /// sides added together, and holds each bar to the beat it starts on, counted out from
+    /// the first bar held now, in one step to undo. Returns how many bars are held.
+    #[wasm_bindgen(js_name = findBars)]
+    pub fn find_bars(&mut self, samples: &[f32], rate: u32) -> Result<usize, JsError> {
+        let score = self.editor.score();
+        let Some(audio) = &score.audio else {
+            return Ok(0);
+        };
+        let order = gtr_model::play_order(&score.master_bars, false);
+        let counts: Vec<usize> = (order.iter())
+            .map(|&bar| usize::from(score.master_bars[bar].time_signature.felt_beats().max(1)))
+            .collect();
+        // How far apart the beats are as written: the middle of the bars' spacings.
+        let mut spacings: Vec<f64> = (gtr_model::timings(score, &order, 1.0).iter())
+            .zip(&counts)
+            .map(|(timing, &count)| timing.length / count as f64)
+            .collect();
+        spacings.sort_by(f64::total_cmp);
+        let expected = spacings.get(spacings.len() / 2).copied().unwrap_or(0.5);
+        let anchor =
+            (audio.sync.first()).map_or((0, 0.0), |p| (p.bar, f64::from(p.millis) / 1000.0));
+        let beats = gtr_audio::beats(samples, rate, expected);
+        let sync = gtr_model::on_beats(&beats, &counts, anchor);
+        if sync.is_empty() {
+            return Err(JsError::new("No beat could be heard in the recording."));
+        }
+        let held = sync.len();
+        let audio = gtr_model::AudioTrack {
+            sync,
+            ..audio.clone()
+        };
+        self.editor.set_audio(Some(audio))?;
+        Ok(held)
+    }
+
     /// Changes the audio track's mix or sync points, or with `"null"` takes it away.
     /// `audio_json` holds a `gtr_model::AudioTrack`.
     #[wasm_bindgen(js_name = setAudio)]

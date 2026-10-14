@@ -5,6 +5,7 @@
 //! strings and drums; [`render`] runs it over a whole passage at once, and [`wav`] writes the
 //! result as a file.
 
+mod beat;
 mod engine;
 mod events;
 mod fx;
@@ -16,6 +17,7 @@ mod wire;
 
 pub use soundfont::{SoundFont, SoundFontError};
 
+pub use beat::beats;
 pub use engine::{Engine, Stereo, render};
 pub use events::{
     Automation, BeatTime, Channel, Click, Cue, NoteEvent, Options, Pulse, Timbre, Timeline, Tone,

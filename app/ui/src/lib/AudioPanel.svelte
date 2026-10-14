@@ -74,12 +74,14 @@
     onunsync: (place: number) => void;
     onseek: (bar: number) => void;
     onmix: (mix: Mix) => void;
+    /** Listens for the beat and holds each bar to the beat it starts on. */
+    onfind: () => void;
     onreplace: () => void;
     onremove: () => void;
     onclose: () => void;
   }
 
-  let { audio, bars, peaks, problem, cursorBar, theme, now, onsync, onunsync, onseek, onmix, onreplace, onremove, onclose }: Props =
+  let { audio, bars, peaks, problem, cursorBar, theme, now, onsync, onunsync, onseek, onmix, onfind, onreplace, onremove, onclose }: Props =
     $props();
 
   const HEIGHT = 96;
@@ -313,6 +315,15 @@
         <button type="button" class="btn small" onclick={() => onunsync(cursorPlace!)}>Let bar {cursorBar + 1} go</button>
       {/if}
     {/if}
+    <button
+      type="button"
+      class="btn small"
+      disabled={!peaks}
+      title="Listens for the beat, and holds each bar to the beat it starts on, counted from the first bar held"
+      onclick={onfind}
+    >
+      Find the bars
+    </button>
     <button type="button" class="tool" aria-label="Zoom the waveform out" disabled={zoom === 0} onclick={() => setZoom(zoom - 1)}>
       <Icon name="zoomOut" size={15} />
     </button>
