@@ -112,6 +112,33 @@ impl Exported {
     }
 }
 
+/// Files gathered to be downloaded as one zip archive.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct Bundle {
+    files: Vec<(String, Vec<u8>)>,
+}
+
+#[wasm_bindgen]
+impl Bundle {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Bundle {
+        Bundle::default()
+    }
+
+    /// Adds a file under `name`, which may hold folders separated by `/`.
+    pub fn add(&mut self, name: String, bytes: Vec<u8>) {
+        self.files.push((name, bytes));
+    }
+
+    /// The archive of every file added.
+    pub fn zip(&self) -> Result<Vec<u8>, JsError> {
+        Ok(gtr_io::bundle(
+            (self.files.iter()).map(|(name, bytes)| (name.as_str(), bytes.as_slice())),
+        )?)
+    }
+}
+
 /// The paper a name stands for.
 fn page(paper: &str) -> gtr_layout::Page {
     match paper {

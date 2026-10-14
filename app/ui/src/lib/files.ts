@@ -1,5 +1,7 @@
 // Opening and saving score files: native dialogs inside Tauri, browser fallbacks on the web.
 
+import { outputName } from './batch';
+
 export const EXTENSION = 'gtrtab';
 /** Files of other programs that can be opened: Guitar Pro, MusicXML, MIDI and plain-text tabs. */
 export const IMPORT_EXTENSIONS = [
@@ -42,42 +44,75 @@ export async function confirmDialog(message: string): Promise<boolean> {
 export const AUDIO_EXTENSIONS = ['mp3', 'ogg', 'oga', 'opus', 'wav', 'flac', 'm4a', 'aac', 'webm'];
 
 /** Lets the user pick a score. Resolves to `null` if they cancel. */
-export function openFile(): Promise<OpenedFile | null> {
-  return pickFile('Scores', [EXTENSION, ...IMPORT_EXTENSIONS]);
+export async function openFile(): Promise<OpenedFile | null> {
+  return (await pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], false))[0] ?? null;
+}
+
+/** Lets the user pick any number of scores. Resolves to none if they cancel. */
+export function openFiles(): Promise<OpenedFile[]> {
+  return pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], true);
 }
 
 /** Lets the user pick a recording. Resolves to `null` if they cancel. */
-export function openAudioFile(): Promise<OpenedFile | null> {
-  return pickFile('Recordings', AUDIO_EXTENSIONS);
+export async function openAudioFile(): Promise<OpenedFile | null> {
+  return (await pickFiles('Recordings', AUDIO_EXTENSIONS, false))[0] ?? null;
 }
 
-async function pickFile(kind: string, extensions: string[]): Promise<OpenedFile | null> {
+async function pickFiles(kind: string, extensions: string[], multiple: boolean): Promise<OpenedFile[]> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog');
-    const path = await open({
-      multiple: false,
-      filters: [{ name: kind, extensions }],
-    });
-    return path === null ? null : readPath(path);
+    const picked: string | string[] | null = await open({ multiple, filters: [{ name: kind, extensions }] });
+    if (picked === null) return [];
+    return Promise.all((Array.isArray(picked) ? picked : [picked]).map(readPath));
   }
 
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
     input.type = 'file';
+    input.multiple = multiple;
     input.accept = extensions.map((e) => `.${e}`).join(',');
     input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return resolve(null);
       try {
-        const bytes = new Uint8Array(await file.arrayBuffer());
-        resolve({ name: file.name, path: null, bytes });
+        resolve(
+          await Promise.all(
+            [...(input.files ?? [])].map(async (file) => ({
+              name: file.name,
+              path: null,
+              bytes: new Uint8Array(await file.arrayBuffer()),
+            })),
+          ),
+        );
       } catch (e) {
         reject(e);
       }
     };
-    input.oncancel = () => resolve(null);
+    input.oncancel = () => resolve([]);
     input.click();
   });
+}
+
+/** Lets the user pick a folder to write files into. Desktop only; `null` if they cancel. */
+export async function pickFolder(): Promise<string | null> {
+  const { open } = await import('@tauri-apps/plugin-dialog');
+  return open({ directory: true, multiple: false });
+}
+
+/**
+ * Writes a file into a folder, under its name or, if a file there or one written
+ * already has it, numbered as `riff (2).pdf`. Desktop only. Resolves to the name written.
+ */
+export async function writeInto(folder: string, from: string, extension: string, bytes: Uint8Array, taken: Set<string>) {
+  const [{ exists, writeFile }, { join }] = await Promise.all([
+    import('@tauri-apps/plugin-fs'),
+    import('@tauri-apps/api/path'),
+  ]);
+  for (;;) {
+    const name = outputName(from, extension, taken);
+    const path = await join(folder, name);
+    if (await exists(path)) continue;
+    await writeFile(path, bytes);
+    return name;
+  }
 }
 
 /** Reads a file by path. Desktop only. */

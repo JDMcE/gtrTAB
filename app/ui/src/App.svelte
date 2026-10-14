@@ -9,8 +9,11 @@
     addRecentFile,
     confirmDialog,
     exportFile,
+    isTauri,
     openAudioFile,
     openFile,
+    pickFolder,
+    writeInto,
     readAutosave,
     readPath,
     recentFiles,
@@ -22,7 +25,7 @@
     takeReopenAfterRestart,
     type OpenedFile,
   } from './lib/files';
-  import { PICTURE_WIDTH, exportFonts, paper, printPages } from './lib/export';
+  import { PICTURE_WIDTH, exportFonts, paper, printPages, type Fonts } from './lib/export';
   import Inspector from './lib/Inspector.svelte';
   import {
     FADES,
@@ -96,7 +99,9 @@
   import { roving } from './lib/ui/roving';
   import ToolButton from './lib/ui/ToolButton.svelte';
   import { tip } from './lib/ui/tooltip';
-  import init, { Document } from './wasm/gtr_wasm.js';
+  import init, { Bundle, Document } from './wasm/gtr_wasm.js';
+  import BatchDialog from './lib/BatchDialog.svelte';
+  import { TARGET_EXTENSIONS, leftOut, outputName, type BatchTarget, type Converted } from './lib/batch';
   import { t, tn } from './lib/i18n';
 
   const UNTITLED = `untitled.${EXTENSION}`;
@@ -174,6 +179,7 @@
   let shortcutsOpen = $state(false);
   let paletteOpen = $state(false);
   let prefsOpen = $state(false);
+  let batchOpen = $state(false);
   let zoom = $state(1);
 
   let playing = $state(false);
@@ -692,6 +698,82 @@
       const saved = await exportFile(named(kind), bytes, what, type);
       if (saved) message = t('Exported {name}', { name: saved });
     });
+
+  /**
+   * Writes a score opened for conversion in a format, as `exportAs` and `exportPicture`
+   * do for the score being edited. Resolves to its bytes and what the format left out.
+   */
+  function converted(from: Document, target: BatchTarget, fonts: Fonts | null): [Uint8Array, string] {
+    switch (target) {
+      case 'gtrtab':
+        return [from.save(), ''];
+      case 'pdf':
+        return [from.exportPdf(viewJson, paper, ...fonts!), ''];
+      case 'svg':
+        return [new TextEncoder().encode(from.exportSvg(viewJson, PICTURE_WIDTH, ...fonts!)), ''];
+      case 'png':
+        return [from.exportPng(viewJson, PICTURE_WIDTH, 2, ...fonts!), ''];
+      default: {
+        const written = from.exportFile(target);
+        try {
+          return [written.bytes, written.report];
+        } finally {
+          written.free();
+        }
+      }
+    }
+  }
+
+  /**
+   * Converts scores of any format the app opens to one format, without opening them for
+   * editing: into a folder chosen on desktop, and as one zip file on the web. A score
+   * that cannot be read or written is said so, and the rest are converted.
+   */
+  async function batchConvert(
+    files: OpenedFile[],
+    target: BatchTarget,
+    done: (result: Converted) => void,
+  ): Promise<string | null> {
+    const folder = isTauri ? await pickFolder() : null;
+    if (isTauri && folder === null) return null;
+    const fonts = ['pdf', 'png', 'svg'].includes(target) ? await exportFonts() : null;
+    const extension = TARGET_EXTENSIONS[target];
+    const bundle = folder === null ? new Bundle() : null;
+    const taken = new Set<string>();
+    let count = 0;
+    try {
+      for (const file of files) {
+        let opened: Document | null = null;
+        try {
+          const native = file.name.toLowerCase().endsWith(`.${EXTENSION}`);
+          opened = native ? Document.load(file.bytes) : Document.importFile(file.name, file.bytes);
+          const [bytes, report] = converted(opened, target, fonts);
+          const name =
+            folder === null
+              ? outputName(file.name, extension, taken)
+              : await writeInto(folder, file.name, extension, bytes, taken);
+          bundle?.add(name, bytes);
+          count++;
+          done({ from: file.name, name, note: leftOut(native ? '' : opened.importReport, report), failed: false });
+        } catch (e) {
+          done({ from: file.name, name: null, note: e instanceof Error ? e.message : String(e), failed: true });
+        } finally {
+          opened?.free();
+        }
+        // Let the window answer, and show the file done, before the next.
+        await new Promise((next) => setTimeout(next));
+      }
+      const failed = files.length - count;
+      const tally =
+        tn(count, '{count} score converted.', '{count} scores converted.') +
+        (failed ? ' ' + tn(failed, '{count} could not be.', '{count} could not be.') : '');
+      if (!bundle || !count) return tally;
+      const saved = await exportFile('converted.zip', bundle.zip(), 'Zip archive', 'application/zip');
+      return saved ? `${tally} ${t('Downloaded as {name}.', { name: saved })}` : null;
+    } finally {
+      bundle?.free();
+    }
+  }
 
   /** Prints the score, in the view it is shown in, on the paper usual where the user is. */
   const print = () =>
@@ -1279,6 +1361,7 @@
     open: { label: t('Open or import…'), icon: 'open', keys: 'Ctrl+O', run: open },
     save: { label: t('Save'), icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
     saveAs: { label: t('Save as…'), icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
+    batchConvert: { label: t('Batch convert…'), run: () => (batchOpen = true) },
     exportAudio: { label: t('Audio (WAV)…'), disabled: () => noScore() || exporting, run: () => exportAudio() },
     exportPdf: { label: t('PDF…'), disabled: noScore, run: () => exportPicture('pdf') },
     exportPng: { label: t('Picture (PNG)…'), disabled: noScore, run: () => exportPicture('png') },
@@ -1797,6 +1880,7 @@
               cmd.exportAudio,
             ],
           },
+          cmd.batchConvert,
           cmd.print,
         ],
       },
@@ -1972,7 +2056,7 @@
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen || prefsOpen || styleOpen) return;
+    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen || prefsOpen || styleOpen || batchOpen) return;
     if (!doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menubar"]')) return;
@@ -2520,6 +2604,16 @@
     onapply={setStyle}
     onclose={() => {
       styleOpen = false;
+      focusScore();
+    }}
+  />
+{/if}
+
+{#if batchOpen}
+  <BatchDialog
+    onconvert={batchConvert}
+    onclose={() => {
+      batchOpen = false;
       focusScore();
     }}
   />

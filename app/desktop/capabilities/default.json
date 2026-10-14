@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Lets the main window open and save score files the user picks in a file dialog, and follow the theme chosen in the app.",
+  "description": "Lets the main window open and save score files the user picks in a file dialog, write converted scores into a folder picked, and follow the theme chosen in the app.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -11,6 +11,7 @@
     "dialog:allow-save",
     "dialog:allow-ask",
     "fs:allow-read-file",
-    "fs:allow-write-file"
+    "fs:allow-write-file",
+    "fs:allow-exists"
   ]
 }
