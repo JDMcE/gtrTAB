@@ -257,6 +257,25 @@ impl Document {
         Ok(self.editor.set_audio(Some(audio))?)
     }
 
+    /// Puts back the file of the score's recording, as kept beside a copy saved without
+    /// it, without changing the score. Returns whether the score's recording is the file
+    /// `name`, and so has it now.
+    #[wasm_bindgen(js_name = restoreRecording)]
+    pub fn restore_recording(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+        let wanted = self.editor.score().audio.as_ref().map(|a| a.name.as_str());
+        if wanted != Some(name) {
+            return false;
+        }
+        self.recordings.insert(name.to_owned(), bytes);
+        true
+    }
+
+    /// How many bytes the file of the score's recording has; 0 without one at hand.
+    #[wasm_bindgen(getter, js_name = recordingSize)]
+    pub fn recording_size(&self) -> usize {
+        self.recording().map_or(0, Vec::len)
+    }
+
     /// The file of the score's recording, if it has one and the file is at hand.
     #[wasm_bindgen(js_name = recordingFile)]
     pub fn recording_file(&self) -> Option<Vec<u8>> {
@@ -519,13 +538,16 @@ impl Document {
 
     /// Starts making the whole score into sound for a file, as it plays: every track
     /// that is not muted, through the SoundFont whose bytes are given or through the
-    /// built-in models if none is. `options_json` is as for [`Document::compile_audio`].
+    /// built-in models if none is, with the score's recording if its samples are given,
+    /// left and right in turn at `sample_rate` as sixteen bits each. `options_json` is as
+    /// for [`Document::compile_audio`].
     #[wasm_bindgen(js_name = exportAudio)]
     pub fn export_audio(
         &self,
         options_json: &str,
         sample_rate: u32,
         soundfont: Option<Vec<u8>>,
+        recording: Option<Vec<i16>>,
     ) -> Result<AudioExport, JsError> {
         let options: Options = serde_json::from_str(options_json)?;
         let font = match soundfont {
@@ -538,6 +560,7 @@ impl Document {
         let sample_rate = sample_rate.clamp(8_000, 192_000);
         let mut engine = gtr_audio::Engine::new(sample_rate);
         engine.set_soundfont(font);
+        engine.set_recording(recording.map(gtr_audio::Recording::interleaved));
         engine.load(gtr_audio::compile(self.editor.score(), 0, &options));
         Ok(AudioExport {
             engine,

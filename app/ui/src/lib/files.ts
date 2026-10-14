@@ -1,6 +1,7 @@
 // Opening and saving score files: native dialogs inside Tauri, browser fallbacks on the web.
 
 import { outputName } from './batch';
+import { request } from './storage';
 
 export const EXTENSION = 'gtrtab';
 /** Files of other programs that can be opened: Guitar Pro, MusicXML, MIDI and plain-text tabs. */
@@ -248,6 +249,33 @@ export function readAutosave(): Autosave | null {
   try {
     const bytes = Uint8Array.from(atob(stored.data), (c) => c.charCodeAt(0));
     return { name: stored.name, path: stored.path, bytes, saved: stored.saved };
+  } catch {
+    return null;
+  }
+}
+
+export interface KeptRecording {
+  name: string;
+  bytes: Uint8Array;
+}
+
+/**
+ * Keeps the recording of work not saved beside the copy of it, or with `null` lets it go.
+ * It is too big for where the copy is kept, so it goes in the browser's database.
+ */
+export async function keepAutosaveRecording(recording: KeptRecording | null): Promise<void> {
+  try {
+    if (recording) await request('recording', 'readwrite', (s) => s.put(recording, 'autosave'));
+    else await request('recording', 'readwrite', (s) => s.delete('autosave'));
+  } catch {
+    // Recovered work then asks for the file of its recording, as it would have anyway.
+  }
+}
+
+/** The recording kept beside the copy of work not saved, if there is one. */
+export async function autosaveRecording(): Promise<KeptRecording | null> {
+  try {
+    return (await request<KeptRecording | undefined>('recording', 'readonly', (s) => s.get('autosave'))) ?? null;
   } catch {
     return null;
   }

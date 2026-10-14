@@ -15,6 +15,8 @@
     pickFolder,
     writeInto,
     readAutosave,
+    autosaveRecording,
+    keepAutosaveRecording,
     readPath,
     recentFiles,
     removeRecentFile,
@@ -74,7 +76,7 @@
   import TrainerDialog from './lib/TrainerDialog.svelte';
   import { nextSpeed, type Trainer } from './lib/trainer';
   import KitDialog from './lib/KitDialog.svelte';
-  import { Player, mixOf } from './lib/player';
+  import { Player, decodeAt, interleaved, mixOf } from './lib/player';
   import {
     DEFAULT_SOUNDFONT,
     fetchDefaultSoundFont,
@@ -252,9 +254,9 @@
   function restart() {
     if (doc && editor) {
       if (editor.dirty || !filePath) {
-        writeAutosave({ name: fileName, path: filePath, bytes: doc.saveWithoutRecording(), saved: !editor.dirty });
+        keepCopy(doc, !editor.dirty);
       } else {
-        writeAutosave(null);
+        dropCopy();
         reopenAfterRestart(filePath);
       }
     }
@@ -375,19 +377,42 @@
       message = t('Saved {name}', { name: saved.name });
     });
 
+  /**
+   * The recording kept beside the copy of unsaved work, by its name and size, or `''`
+   * for none: it is big, so it is written only when it changes, not with every edit.
+   */
+  let keptRecording = '';
+
+  /** Keeps a copy of the work as it is, in case the app closes before it is saved. */
+  function keepCopy(current: Document, saved = false) {
+    writeAutosave({ name: fileName, path: filePath, bytes: current.saveWithoutRecording(), saved });
+    const size = score?.audio ? current.recordingSize : 0;
+    const key = size ? `${score!.audio!.name}:${size}` : '';
+    if (key === keptRecording) return;
+    keptRecording = key;
+    void keepAutosaveRecording(key ? { name: score!.audio!.name, bytes: current.recordingFile()! } : null);
+  }
+
+  /** Lets go of the copy of the work, which is saved or not wanted. */
+  function dropCopy() {
+    writeAutosave(null);
+    if (!keptRecording) return;
+    keptRecording = '';
+    void keepAutosaveRecording(null);
+  }
+
   // Keep a copy of unsaved work so that a crash or closed window does not lose it.
   $effect(() => {
     // Before a document is open there is nothing to save, and a copy left by the last
     // session is still waiting to be recovered.
     if (!editor) return;
     if (!editor.dirty) {
-      writeAutosave(null);
+      dropCopy();
       return;
     }
     void score;
     const timer = setTimeout(() => {
-      // The recording is left out: it can be large, and is in the file it came from.
-      if (doc) writeAutosave({ name: fileName, path: filePath, bytes: doc.saveWithoutRecording() });
+      if (doc) keepCopy(doc);
     }, AUTOSAVE_DELAY_MS);
     return () => clearTimeout(timer);
   });
@@ -620,8 +645,9 @@
 
   /**
    * Writes the whole score to a WAV file as it plays: every track that is not muted,
-   * with its repeats, through the sound chosen for playback. The sound is made a few
-   * seconds at a time, so that the window goes on answering and can say how far it is.
+   * with its repeats, through the sound chosen for playback, and the audio track's
+   * recording unless it is muted. The sound is made a few seconds at a time, so that the
+   * window goes on answering and can say how far it is.
    */
   const exportAudio = () =>
     run(async () => {
@@ -631,7 +657,9 @@
         const RATE = 44_100;
         const options = JSON.stringify({ from_bar: 0, to_bar: null, replay_repeats: replayRepeats, speed: 1 });
         const font = await soundBytes();
-        const making = doc.exportAudio(options, RATE, font ? new Uint8Array(font) : undefined);
+        const recording = score?.audio ? doc.recordingFile() : undefined;
+        const samples = recording && interleaved(await decodeAt(recording, RATE));
+        const making = doc.exportAudio(options, RATE, font ? new Uint8Array(font) : undefined, samples);
         try {
           for (let done = 0; done < 1; ) {
             done = making.step(RATE * 4);
@@ -2141,6 +2169,11 @@
       if (autosave) {
         try {
           const recovered = Document.load(autosave.bytes);
+          // The recording is kept apart from the copy, and comes back if it is the score's.
+          const recording = await autosaveRecording();
+          if (recording && recovered.restoreRecording(recording.name, recording.bytes)) {
+            keptRecording = `${recording.name}:${recording.bytes.length}`;
+          }
           // A score saved before the app started again is as it was; one that was not is work to save.
           if (!autosave.saved) recovered.markUnsaved();
           setDocument(recovered, autosave.name, autosave.path);
@@ -2150,6 +2183,7 @@
           writeAutosave(null);
         }
       }
+      void keepAutosaveRecording(null);
       setDocument(new Document(), UNTITLED, null);
       const reopen = takeReopenAfterRestart();
       if (reopen) openRecent(reopen);
