@@ -8,14 +8,14 @@ use std::io::{Cursor, Read};
 use gtr_model::{
     Accent, Beat, BeatEffects, Bend, ChordDiagram, Duration, Dynamic, Fade, Feel, Finger, Grace,
     GraceNote, Hairpin, Harmonic, Instrument, Jump, MasterBar, Mix, Note, NoteEffects, NoteValue,
-    PickStroke, Score, ScoreInfo, Slap, Staff, Strum, Target, TimeSignature, Track, Trill, Tuplet,
-    Vibrato, Voice,
+    PickStroke, Score, ScoreInfo, Slap, Sound, Staff, Strum, Target, TimeSignature, Track, Trill,
+    Tuplet, Vibrato, Voice,
 };
 use roxmltree::{Document, Node};
 use zip::ZipArchive;
 
 use super::{
-    ImportError, Skipped, bar, beat, bend_from_points, duration, keep_dynamic_changes,
+    ImportError, Skipped, bar, beat, bend_from_points, duration, keep_dynamic_changes, rse,
     slide_from_flags, tuning,
 };
 
@@ -228,6 +228,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             })
             .collect();
         let mut track = Track::new(text(node, "Name"), instrument, staves);
+        let switches = read_sounds(node, &mut track, skipped);
         // The mixing desk's settings for the track, each from 0 to 1: the twelfth is its
         // place between the speakers and the thirteenth its volume, which stands at
         // 0.795 until it is moved.
@@ -278,6 +279,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
             chords,
             lines,
             changes,
+            switches,
         });
     }
 
@@ -433,7 +435,18 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
     }
     for (track, part) in tracks.iter_mut().zip(&parts) {
         set_mix_changes(track, &part.changes, &master_bars);
+        for &(bar, position, sound) in &part.switches {
+            match beat_at(track, &master_bars, bar, position) {
+                Some(beat) => beat.effects.sound = Some(sound),
+                None => skipped.add("switches of sound in bars with no beat to carry them"),
+            }
+        }
     }
+    // The pedals of the whole mix.
+    let master = (root.descendants()).find(|n| n.has_tag_name("MasterTrack"));
+    let (effects, unmatched) =
+        (master.and_then(|m| child(m, "RSE"))).map_or((Vec::new(), false), rse::chain);
+    skipped.add_if(unmatched, "pedals and amplifiers that have no match here");
     super::keep_feel_changes(&mut master_bars);
     if let (Some(&(_, _, _, true)), Some(first)) = (tempos.first(), master_bars.first_mut()) {
         first.tempo_gradual = true;
@@ -453,7 +466,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         tempo,
         master_bars,
         tracks,
-        effects: Vec::new(),
+        effects,
         audio: None,
         style: Default::default(),
     })
@@ -500,6 +513,131 @@ struct Part<'a> {
     lines: Vec<(usize, &'a str)>,
     /// Changes of the track's volume and pan.
     changes: Vec<Change>,
+    /// Switches to another of the track's sounds: the bar, how far through it from 0 to
+    /// 1, and the sound, as [`BeatEffects::sound`] numbers it.
+    switches: Vec<(usize, f64, u8)>,
+}
+
+/// Reads a track's sounds, each with its chain of pedals and amplifiers, onto the track:
+/// the one it starts with is its own, and the others are those it can switch to. Returns
+/// where it switches from one to another after it starts.
+fn read_sounds(node: Node, track: &mut Track, skipped: &mut Skipped) -> Vec<(usize, f64, u8)> {
+    let sounds: Vec<Node> = (child(node, "Sounds").into_iter())
+        .flat_map(|s| s.children())
+        .filter(|n| n.has_tag_name("Sound"))
+        .collect();
+    // Guitar Pro 6 has no sounds of its own: a track has a chain, and variations of it.
+    if sounds.is_empty() {
+        let mut chains = (child(node, "RSE").into_iter())
+            .flat_map(|rse| rse.descendants())
+            .filter(|n| n.has_tag_name("EffectChain"))
+            .map(rse::chain);
+        if let Some((chain, unmatched)) = chains.next() {
+            skipped.add_if(unmatched, "pedals and amplifiers that have no match here");
+            track.effects = chain;
+        }
+        skipped.add_if(
+            chains.any(|(chain, _)| !chain.is_empty()),
+            "the variations of Guitar Pro 6's effect chains",
+        );
+        return Vec::new();
+    }
+    // A switch names a sound by its path, its name and its role, which together tell it
+    // from the others.
+    let key = |sound: Node| {
+        format!(
+            "{};{};{}",
+            text(sound, "Path"),
+            text(sound, "Name"),
+            text(sound, "Role")
+        )
+    };
+    let mut switches: Vec<(usize, f64, &str)> = (node.children())
+        .filter(|n| n.has_tag_name("Automations"))
+        .flat_map(|a| a.children())
+        .filter(|n| n.has_tag_name("Automation") && text(*n, "Type") == "Sound")
+        .filter_map(|a| {
+            Some((
+                text(a, "Bar").parse().ok()?,
+                text(a, "Position").parse().ok()?,
+                text(a, "Value"),
+            ))
+        })
+        .collect();
+    switches.sort_by(|a, b| {
+        (a.0, a.1)
+            .partial_cmp(&(b.0, b.1))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+    let place = |value: &str| {
+        sounds.iter().position(|&s| {
+            key(s) == value || text(s, "Name") == value.split(';').nth(1).unwrap_or("")
+        })
+    };
+    // The track's own sound is the one it starts with; the rest follow it in their order.
+    let own = match switches.first() {
+        Some(&(0, 0.0, value)) => place(value).unwrap_or(0),
+        _ => 0,
+    };
+    let mut order: Vec<usize> = std::iter::once(own)
+        .chain((0..sounds.len()).filter(|&i| i != own))
+        .collect();
+    skipped.add_if(
+        order.len() > Sound::MAX_SOUNDS + 1,
+        "sounds past the eighth of a track",
+    );
+    order.truncate(Sound::MAX_SOUNDS + 1);
+    let mut others = Vec::new();
+    for (n, &i) in order.iter().enumerate() {
+        let sound = sounds[i];
+        let (chain, unmatched) =
+            (descendant(sound, "EffectChain")).map_or((Vec::new(), false), rse::chain);
+        skipped.add_if(unmatched, "pedals and amplifiers that have no match here");
+        if n == 0 {
+            track.effects = chain;
+            continue;
+        }
+        let program =
+            (descendant(sound, "Program")).and_then(|p| p.text()?.trim().parse::<u8>().ok());
+        let instrument = match track.instrument {
+            Instrument::Drums | Instrument::Piano => track.instrument,
+            own => program.map_or(own, Instrument::from_midi_program),
+        };
+        let name: String = match text(sound, "Name").trim() {
+            "" => format!("Sound {n}"),
+            name => name.chars().take(Sound::MAX_NAME).collect(),
+        };
+        let fallback = Sound {
+            name: name.clone(),
+            instrument: track.instrument,
+            effects: chain.clone(),
+        };
+        let read = Sound {
+            name,
+            instrument,
+            effects: chain,
+        };
+        others.push(
+            match Sound::list_is_valid(std::slice::from_ref(&read), track.instrument) {
+                true => read,
+                false => fallback,
+            },
+        );
+    }
+    track.sounds = others;
+    // Each switch after the start, to the number the sound now has.
+    (switches.into_iter())
+        .filter(|&(bar, position, _)| bar > 0 || position > 0.0)
+        .filter_map(|(bar, position, value)| {
+            let to = order.iter().position(|&i| Some(i) == place(value))?;
+            Some((bar, position, u8::try_from(to).ok()?))
+        })
+        .collect()
+}
+
+/// The first element named `name` anywhere below `node`.
+fn descendant<'a>(node: Node<'a, 'a>, name: &str) -> Option<Node<'a, 'a>> {
+    node.descendants().find(|n| n.has_tag_name(name))
 }
 
 /// A change of a track's volume or pan at a moment of a bar, as the mixing desk counts
@@ -521,8 +659,40 @@ fn moment(share: f64, master: &MasterBar) -> gtr_model::Rational {
     gtr_model::Rational::new((whole * 1920.0).round() as i64, 1920)
 }
 
-/// Puts a track's changes of volume and pan on the beats they happen at: the beat of the
-/// first staff's first voice that starts there, or the last to start before.
+/// The beat of a track at a moment of a bar, from 0 to 1 through it: the beat of the first
+/// staff's first voice that starts there, or the last to start before.
+fn beat_at<'a>(
+    track: &'a mut Track,
+    masters: &[MasterBar],
+    bar: usize,
+    position: f64,
+) -> Option<&'a mut Beat> {
+    beat_in(
+        track.staves[0].bars.get_mut(bar)?,
+        masters.get(bar)?,
+        position,
+    )
+}
+
+fn beat_in<'a>(
+    bar: &'a mut gtr_model::Bar,
+    master: &MasterBar,
+    position: f64,
+) -> Option<&'a mut Beat> {
+    let at = moment(position, master);
+    let mut time = gtr_model::Rational::from_integer(0);
+    let mut found = None;
+    for (index, beat) in bar.voices[0].beats.iter().enumerate() {
+        if time > at {
+            break;
+        }
+        found = Some(index);
+        time += beat.duration.length();
+    }
+    found.map(|index| &mut bar.voices[0].beats[index])
+}
+
+/// Puts a track's changes of volume and pan on the beats they happen at.
 fn set_mix_changes(track: &mut Track, changes: &[Change], masters: &[MasterBar]) {
     for change in changes {
         let (Some(master), Some(bar)) = (
@@ -531,17 +701,7 @@ fn set_mix_changes(track: &mut Track, changes: &[Change], masters: &[MasterBar])
         ) else {
             continue;
         };
-        let at = moment(change.position, master);
-        let mut time = gtr_model::Rational::from_integer(0);
-        let mut found = None;
-        for (index, beat) in bar.voices[0].beats.iter().enumerate() {
-            if time > at {
-                break;
-            }
-            found = Some(index);
-            time += beat.duration.length();
-        }
-        let Some(beat) = found.map(|index| &mut bar.voices[0].beats[index]) else {
+        let Some(beat) = beat_in(bar, master, change.position) else {
             continue;
         };
         if change.pan {

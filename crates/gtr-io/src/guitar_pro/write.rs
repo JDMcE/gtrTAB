@@ -14,6 +14,7 @@ use gtr_model::{
 };
 use zip::{ZipWriter, write::SimpleFileOptions};
 
+use super::rse;
 use crate::util::esc;
 use crate::{ExportError, Skipped};
 
@@ -179,6 +180,8 @@ fn gpif(score: &Score, skipped: &mut Skipped) -> String {
         masters.push_str(&master_xml(master, feel, &ids, &fermatas));
     }
 
+    let (master, left_out) = rse::effects(&score.effects, true);
+    skipped.add_if(left_out, "pedals Guitar Pro has no match for");
     let info = &score.info;
     let track_ids: Vec<String> = (0..score.tracks.len()).map(|i| i.to_string()).collect();
     let mut out = String::new();
@@ -194,7 +197,8 @@ fn gpif(score: &Score, skipped: &mut Skipped) -> String {
          <ScoreSystemsDefaultLayout>4</ScoreSystemsDefaultLayout>\n\
          <ScoreSystemsLayout>4</ScoreSystemsLayout>\n<ScoreZoomPolicy>Value</ScoreZoomPolicy>\n\
          <ScoreZoom>1</ScoreZoom>\n<MultiVoice>0&gt;</MultiVoice>\n</Score>\n\
-         <MasterTrack>\n<Tracks>{}</Tracks>\n<Automations>\n{}</Automations>\n</MasterTrack>\n\
+         <MasterTrack>\n<Tracks>{}</Tracks>\n<Automations>\n{}</Automations>\n\
+         <RSE><Master>\n{master}</Master></RSE>\n</MasterTrack>\n\
          <AudioTracks>\n</AudioTracks>\n<Tracks>\n{tracks}</Tracks>\n\
          <MasterBars>\n{masters}</MasterBars>\n",
         esc(&info.title),
@@ -463,15 +467,29 @@ fn track_xml(
             }
         }
     }
-    let program = instrument.midi_program();
+    // The track's own sound, then those it can switch to, each with its pedals.
+    let mut sounds = String::new();
+    let own = std::iter::once((instrument.name(), instrument, track.effects.as_slice()));
+    let others =
+        (track.sounds.iter()).map(|s| (s.name.as_str(), s.instrument, s.effects.as_slice()));
+    for (name, instrument, chain) in own.chain(others) {
+        let (effects, left_out) = rse::effects(chain, false);
+        skipped.add_if(left_out, "pedals Guitar Pro has no match for");
+        let _ = write!(
+            sounds,
+            "<Sound><Name>{name}</Name><Label>{name}</Label><Path></Path><Role>User</Role>\
+             <MIDI><LSB>0</LSB><MSB>0</MSB><Program>{}</Program></MIDI>\
+             <RSE><EffectChain>\n{effects}</EffectChain></RSE></Sound>\n",
+            instrument.midi_program(),
+            name = esc(name),
+        );
+    }
     let _ = write!(
         out,
         "<RSE><ChannelStrip version=\"E56\"><Parameters>{}</Parameters>\n\
          <Automations>\n{changes}</Automations></ChannelStrip></RSE>\n\
          <ForcedSound>-1</ForcedSound>\n\
-         <Sounds><Sound><Name>{name}</Name><Label>{name}</Label><Path></Path>\
-         <Role>User</Role><MIDI><LSB>0</LSB><MSB>0</MSB><Program>{program}</Program></MIDI>\
-         </Sound></Sounds>\n\
+         <Sounds>\n{sounds}</Sounds>\n\
          <MidiConnection><Port>0</Port><PrimaryChannel>{}</PrimaryChannel>\
          <SecondaryChannel>{}</SecondaryChannel>\
          <ForeOneChannelPerString>false</ForeOneChannelPerString></MidiConnection>\n\
@@ -486,7 +504,6 @@ fn track_xml(
             _ => "Default",
         },
         "<Line><Text></Text><Offset>0</Offset></Line>".repeat(5),
-        name = instrument.name(),
     );
 
     for (staff_index, staff) in track.staves.iter().enumerate() {
@@ -563,7 +580,40 @@ fn track_xml(
              <Name>Standard</Name>\n</Properties></Staff>\n"
         );
     }
-    out.push_str("</Staves>\n<Automations>\n</Automations>\n</Track>\n");
+    // The sound the track starts with, and each switch to another, which a switch names
+    // by its path, its name and its role.
+    let named = |sound: u8| match usize::from(sound).checked_sub(1) {
+        None => instrument.name().to_owned(),
+        Some(other) => (track.sounds.get(other))
+            .map_or_else(|| instrument.name().to_owned(), |s| s.name.clone()),
+    };
+    let mut switches = automation(
+        "Sound",
+        false,
+        0,
+        0.0,
+        true,
+        &esc(&format!(";{};User", named(0))),
+    );
+    for (bar, master) in score.master_bars.iter().enumerate() {
+        let mut time = Rational::from_integer(0);
+        for beat in &track.staves[0].bars[bar].voices[0].beats {
+            if let Some(sound) = beat
+                .effects
+                .sound
+                .filter(|_| bar > 0 || time > Rational::from_integer(0))
+            {
+                let at = share(time, master).min(1.0);
+                let value = esc(&format!(";{};User", named(sound)));
+                switches.push_str(&automation("Sound", false, bar, at, true, &value));
+            }
+            time += beat.duration.length();
+        }
+    }
+    let _ = write!(
+        out,
+        "</Staves>\n<Automations>\n{switches}</Automations>\n</Track>\n"
+    );
     out
 }
 

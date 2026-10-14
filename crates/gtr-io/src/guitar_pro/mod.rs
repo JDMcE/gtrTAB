@@ -6,6 +6,7 @@
 mod gp5;
 mod gp7;
 mod gpx;
+mod rse;
 mod write;
 
 use gtr_model::{
