@@ -1,6 +1,6 @@
 <script lang="ts">
   import { TARGET_EXTENSIONS, type Converted, type BatchTarget } from './batch';
-  import { isTauri, openFiles, type OpenedFile } from './files';
+  import { canPickFolder, openFiles, type OpenedFile } from './files';
   import { t } from './i18n';
   import Dialog from './ui/Dialog.svelte';
   import Icon from './ui/Icon.svelte';
@@ -74,7 +74,7 @@
 
 <Dialog
   title={t('Batch convert')}
-  hint={isTauri
+  hint={canPickFolder()
     ? t('Opens each score and writes it in another format, into a folder you choose.')
     : t('Opens each score and writes it in another format. They are downloaded together as a zip file.')}
   width="520px"

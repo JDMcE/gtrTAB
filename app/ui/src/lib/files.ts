@@ -1,7 +1,10 @@
-// Opening and saving score files: native dialogs inside Tauri, browser fallbacks on the web.
+// Opening and saving score files: native dialogs inside Tauri; on the web, the files the
+// browser lets the page keep hold of where it can (`webfiles.ts`), and otherwise uploads
+// and downloads.
 
 import { outputName } from './batch';
 import { request } from './storage';
+import * as web from './webfiles';
 
 export const EXTENSION = 'gtrtab';
 /** Files of other programs that can be opened: Guitar Pro, MusicXML, MIDI and plain-text tabs. */
@@ -14,14 +17,18 @@ export const IMPORT_EXTENSIONS = [
 
 export interface OpenedFile {
   name: string;
-  /** Full path on desktop; `null` on the web, where files cannot be reopened by path. */
+  /**
+   * Full path on desktop, or on the web the path a file kept hold of has; `null` for a
+   * file that cannot be opened again by path.
+   */
   path: string | null;
   bytes: Uint8Array;
 }
 
 export const isTauri = '__TAURI_INTERNALS__' in window;
 
-const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
+/** The name of the file a path stands for, on desktop or on the web. */
+export const baseName = (path: string) => path.split(/[\\/]/).pop() ?? path;
 
 /** Sets the browser tab title or, inside Tauri, the window title. */
 export async function setWindowTitle(title: string): Promise<void> {
@@ -46,26 +53,28 @@ export const AUDIO_EXTENSIONS = ['mp3', 'ogg', 'oga', 'opus', 'wav', 'flac', 'm4
 
 /** Lets the user pick a score. Resolves to `null` if they cancel. */
 export async function openFile(): Promise<OpenedFile | null> {
-  return (await pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], false))[0] ?? null;
+  return (await pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], false, true))[0] ?? null;
 }
 
 /** Lets the user pick any number of scores. Resolves to none if they cancel. */
 export function openFiles(): Promise<OpenedFile[]> {
-  return pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], true);
+  return pickFiles('Scores', [EXTENSION, ...IMPORT_EXTENSIONS], true, false);
 }
 
 /** Lets the user pick a recording. Resolves to `null` if they cancel. */
 export async function openAudioFile(): Promise<OpenedFile | null> {
-  return (await pickFiles('Recordings', AUDIO_EXTENSIONS, false))[0] ?? null;
+  return (await pickFiles('Recordings', AUDIO_EXTENSIONS, false, false))[0] ?? null;
 }
 
-async function pickFiles(kind: string, extensions: string[], multiple: boolean): Promise<OpenedFile[]> {
+/** Lets the user pick files; with `hold`, ones that can be opened again by their path. */
+async function pickFiles(kind: string, extensions: string[], multiple: boolean, hold: boolean): Promise<OpenedFile[]> {
   if (isTauri) {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const picked: string | string[] | null = await open({ multiple, filters: [{ name: kind, extensions }] });
     if (picked === null) return [];
     return Promise.all((Array.isArray(picked) ? picked : [picked]).map(readPath));
   }
+  if (web.canOpen()) return web.pick(kind, extensions, multiple, hold);
 
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
@@ -92,17 +101,27 @@ async function pickFiles(kind: string, extensions: string[], multiple: boolean):
   });
 }
 
-/** Lets the user pick a folder to write files into. Desktop only; `null` if they cancel. */
+/** Whether files can be written into a folder the user picks, rather than downloaded. */
+export const canPickFolder = () => isTauri || web.canPickFolder();
+
+/** Lets the user pick a folder to write files into; `null` if they cancel. */
 export async function pickFolder(): Promise<string | null> {
+  if (!isTauri) return web.pickFolder();
   const { open } = await import('@tauri-apps/plugin-dialog');
   return open({ directory: true, multiple: false });
 }
 
 /**
- * Writes a file into a folder, under its name or, if a file there or one written
- * already has it, numbered as `riff (2).pdf`. Desktop only. Resolves to the name written.
+ * Writes a file into a folder picked, under its name or, if a file there or one written
+ * already has it, numbered as `riff (2).pdf`. Resolves to the name written.
  */
 export async function writeInto(folder: string, from: string, extension: string, bytes: Uint8Array, taken: Set<string>) {
+  if (web.isWebPath(folder)) {
+    for (;;) {
+      const name = outputName(from, extension, taken);
+      if (await web.writeNew(folder, name, bytes)) return name;
+    }
+  }
   const [{ exists, writeFile }, { join }] = await Promise.all([
     import('@tauri-apps/plugin-fs'),
     import('@tauri-apps/api/path'),
@@ -116,8 +135,9 @@ export async function writeInto(folder: string, from: string, extension: string,
   }
 }
 
-/** Reads a file by path. Desktop only. */
+/** Reads a file by path: on disk on desktop, or a file kept hold of on the web. */
 export async function readPath(path: string): Promise<OpenedFile> {
+  if (web.isWebPath(path)) return web.read(path);
   const { readFile } = await import('@tauri-apps/plugin-fs');
   return { name: baseName(path), path, bytes: await readFile(path) };
 }
@@ -144,6 +164,7 @@ export async function saveFile(
     await writeFile(path, bytes);
     return { name: baseName(path), path };
   }
+  if (path !== null || web.canSave()) return web.save(name, path, bytes, 'gtrTab score');
 
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: 'application/zip' }));
   const link = document.createElement('a');
@@ -177,6 +198,7 @@ export async function exportFile(
     await writeFile(path, bytes);
     return baseName(path);
   }
+  if (web.canSave()) return (await web.save(name, null, bytes, kind, false))?.name ?? null;
   const url = URL.createObjectURL(new Blob([bytes as BlobPart], { type }));
   const link = document.createElement('a');
   link.href = url;
@@ -210,19 +232,23 @@ function write(key: string, value: unknown): void {
   }
 }
 
-/** Paths of recently used files, newest first. Always empty on the web. */
+/** Paths of recently used files, newest first; on the web, only where files can be kept hold of. */
 export function recentFiles(): string[] {
-  return isTauri ? (read<string[]>(RECENT_KEY) ?? []) : [];
+  return isTauri || web.canOpen() ? (read<string[]>(RECENT_KEY) ?? []) : [];
 }
 
 export function addRecentFile(path: string): string[] {
-  const list = [path, ...recentFiles().filter((p) => p !== path)].slice(0, MAX_RECENT);
+  const all = [path, ...recentFiles().filter((p) => p !== path)];
+  // A file that falls off the end is no longer kept hold of.
+  for (const dropped of all.slice(MAX_RECENT)) if (web.isWebPath(dropped)) void web.forget(dropped);
+  const list = all.slice(0, MAX_RECENT);
   write(RECENT_KEY, list);
   return list;
 }
 
 export function removeRecentFile(path: string): string[] {
   const list = recentFiles().filter((p) => p !== path);
+  if (web.isWebPath(path)) void web.forget(path);
   write(RECENT_KEY, list);
   return list;
 }

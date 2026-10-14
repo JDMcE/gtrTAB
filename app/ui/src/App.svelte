@@ -9,7 +9,8 @@
     addRecentFile,
     confirmDialog,
     exportFile,
-    isTauri,
+    canPickFolder,
+    baseName,
     openAudioFile,
     openFile,
     pickFolder,
@@ -105,6 +106,7 @@
   import BatchDialog from './lib/BatchDialog.svelte';
   import { TARGET_EXTENSIONS, leftOut, outputName, type BatchTarget, type Converted } from './lib/batch';
   import { t, tn } from './lib/i18n';
+  import { onLaunch } from './lib/webfiles';
 
   const UNTITLED = `untitled.${EXTENSION}`;
   const VALUE_NAMES = [
@@ -762,8 +764,8 @@
     target: BatchTarget,
     done: (result: Converted) => void,
   ): Promise<string | null> {
-    const folder = isTauri ? await pickFolder() : null;
-    if (isTauri && folder === null) return null;
+    const folder = canPickFolder() ? await pickFolder() : null;
+    if (canPickFolder() && folder === null) return null;
     const fonts = ['pdf', 'png', 'svg'].includes(target) ? await exportFonts() : null;
     const extension = TARGET_EXTENSIONS[target];
     const bundle = folder === null ? new Bundle() : null;
@@ -1913,7 +1915,7 @@
 
   const menus = $derived.by((): Menu[] => {
     const recentItems: MenuEntry[] = recent.map((path) => ({
-      label: path.split(/[\\/]/).pop() ?? path,
+      label: baseName(path),
       run: () => openRecent(path),
     }));
     const tracks: MenuEntry[] = (score?.tracks ?? []).map((track, i) => ({
@@ -2191,7 +2193,7 @@
   }
 
   onMount(() => {
-    run(async () => {
+    const started = run(async () => {
       await init();
       standardKit = JSON.parse(Document.drumKitJson());
       standardStyle = JSON.parse(Document.defaultStyleJson());
@@ -2220,6 +2222,15 @@
       const reopen = takeReopenAfterRestart();
       if (reopen) openRecent(reopen);
     });
+    // A score the system opens with the installed web app, once the app is up.
+    void started.then(() =>
+      onLaunch((file) =>
+        run(async () => {
+          if (!(await discardChanges())) return;
+          load(file);
+        }),
+      ),
+    );
     // The samples are big, so they are fetched once the app is up; until they arrive,
     // playback uses the built-in models.
     void applySound().then((problem) => {

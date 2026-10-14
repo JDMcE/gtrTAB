@@ -1,10 +1,11 @@
 // What the app keeps in the browser's database: files too big for localStorage, such as a
-// SoundFont the user picked and the recording of work not saved.
+// SoundFont the user picked and the recording of work not saved, and the files and
+// folders on disk the user has let it keep hold of.
 
 const DATABASE = 'gtrtab';
 /** Each version adds stores; those already there are kept as they are. */
-const VERSION = 2;
-const STORES = ['soundfont', 'recording'] as const;
+const VERSION = 3;
+const STORES = ['soundfont', 'recording', 'handles'] as const;
 
 export type Store = (typeof STORES)[number];
 
