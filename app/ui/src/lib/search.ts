@@ -7,7 +7,7 @@ export interface Found {
   command: Command;
   /** The menus it is under, e.g. `['File', 'Export']`. */
   path: string[];
-  /** Its path and name, which stay the same from one run to the next. */
+  /** Its id, or without one its path and name: what it is remembered by from one run to the next. */
   id: string;
 }
 
@@ -21,7 +21,7 @@ export function listCommands(menus: Menu[]): Found[] {
       if ('items' in item) walk(item.items, [...path, item.label]);
       else if (!seen.has(item)) {
         seen.add(item);
-        found.push({ command: item, path, id: [...path, item.label].join(' › ') });
+        found.push({ command: item, path, id: item.id ?? [...path, item.label].join(' › ') });
       }
     }
   };

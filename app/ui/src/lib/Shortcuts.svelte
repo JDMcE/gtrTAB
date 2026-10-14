@@ -2,6 +2,7 @@
   import type { ShortcutGroup } from './commands';
   import { bind, chordOf, defaultsOf, fixedKey, keysOf, reset, unbind, type Bindings } from './keymap';
   import { search, type Found } from './search';
+  import { t } from './i18n';
   import Dialog from './ui/Dialog.svelte';
   import Icon from './ui/Icon.svelte';
   import { tip } from './ui/tooltip';
@@ -56,25 +57,27 @@
     const { bindings, from } = bind(bindable, custom, id, chord);
     onchange(bindings);
     said = from
-      ? `${chord} now runs ${name(id)}, and no longer ${name(from)}.`
-      : `${chord} now runs ${name(id)}.`;
+      ? t('{key} now runs {command}, and no longer {other}.', { key: chord, command: name(id), other: name(from) })
+      : t('{key} now runs {command}.', { key: chord, command: name(id) });
   }
 
   function take(found: Found, chord: string) {
     onchange(unbind(bindable, custom, found.command.id!, chord));
-    said = `${chord} no longer runs ${name(found.command.id!)}.`;
+    said = t('{key} no longer runs {command}.', { key: chord, command: name(found.command.id!) });
   }
 
   function putBack(found: Found) {
     const id = found.command.id!;
     onchange(reset(bindable, custom, id));
     const own = defaultsOf({ id, keys: found.command.keys });
-    said = own.length ? `${name(id)} has ${own.join(' and ')} again.` : `${name(id)} has no key again.`;
+    said = own.length
+      ? t('{command} has {keys} again.', { command: name(id), keys: own.join(' / ') })
+      : t('{command} has no key again.', { command: name(id) });
   }
 
   function putAllBack() {
     onchange({});
-    said = 'Every command has the keys it came with.';
+    said = t('Every command has the keys it came with.');
   }
 
   /** While a command waits for a key, the next one pressed is given to it. */
@@ -84,13 +87,13 @@
     event.stopPropagation();
     if (event.key === 'Escape') {
       waiting = null;
-      said = 'No key given.';
+      said = t('No key given.');
       return;
     }
     const chord = chordOf(event);
     if (!chord) return;
     if (fixedKey(chord)) {
-      said = `${chord} moves the cursor, enters notes or moves between controls, and cannot be given to a command. Press another key, or Esc.`;
+      said = t('{key} moves the cursor, enters notes or moves between controls, and cannot be given to a command. Press another key, or Esc.', { key: chord });
       return;
     }
     const id = waiting;
@@ -102,16 +105,16 @@
 <svelte:window onkeydowncapture={onKeydown} />
 
 <Dialog
-  title="Keyboard shortcuts"
-  hint="Give a command another key with +, or take one away by clicking it. A key given to one command is taken from any other that had it."
+  title={t('Keyboard shortcuts')}
+  hint={t('Give a command another key with +, or take one away by clicking it. A key given to one command is taken from any other that had it.')}
   width="900px"
   {onclose}
 >
   <div class="find">
-    <input type="search" aria-label="Find a command" placeholder="Find a command" bind:value={query} />
+    <input type="search" aria-label={t('Find a command')} placeholder={t('Find a command')} bind:value={query} />
     <label class="check">
       <input type="checkbox" bind:checked={every} disabled={!!query.trim()} />
-      Every command, not only those with keys
+      {t('Every command, not only those with keys')}
     </label>
   </div>
   <p class="said" role="status">{said}</p>
@@ -134,25 +137,25 @@
                   <button
                     type="button"
                     class="key"
-                    aria-label="Take {chord} from {label}"
-                    use:tip={{ label: 'Take this key away' }}
+                    aria-label={t('Take {key} from {command}', { key: chord, command: label })}
+                    use:tip={{ label: t('Take this key away') }}
                     onclick={() => take(found, chord)}
                   >
                     <kbd>{chord}</kbd>
                   </button>
                 {/each}
                 {#if waiting === id}
-                  <kbd class="waiting" aria-live="polite">Press a key…</kbd>
+                  <kbd class="waiting" aria-live="polite">{t('Press a key…')}</kbd>
                 {/if}
                 <button
                   type="button"
                   class="tool"
-                  aria-label="Give {label} a key"
+                  aria-label={t('Give {command} a key', { command: label })}
                   aria-pressed={waiting === id}
-                  use:tip={{ label: 'Give it a key' }}
+                  use:tip={{ label: t('Give it a key') }}
                   onclick={() => {
                     waiting = waiting === id ? null : id;
-                    said = waiting ? `Press the key for ${label}, or Esc.` : '';
+                    said = waiting ? t('Press the key for {command}, or Esc.', { command: label }) : '';
                   }}
                 >
                   <Icon name="addSound" size={14} />
@@ -161,8 +164,8 @@
                   <button
                     type="button"
                     class="tool"
-                    aria-label="Give {label} its own keys back"
-                    use:tip={{ label: 'Back to its own keys' }}
+                    aria-label={t('Give {command} its own keys back', { command: label })}
+                    use:tip={{ label: t('Back to its own keys') }}
                     onclick={() => putBack(found)}
                   >
                     <Icon name="undo" size={14} />
@@ -184,7 +187,7 @@
               <span class="name">{row.label}</span>
               <span class="keys">
                 {#each row.keys.split(' / ') as keys, i}
-                  {#if i > 0}<span class="or">or</span>{/if}
+                  {#if i > 0}<span class="or">{t('or')}</span>{/if}
                   <kbd>{keys}</kbd>
                 {/each}
               </span>
@@ -195,15 +198,15 @@
     {/each}
 
     {#if !shown.length && !fixedShown.length}
-      <p class="none">No command matches “{query}”</p>
+      <p class="none">{t('No command matches “{query}”', { query })}</p>
     {/if}
   </div>
 
   {#snippet footer()}
     <button type="button" class="btn remove" disabled={!Object.keys(custom).length} onclick={putAllBack}>
-      Reset every key
+      {t('Reset every key')}
     </button>
-    <button type="button" class="btn primary" onclick={onclose}>Done</button>
+    <button type="button" class="btn primary" onclick={onclose}>{t('Done')}</button>
   {/snippet}
 </Dialog>
 

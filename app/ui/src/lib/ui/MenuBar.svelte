@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n';
   import { tick } from 'svelte';
   import type { Command, Menu, MenuEntry } from '../commands';
   import Icon from './Icon.svelte';
@@ -155,7 +156,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-<nav class="menubar" role="menubar" aria-label="Menus" bind:this={bar} onkeydown={onKeydown}>
+<nav class="menubar" role="menubar" aria-label={t('Menus')} bind:this={bar} onkeydown={onKeydown}>
   {#each menus as menu, i}
     <div class="slot">
       <button

@@ -104,7 +104,8 @@ These are the keys the app comes with. Any command in the menus can be given a k
 - **Track pane** under the score: a row per track with its name, mute, solo, volume and pan, and a grid with a cell for every bar, filled where the track has notes. Click a name to edit that track, a cell to go to that bar, and double-click a name for the track's settings: instrument, tuning, capo and mix. The mixer works while the score is playing. The buttons above the names add, set up, move and remove tracks. Drag the pane's top edge to resize it; the View menu hides it.
 - **Views** (View menu): each track as notation and tab together, tab only, notation only, or rhythm slashes; and every track at once or only the one being edited. Notes are entered on the tab and the notation follows.
 - **Inspector** on the right: everything set on the beat and note under the cursor, each with a button to remove it and, for bends, the whammy bar, trills and grace notes, one to edit it. Fingering is set here too. It opens by default when the window is wide enough to show it beside a full page.
-- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark.
+- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark, and the contrast until it is set to high or normal.
+- **Preferences** (Edit > Preferences…, Ctrl+,): theme, contrast, the score on white paper whatever the theme, the language, the panels, what playback sounds through, and the keyboard shortcuts.
 
 Repeats, alternate endings, segno, coda and fine, section names, tempo changes, timers and swing are set on the cursor's bar from the Score menu, and playback follows them. Chord names and diagrams, text, lyrics, fermatas and changes of volume or pan are set on the cursor's beat from the Beat menu. The chord dialog finds ways to finger a chord in the track's tuning.
 

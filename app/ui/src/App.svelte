@@ -18,6 +18,8 @@
     saveFile,
     setWindowTitle,
     writeAutosave,
+    reopenAfterRestart,
+    takeReopenAfterRestart,
     type OpenedFile,
   } from './lib/files';
   import { PICTURE_WIDTH, exportFonts, paper, printPages } from './lib/export';
@@ -76,7 +78,8 @@
     storeSoundFont,
     storedSoundFont,
   } from './lib/soundfont';
-  import { THEMES, applyTheme, loadPrefs, savePrefs, type Theme } from './lib/prefs';
+  import { THEMES, applyLook, applyTheme, defaultPrefs, loadPrefs, savePrefs, type Prefs, type Theme } from './lib/prefs';
+  import Preferences from './lib/Preferences.svelte';
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
@@ -92,18 +95,22 @@
   import ToolButton from './lib/ui/ToolButton.svelte';
   import { tip } from './lib/ui/tooltip';
   import init, { Document } from './wasm/gtr_wasm.js';
+  import { t, tn } from './lib/i18n';
 
   const UNTITLED = `untitled.${EXTENSION}`;
-  const VALUE_NAMES = ['Whole', 'Half', 'Quarter', 'Eighth', '16th', '32nd', '64th', '128th', '256th'];
+  const VALUE_NAMES = [
+    t('Whole note'), t('Half note'), t('Quarter note'), t('Eighth note'), t('16th note'),
+    t('32nd note'), t('64th note'), t('128th note'), t('256th note'),
+  ];
   const DYNAMICS: [Dynamic, string][] = [
-    ['ppp', 'Pianississimo'],
-    ['pp', 'Pianissimo'],
-    ['p', 'Piano'],
-    ['mp', 'Mezzo-piano'],
-    ['mf', 'Mezzo-forte'],
-    ['f', 'Forte'],
-    ['ff', 'Fortissimo'],
-    ['fff', 'Fortississimo'],
+    ['ppp', t('Pianississimo')],
+    ['pp', t('Pianissimo')],
+    ['p', t('Piano')],
+    ['mp', t('Mezzo-piano')],
+    ['mf', t('Mezzo-forte')],
+    ['f', t('Forte')],
+    ['ff', t('Fortissimo')],
+    ['fff', t('Fortississimo')],
   ];
   /** Tuplets as notes played in the time of how many. */
   const TUPLETS = [
@@ -118,13 +125,14 @@
     [13, 8],
   ];
   const FINGERS = ['thumb', 'index', 'middle', 'ring', 'pinky'];
+  const FINGER_NAMES = [t('thumb'), t('index'), t('middle'), t('ring'), t('pinky')];
   /** Playback speeds offered by name, as percentages of the tempo written. */
   const SPEEDS = [25, 50, 75, 100, 125, 150, 200];
   const [MIN_SPEED, MAX_SPEED] = [25, 200];
   /** How far the slower and faster keys move the speed. */
   const SPEED_STEP = 5;
   const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-  const THEME_NAMES: Record<Theme, string> = { system: 'System', light: 'Light', dark: 'Dark' };
+  const THEME_NAMES: Record<Theme, string> = { system: t('System'), light: t('Light'), dark: t('Dark') };
   const THEME_ICONS: Record<Theme, IconName> = {
     system: 'themeSystem',
     light: 'themeLight',
@@ -162,6 +170,7 @@
   let kitDialog = $state(false);
   let shortcutsOpen = $state(false);
   let paletteOpen = $state(false);
+  let prefsOpen = $state(false);
   let zoom = $state(1);
 
   let playing = $state(false);
@@ -193,6 +202,15 @@
   let lastDigitAt = 0;
 
   $effect(() => savePrefs($state.snapshot(prefs)));
+  /** The language in use, which a change in the preferences only switches to on a new start. */
+  const languageAtStart = untrack(() => prefs.language);
+  /** Goes up when the system's contrast changes, so that the canvases are painted again. */
+  let lookChanges = $state(0);
+  // Before the canvases repaint for the change, which their own effects do first.
+  $effect.pre(() => applyLook(prefs.contrast, prefs.paper, () => lookChanges++));
+  /** Changes with everything the score's colours depend on. */
+  const look = $derived(`${prefs.theme} ${prefs.contrast} ${prefs.paper} ${lookChanges}`);
+
   // What the menus, tooltips and palette show beside each command follows the keys given.
   $effect.pre(() => {
     shortcuts.custom = prefs.shortcuts;
@@ -201,6 +219,37 @@
   function setTheme(theme: Theme) {
     prefs.theme = theme;
     applyTheme(theme);
+  }
+
+  /** Sets one preference from the preferences dialog. */
+  function setPref<K extends keyof Prefs>(key: K, value: Prefs[K]) {
+    if (key === 'theme') setTheme(value as Theme);
+    else prefs[key] = value;
+  }
+
+  /** Every preference as it was when the app came, except the keys given and the commands used lately. */
+  function resetPrefs() {
+    const { shortcuts: keys, recentCommands, sound } = prefs;
+    Object.assign(prefs, { ...defaultPrefs(), shortcuts: keys, recentCommands });
+    applyTheme(prefs.theme);
+    if (sound !== prefs.sound) useSound('default');
+    message = t('Preferences as they were when gtrTab came');
+  }
+
+  /**
+   * Starts the app again, for a change of language, with the score as it is: work not saved
+   * is kept as it is in case the app closes, and a score that is saved is opened again.
+   */
+  function restart() {
+    if (doc && editor) {
+      if (editor.dirty || !filePath) {
+        writeAutosave({ name: fileName, path: filePath, bytes: doc.saveWithoutRecording(), saved: !editor.dirty });
+      } else {
+        writeAutosave(null);
+        reopenAfterRestart(filePath);
+      }
+    }
+    location.reload();
   }
 
   function toggleSection(id: string) {
@@ -252,7 +301,7 @@
   // --- Files ---
 
   async function discardChanges(): Promise<boolean> {
-    return !editor?.dirty || confirmDialog(`Discard unsaved changes to ${fileName}?`);
+    return !editor?.dirty || confirmDialog(t('Discard unsaved changes to {name}?', { name: fileName }));
   }
 
   const newScore = () =>
@@ -271,7 +320,9 @@
     const report = imported.importReport;
     imported.markUnsaved();
     setDocument(imported, file.name.replace(/\.[^.]+$/, '') + `.${EXTENSION}`, null);
-    message = report ? `Imported ${file.name}. Not imported: ${report}.` : `Imported ${file.name}.`;
+    message = report
+      ? t('Imported {name}. Not imported: {report}.', { name: file.name, report })
+      : t('Imported {name}.', { name: file.name });
   }
 
   const open = () =>
@@ -312,7 +363,7 @@
       fileName = saved.name;
       filePath = saved.path;
       if (saved.path) recent = addRecentFile(saved.path);
-      message = `Saved ${saved.name}`;
+      message = t('Saved {name}', { name: saved.name });
     });
 
   // Keep a copy of unsaved work so that a crash or closed window does not lose it.
@@ -384,7 +435,7 @@
     pass += 1;
     if (fromQueue && queuedSpeed !== null) {
       speed = playedSpeed = queuedSpeed;
-      message = `Time ${pass} round, at ${speed}% of the tempo`;
+      message = t('Time {pass} round, at {speed}% of the tempo', { pass, speed });
     }
     queuedSpeed = null;
     queueNext();
@@ -449,7 +500,7 @@
 
   function setSpeed(percent: number) {
     speed = Math.max(MIN_SPEED, Math.min(MAX_SPEED, Math.round(percent)));
-    message = `Playing at ${speed}% of the tempo`;
+    message = t('Playing at {speed}% of the tempo', { speed });
   }
 
   // Volume, pan, mute and solo take effect on what is already playing.
@@ -492,15 +543,20 @@
   function setTrainer(next: Trainer | null) {
     training = next !== null;
     if (!next) {
-      message = 'Speed trainer off';
+      message = t('Speed trainer off');
       return;
     }
     trainer = next;
     loop = true;
     message =
       speed >= next.target
-        ? `Already at ${speed}%; the speed trainer goes up to ${next.target}%`
-        : `Speed trainer: from ${speed}% up to ${next.target}%, ${next.step}% faster ${next.every === 1 ? 'each time' : `every ${next.every} times`} round`;
+        ? t('Already at {speed}%; the speed trainer goes up to {target}%', { speed, target: next.target })
+        : tn(
+            next.every,
+            'Speed trainer: from {speed}% up to {target}%, {step}% faster each time round',
+            'Speed trainer: from {speed}% up to {target}%, {step}% faster every {count} times round',
+            { speed, target: next.target, step: next.step },
+          );
   }
 
   // --- Sound ---
@@ -521,13 +577,13 @@
         return null;
       }
       prefs.sound = 'default';
-      return 'The SoundFont picked before is no longer there.';
+      return t('The SoundFont picked before is no longer there.');
     }
     if (prefs.sound === 'default') {
       const bytes = await fetchDefaultSoundFont();
       if (bytes && !(await player.setSoundFont(bytes))) return null;
       await player.setSoundFont(null);
-      return `${DEFAULT_SOUNDFONT.name} is not part of this build.`;
+      return t('{name} is not part of this build.', { name: DEFAULT_SOUNDFONT.name });
     }
     await player.setSoundFont(null);
     return null;
@@ -537,8 +593,11 @@
     run(async () => {
       prefs.sound = sound;
       const problem = await applySound();
-      if (problem) throw new Error(`${problem} Playing through the built-in models.`);
-      message = sound === 'default' ? `Playing through ${DEFAULT_SOUNDFONT.name}` : 'Playing through the built-in models';
+      if (problem) throw new Error(t('{problem} Playing through the built-in models.', { problem }));
+      message =
+        sound === 'default'
+          ? t('Playing through {name}', { name: DEFAULT_SOUNDFONT.name })
+          : t('Playing through the built-in models');
     });
 
   /** The bytes of the SoundFont the preferences ask for, or `null` for the built-in models. */
@@ -567,12 +626,12 @@
         try {
           for (let done = 0; done < 1; ) {
             done = making.step(RATE * 4);
-            message = `Exporting audio: ${Math.round(done * 100)}%`;
+            message = t('Exporting audio: {percent}%', { percent: Math.round(done * 100) });
             await new Promise((next) => setTimeout(next));
           }
           const name = fileName.replace(/\.[^.]+$/, '') + '.wav';
           const written = await exportFile(name, making.wav(), 'WAV audio', 'audio/wav');
-          message = written ? `Exported ${written}` : '';
+          message = written ? t('Exported {name}', { name: written }) : '';
         } finally {
           making.free();
         }
@@ -603,7 +662,11 @@
       try {
         const report = written.report;
         const saved = await exportFile(named(written.extension), written.bytes, FORMATS[format], written.mediaType);
-        if (saved) message = report ? `Exported ${saved}. Not exported: ${report}.` : `Exported ${saved}`;
+        if (saved) {
+          message = report
+            ? t('Exported {name}. Not exported: {report}.', { name: saved, report })
+            : t('Exported {name}', { name: saved });
+        }
       } finally {
         written.free();
       }
@@ -624,7 +687,7 @@
             ? [new TextEncoder().encode(doc.exportSvg(viewJson, PICTURE_WIDTH, ...fonts)), 'SVG picture', 'image/svg+xml']
             : [doc.exportPng(viewJson, PICTURE_WIDTH, 2, ...fonts), 'PNG picture', 'image/png'];
       const saved = await exportFile(named(kind), bytes, what, type);
-      if (saved) message = `Exported ${saved}`;
+      if (saved) message = t('Exported {name}', { name: saved });
     });
 
   /** Prints the score, in the view it is shown in, on the paper usual where the user is. */
@@ -647,7 +710,7 @@
       await storeSoundFont(kept);
       customSound = font.name;
       prefs.sound = 'custom';
-      message = `Playing through ${font.name}`;
+      message = t('Playing through {name}', { name: font.name });
     });
 
   // --- Techniques ---
@@ -673,7 +736,7 @@
 
   const voices: Command[] = Array.from({ length: MAX_VOICES }, (_, i) => ({
     id: `voice${i + 1}`,
-    label: `Voice ${i + 1}`,
+    label: t('Voice {number}', { number: i + 1 }),
     icon: `voice${i + 1}` as IconName,
     keys: `Alt+${i + 1}`,
     active: () => editor?.cursor.voice === i,
@@ -764,7 +827,7 @@
       if (instrumentKind === 'drums') {
         const there = notes.find((n) => n.fret === fret);
         const line = there ? there.string : freeLine(notes.map((n) => n.string), cursorStaff.tuning.strings.length);
-        if (line === null) throw new Error('This beat has a piece of the kit on every line.');
+        if (line === null) throw new Error(t('This beat has a piece of the kit on every line.'));
         d.setCursor(bar, beat, line, false);
         return there ? d.delete() : d.setFret(fret);
       }
@@ -846,15 +909,17 @@
     const pedals = $state.snapshot(pedalChain) as Pedal[];
     const master = pedalMaster;
     prompt = {
-      title: 'Save as a preset',
-      hint: `The pedals of ${master ? 'the mix' : 'this track'}, to put on ${master ? 'the mix of another score' : 'another track'}. A preset of the same name is replaced.`,
-      field: { kind: 'text', label: 'Name', value: '' },
+      title: t('Save as a preset'),
+      hint: master
+        ? t('The pedals of the mix, to put on the mix of another score. A preset of the same name is replaced.')
+        : t('The pedals of this track, to put on another track. A preset of the same name is replaced.'),
+      field: { kind: 'text', label: t('Name'), value: '' },
       apply: (name: string) => {
         name = name.trim();
         if (!name) return;
         userPresets = withPreset(userPresets, { name, master, pedals });
         saveUserPresets(userPresets);
-        message = `Saved the preset ${name}`;
+        message = t('Saved the preset {name}', { name });
       },
     };
   }
@@ -886,7 +951,7 @@
     recordingProblem = '';
     const bytes = name && current ? current.recordingFile() : undefined;
     if (!name || !bytes) {
-      if (name) recordingProblem = `The recording ${name} is not at hand: replace it with the file it came from.`;
+      if (name) recordingProblem = t('The recording {name} is not at hand: replace it with the file it came from.', { name });
       await player.setRecording(null);
       return;
     }
@@ -908,7 +973,9 @@
       const replacing = !!score?.audio;
       doc.importRecording(file.name, file.bytes);
       prefs.audio = true;
-      message = replacing ? `The recording is now ${file.name}` : `Added an audio track of ${file.name}`;
+      message = replacing
+        ? t('The recording is now {name}', { name: file.name })
+        : t('Added an audio track of {name}', { name: file.name });
     });
 
   const setAudio = (audio: AudioTrack | null) => edit((d) => d.setAudio(JSON.stringify(audio)));
@@ -939,11 +1006,11 @@
         decibels(settings.gain),
       );
     } catch (error) {
-      return `The input could not be opened: ${error instanceof Error ? error.message : String(error)}`;
+      return t('The input could not be opened: {problem}', { problem: error instanceof Error ? error.message : String(error) });
     }
     lineOn = true;
     lineLatency = lineIn.latency;
-    message = 'Playing the line in through the pedals';
+    message = t('Playing the line in through the pedals');
     return null;
   }
 
@@ -957,7 +1024,7 @@
     lineIn.stop();
     lineOn = false;
     lineLevels = { input: 0, output: 0 };
-    message = 'Stopped the line in';
+    message = t('Stopped the line in');
   }
 
   // The line follows the pedals of the cursor's track, in the sound shown on the
@@ -972,7 +1039,7 @@
   function deletePreset(preset: PedalPreset) {
     userPresets = userPresets.filter((p) => p !== preset);
     saveUserPresets(userPresets);
-    message = `Deleted the preset ${preset.name}`;
+    message = t('Deleted the preset {name}', { name: preset.name });
   }
   let scaleLibrary = $state.raw<{ root: number; scale: number; found: { fits: Fit[]; source: string } | null } | null>(
     null,
@@ -997,7 +1064,10 @@
     prefs.instrument = true;
     chordLibraryOpen = false;
     scaleLibrary = null;
-    message = `${next.label} marked on the ${instrumentKind === 'keys' ? 'keyboard' : 'fretboard'}`;
+    message =
+      instrumentKind === 'keys'
+        ? t('{name} marked on the keyboard', { name: next.label })
+        : t('{name} marked on the fretboard', { name: next.label });
   }
 
   /** The pitches of the selected notes, or of the whole track without a selection. */
@@ -1095,7 +1165,7 @@
   const usualTouch = () => (effects.harmonic === 'pinch' ? 5 : 12);
   const harmonicTouches: Command[] = HARMONIC_TOUCHES.map(([frets, sounds]) => ({
     id: `harmonicTouch.${frets}`,
-    label: `Touched ${frets} frets above the note: ${sounds}`,
+    label: t('Touched {frets} frets above the note: {sounds}', { frets, sounds }),
     active: () =>
       !!effects.harmonic && effects.harmonic !== 'natural' && (effects.harmonic_touch ?? usualTouch()) === frets,
     disabled: () => !effects.harmonic || effects.harmonic === 'natural',
@@ -1118,7 +1188,7 @@
 
   const noteValues: Command[] = NOTE_VALUES.map((value, i) => ({
     id: `value.${value}`,
-    label: `${VALUE_NAMES[i]} note`,
+    label: VALUE_NAMES[i],
     icon: value,
     active: () => editor?.duration.value === value,
     run: () => edit((d) => d.setNoteValue(value)),
@@ -1138,7 +1208,7 @@
       const active = () => current()?.actual === actual && current()?.normal === normal;
       return {
         id: `${nested ? 'nestedTuplet' : 'tuplet'}.${actual}:${normal}`,
-        label: `${actual} in the time of ${normal}`,
+        label: t('{actual} in the time of {normal}', { actual, normal }),
         active,
         disabled: () => nested && !editor?.duration.tuplet,
         run: () =>
@@ -1152,232 +1222,232 @@
   const fingering = (field: 'left_finger' | 'right_finger', marks: string): Command[] =>
     FINGERS.map((finger, i) => ({
       id: `${field}.${finger}`,
-      label: `${marks[i]}  ${finger}`,
+      label: `${marks[i]}  ${FINGER_NAMES[i]}`,
       active: () => effects[field] === finger,
       disabled: noNote,
       run: () => setNoteEffect(field, effects[field] === finger ? null : finger),
     }));
 
   const cmd = {
-    new: { label: 'New', icon: 'new', keys: 'Ctrl+N', run: newScore },
-    open: { label: 'Open or import…', icon: 'open', keys: 'Ctrl+O', run: open },
-    save: { label: 'Save', icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
-    saveAs: { label: 'Save as…', icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
-    exportAudio: { label: 'Audio (WAV)…', disabled: () => noScore() || exporting, run: () => exportAudio() },
-    exportPdf: { label: 'PDF…', disabled: noScore, run: () => exportPicture('pdf') },
-    exportPng: { label: 'Picture (PNG)…', disabled: noScore, run: () => exportPicture('png') },
-    exportSvg: { label: 'Picture (SVG)…', disabled: noScore, run: () => exportPicture('svg') },
-    exportGuitarPro: { label: 'Guitar Pro (.gp)…', disabled: noScore, run: () => exportAs('guitar_pro') },
-    exportMusicXml: { label: 'MusicXML…', disabled: noScore, run: () => exportAs('musicxml') },
-    exportMidi: { label: 'MIDI…', disabled: noScore, run: () => exportAs('midi') },
-    exportAscii: { label: 'Text tab…', disabled: noScore, run: () => exportAs('ascii') },
-    print: { label: 'Print…', keys: 'Ctrl+P', disabled: noScore, run: print },
+    new: { label: t('New'), icon: 'new', keys: 'Ctrl+N', run: newScore },
+    open: { label: t('Open or import…'), icon: 'open', keys: 'Ctrl+O', run: open },
+    save: { label: t('Save'), icon: 'save', keys: 'Ctrl+S', disabled: noScore, run: () => save() },
+    saveAs: { label: t('Save as…'), icon: 'saveAs', keys: 'Ctrl+Shift+S', disabled: noScore, run: () => save(true) },
+    exportAudio: { label: t('Audio (WAV)…'), disabled: () => noScore() || exporting, run: () => exportAudio() },
+    exportPdf: { label: t('PDF…'), disabled: noScore, run: () => exportPicture('pdf') },
+    exportPng: { label: t('Picture (PNG)…'), disabled: noScore, run: () => exportPicture('png') },
+    exportSvg: { label: t('Picture (SVG)…'), disabled: noScore, run: () => exportPicture('svg') },
+    exportGuitarPro: { label: t('Guitar Pro (.gp)…'), disabled: noScore, run: () => exportAs('guitar_pro') },
+    exportMusicXml: { label: t('MusicXML…'), disabled: noScore, run: () => exportAs('musicxml') },
+    exportMidi: { label: t('MIDI…'), disabled: noScore, run: () => exportAs('midi') },
+    exportAscii: { label: t('Text tab…'), disabled: noScore, run: () => exportAs('ascii') },
+    print: { label: t('Print…'), keys: 'Ctrl+P', disabled: noScore, run: print },
 
-    undo: { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
-    redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y / Ctrl+Shift+Z', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
-    cut: { label: 'Cut', icon: 'cut', keys: 'Ctrl+X', run: () => edit((d) => d.cut()) },
-    copy: { label: 'Copy', icon: 'copy', keys: 'Ctrl+C', run: () => edit((d) => d.copy()) },
-    paste: { label: 'Paste', icon: 'paste', keys: 'Ctrl+V', disabled: () => !editor?.can_paste, run: () => edit((d) => d.paste()) },
-    insertBeat: { label: 'Insert a rest before the cursor', keys: 'Insert', run: () => edit((d) => d.insertBeat()) },
-    delete: { label: 'Remove the note, or the beat if it is a rest', keys: 'Delete / Backspace', run: () => edit((d) => d.delete()) },
-    deleteBeats: { label: 'Remove the beat or the selected beats', keys: 'Ctrl+Delete', run: () => edit((d) => d.deleteBeats()) },
+    undo: { label: t('Undo'), icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
+    redo: { label: t('Redo'), icon: 'redo', keys: 'Ctrl+Y / Ctrl+Shift+Z', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
+    cut: { label: t('Cut'), icon: 'cut', keys: 'Ctrl+X', run: () => edit((d) => d.cut()) },
+    copy: { label: t('Copy'), icon: 'copy', keys: 'Ctrl+C', run: () => edit((d) => d.copy()) },
+    paste: { label: t('Paste'), icon: 'paste', keys: 'Ctrl+V', disabled: () => !editor?.can_paste, run: () => edit((d) => d.paste()) },
+    insertBeat: { label: t('Insert a rest before the cursor'), keys: 'Insert', run: () => edit((d) => d.insertBeat()) },
+    delete: { label: t('Remove the note, or the beat if it is a rest'), keys: 'Delete / Backspace', run: () => edit((d) => d.delete()) },
+    deleteBeats: { label: t('Remove the beat or the selected beats'), keys: 'Ctrl+Delete', run: () => edit((d) => d.deleteBeats()) },
 
-    dot: { label: 'Dotted', icon: 'dot', keys: '.', active: () => (editor?.duration.dots ?? 0) > 0, run: () => edit((d) => d.toggleDot()) },
-    triplet: { label: 'Triplet', icon: 'triplet', keys: '/', active: () => !!editor?.duration.tuplet, run: () => edit((d) => d.toggleTriplet()) },
-    rest: { label: 'Rest', icon: 'rest', keys: 'R', run: () => edit((d) => d.rest()) },
-    tie: { label: 'Tie to the previous note', icon: 'tie', keys: 'L', active: () => !!editor?.note?.tied, run: () => edit((d) => d.toggleTie()) },
+    dot: { label: t('Dotted'), icon: 'dot', keys: '.', active: () => (editor?.duration.dots ?? 0) > 0, run: () => edit((d) => d.toggleDot()) },
+    triplet: { label: t('Triplet'), icon: 'triplet', keys: '/', active: () => !!editor?.duration.tuplet, run: () => edit((d) => d.toggleTriplet()) },
+    rest: { label: t('Rest'), icon: 'rest', keys: 'R', run: () => edit((d) => d.rest()) },
+    tie: { label: t('Tie to the previous note'), icon: 'tie', keys: 'L', active: () => !!editor?.note?.tied, run: () => edit((d) => d.toggleTie()) },
 
-    hammer: toggle('Hammer-on or pull-off to the next note', 'hammer', 'hammer', () => !!effects.hammer, 'H'),
-    slideShift: toggle('Shift slide to the next note', 'slideShift', 'slide_shift', () => effects.slide === 'shift', 'S'),
-    slideLegato: toggle('Legato slide to the next note', 'slideLegato', 'slide_legato', () => effects.slide === 'legato'),
-    slideInBelow: toggle('Slide in from below', 'slideInBelow', 'slide_in_below', () => effects.slide === 'in_from_below'),
-    slideInAbove: toggle('Slide in from above', 'slideInAbove', 'slide_in_above', () => effects.slide === 'in_from_above'),
-    slideOutDown: toggle('Slide out downwards', 'slideOutDown', 'slide_out_down', () => effects.slide === 'out_down'),
-    slideOutUp: toggle('Slide out upwards', 'slideOutUp', 'slide_out_up', () => effects.slide === 'out_up'),
+    hammer: toggle(t('Hammer-on or pull-off to the next note'), 'hammer', 'hammer', () => !!effects.hammer, 'H'),
+    slideShift: toggle(t('Shift slide to the next note'), 'slideShift', 'slide_shift', () => effects.slide === 'shift', 'S'),
+    slideLegato: toggle(t('Legato slide to the next note'), 'slideLegato', 'slide_legato', () => effects.slide === 'legato'),
+    slideInBelow: toggle(t('Slide in from below'), 'slideInBelow', 'slide_in_below', () => effects.slide === 'in_from_below'),
+    slideInAbove: toggle(t('Slide in from above'), 'slideInAbove', 'slide_in_above', () => effects.slide === 'in_from_above'),
+    slideOutDown: toggle(t('Slide out downwards'), 'slideOutDown', 'slide_out_down', () => effects.slide === 'out_down'),
+    slideOutUp: toggle(t('Slide out upwards'), 'slideOutUp', 'slide_out_up', () => effects.slide === 'out_up'),
     bend: {
-      label: 'Full bend',
+      label: t('Full bend'),
       icon: 'bend',
       keys: 'B',
       active: () => !!effects.bend,
       run: () => setNoteEffect('bend', effects.bend ? null : bendPreset('bend', 4)),
     },
-    bendEditor: { label: 'Bend editor…', icon: 'bend', keys: 'Shift+B', disabled: noNote, run: () => (effectDialog = 'bend') },
-    vibrato: toggle('Vibrato', 'vibrato', 'vibrato', () => effects.vibrato === 'slight', 'V'),
-    wideVibrato: toggle('Wide vibrato', 'wideVibrato', 'wide_vibrato', () => effects.vibrato === 'wide'),
-    palmMute: toggle('Palm mute', 'palmMute', 'palm_mute', () => !!effects.palm_mute, 'P'),
-    letRing: toggle('Let ring', 'letRing', 'let_ring', () => !!effects.let_ring, 'I'),
-    dead: toggle('Dead note', 'dead', 'dead', () => !!effects.dead, 'X'),
-    ghost: toggle('Ghost note', 'ghost', 'ghost', () => !!effects.ghost, 'G'),
-    staccato: toggle('Staccato', 'staccato', 'staccato', () => !!effects.staccato),
-    accent: toggle('Accent', 'accent', 'accent', () => effects.accent === 'normal', 'A'),
-    heavyAccent: toggle('Heavy accent', 'heavyAccent', 'heavy_accent', () => effects.accent === 'heavy'),
-    harmonicNatural: toggle('Natural harmonic', 'harmonic', 'harmonic_natural', () => effects.harmonic === 'natural', 'N'),
-    harmonicArtificial: toggle('Artificial harmonic', 'harmonic', 'harmonic_artificial', () => effects.harmonic === 'artificial'),
-    harmonicPinch: toggle('Pinch harmonic', 'harmonic', 'harmonic_pinch', () => effects.harmonic === 'pinch'),
-    harmonicTapped: toggle('Tapped harmonic', 'harmonic', 'harmonic_tapped', () => effects.harmonic === 'tapped'),
-    harmonicSemi: toggle('Semi-harmonic', 'harmonic', 'harmonic_semi', () => effects.harmonic === 'semi'),
-    tapped: toggle('Tapping', 'tapping', 'tapped', () => !!effects.tapped, 'T'),
-    trill: { label: 'Trill…', icon: 'trill', active: () => !!effects.trill, disabled: noNote, run: () => (effectDialog = 'trill') },
-    grace: { label: 'Grace note…', icon: 'grace', active: () => !!effects.grace, disabled: noNote, run: () => (effectDialog = 'grace') },
+    bendEditor: { label: t('Bend editor…'), icon: 'bend', keys: 'Shift+B', disabled: noNote, run: () => (effectDialog = 'bend') },
+    vibrato: toggle(t('Vibrato'), 'vibrato', 'vibrato', () => effects.vibrato === 'slight', 'V'),
+    wideVibrato: toggle(t('Wide vibrato'), 'wideVibrato', 'wide_vibrato', () => effects.vibrato === 'wide'),
+    palmMute: toggle(t('Palm mute'), 'palmMute', 'palm_mute', () => !!effects.palm_mute, 'P'),
+    letRing: toggle(t('Let ring'), 'letRing', 'let_ring', () => !!effects.let_ring, 'I'),
+    dead: toggle(t('Dead note'), 'dead', 'dead', () => !!effects.dead, 'X'),
+    ghost: toggle(t('Ghost note'), 'ghost', 'ghost', () => !!effects.ghost, 'G'),
+    staccato: toggle(t('Staccato'), 'staccato', 'staccato', () => !!effects.staccato),
+    accent: toggle(t('Accent'), 'accent', 'accent', () => effects.accent === 'normal', 'A'),
+    heavyAccent: toggle(t('Heavy accent'), 'heavyAccent', 'heavy_accent', () => effects.accent === 'heavy'),
+    harmonicNatural: toggle(t('Natural harmonic'), 'harmonic', 'harmonic_natural', () => effects.harmonic === 'natural', 'N'),
+    harmonicArtificial: toggle(t('Artificial harmonic'), 'harmonic', 'harmonic_artificial', () => effects.harmonic === 'artificial'),
+    harmonicPinch: toggle(t('Pinch harmonic'), 'harmonic', 'harmonic_pinch', () => effects.harmonic === 'pinch'),
+    harmonicTapped: toggle(t('Tapped harmonic'), 'harmonic', 'harmonic_tapped', () => effects.harmonic === 'tapped'),
+    harmonicSemi: toggle(t('Semi-harmonic'), 'harmonic', 'harmonic_semi', () => effects.harmonic === 'semi'),
+    tapped: toggle(t('Tapping'), 'tapping', 'tapped', () => !!effects.tapped, 'T'),
+    trill: { label: t('Trill…'), icon: 'trill', active: () => !!effects.trill, disabled: noNote, run: () => (effectDialog = 'trill') },
+    grace: { label: t('Grace note…'), icon: 'grace', active: () => !!effects.grace, disabled: noNote, run: () => (effectDialog = 'grace') },
 
-    crescendo: toggle('Crescendo', 'crescendo', 'crescendo', () => beatEffects.hairpin === 'crescendo', '<'),
-    decrescendo: toggle('Decrescendo', 'decrescendo', 'decrescendo', () => beatEffects.hairpin === 'decrescendo', '>'),
-    strokeDown: toggle('Downstroke', 'strokeDown', 'stroke_down', () => beatEffects.stroke === 'down'),
-    strokeUp: toggle('Upstroke', 'strokeUp', 'stroke_up', () => beatEffects.stroke === 'up'),
-    strumDown: toggle('Strum down', 'strumDown', 'brush_down', () => beatEffects.strum === 'brush_down'),
-    strumUp: toggle('Strum up', 'strumUp', 'brush_up', () => beatEffects.strum === 'brush_up'),
-    arpeggioDown: toggle('Arpeggio down', 'arpeggioDown', 'arpeggio_down', () => beatEffects.strum === 'arpeggio_down'),
-    arpeggioUp: toggle('Arpeggio up', 'arpeggioUp', 'arpeggio_up', () => beatEffects.strum === 'arpeggio_up'),
-    rasgueado: toggle('Rasgueado', 'strumDown', 'rasgueado', () => beatEffects.strum === 'rasgueado'),
-    tremolo: toggle('Tremolo picking', 'tremolo', 'tremolo', () => !!beatEffects.tremolo),
-    slap: toggle('Slap', 'slap', 'slap', () => beatEffects.slap === 'slap'),
-    pop: toggle('Pop', 'pop', 'pop', () => beatEffects.slap === 'pop'),
-    whammy: { label: 'Whammy bar…', icon: 'whammy', keys: 'W', active: () => !!beatEffects.whammy, run: () => (effectDialog = 'whammy') },
+    crescendo: toggle(t('Crescendo'), 'crescendo', 'crescendo', () => beatEffects.hairpin === 'crescendo', '<'),
+    decrescendo: toggle(t('Decrescendo'), 'decrescendo', 'decrescendo', () => beatEffects.hairpin === 'decrescendo', '>'),
+    strokeDown: toggle(t('Downstroke'), 'strokeDown', 'stroke_down', () => beatEffects.stroke === 'down'),
+    strokeUp: toggle(t('Upstroke'), 'strokeUp', 'stroke_up', () => beatEffects.stroke === 'up'),
+    strumDown: toggle(t('Strum down'), 'strumDown', 'brush_down', () => beatEffects.strum === 'brush_down'),
+    strumUp: toggle(t('Strum up'), 'strumUp', 'brush_up', () => beatEffects.strum === 'brush_up'),
+    arpeggioDown: toggle(t('Arpeggio down'), 'arpeggioDown', 'arpeggio_down', () => beatEffects.strum === 'arpeggio_down'),
+    arpeggioUp: toggle(t('Arpeggio up'), 'arpeggioUp', 'arpeggio_up', () => beatEffects.strum === 'arpeggio_up'),
+    rasgueado: toggle(t('Rasgueado'), 'strumDown', 'rasgueado', () => beatEffects.strum === 'rasgueado'),
+    tremolo: toggle(t('Tremolo picking'), 'tremolo', 'tremolo', () => !!beatEffects.tremolo),
+    slap: toggle(t('Slap'), 'slap', 'slap', () => beatEffects.slap === 'slap'),
+    pop: toggle(t('Pop'), 'pop', 'pop', () => beatEffects.slap === 'pop'),
+    whammy: { label: t('Whammy bar…'), icon: 'whammy', keys: 'W', active: () => !!beatEffects.whammy, run: () => (effectDialog = 'whammy') },
 
-    insertBar: { label: 'Insert bar', icon: 'insertBar', keys: 'Ctrl+Insert', run: () => edit((d) => d.insertBar()) },
-    removeBar: { label: 'Remove bar', icon: 'removeBar', run: () => edit((d) => d.removeBar()) },
-    timeSignature: { label: 'Time signature…', icon: 'timeSignature', run: () => (dialog = 'time') },
-    keySignature: { label: 'Key signature…', icon: 'keySignature', run: () => (dialog = 'key') },
-    scoreInfo: { label: 'Title, credits and tempo…', icon: 'scoreInfo', run: () => (dialog = 'score') },
+    insertBar: { label: t('Insert bar'), icon: 'insertBar', keys: 'Ctrl+Insert', run: () => edit((d) => d.insertBar()) },
+    removeBar: { label: t('Remove bar'), icon: 'removeBar', run: () => edit((d) => d.removeBar()) },
+    timeSignature: { label: t('Time signature…'), icon: 'timeSignature', run: () => (dialog = 'time') },
+    keySignature: { label: t('Key signature…'), icon: 'keySignature', run: () => (dialog = 'key') },
+    scoreInfo: { label: t('Title, credits and tempo…'), icon: 'scoreInfo', run: () => (dialog = 'score') },
 
     repeatStart: {
-      label: 'Start of a repeat',
+      label: t('Start of a repeat'),
       icon: 'repeatStart',
       active: () => !!masterBar?.repeat_start,
       run: () => setBar('repeat_start', masterBar?.repeat_start ? null : true),
     },
     repeatEnd: {
-      label: 'End of a repeat…',
+      label: t('End of a repeat…'),
       icon: 'repeatEnd',
       active: () => !!masterBar?.repeat_count,
       run: () =>
         (prompt = {
-          title: 'End of a repeat',
-          hint: `The repeat ends with bar ${barNumber()}. Leave the field empty for no repeat.`,
-          field: { kind: 'number', label: 'Times played in all', value: masterBar?.repeat_count || 2, min: 2, max: 99 },
+          title: t('End of a repeat'),
+          hint: t('The repeat ends with bar {bar}. Leave the field empty for no repeat.', { bar: barNumber() }),
+          field: { kind: 'number', label: t('Times played in all'), value: masterBar?.repeat_count || 2, min: 2, max: 99 },
           apply: (count: number | null) => setBar('repeat_count', count && count >= 2 ? count : null),
         }),
     },
     endings: {
-      label: 'Alternate ending…',
+      label: t('Alternate ending…'),
       icon: 'ending',
       active: () => !!masterBar?.alternate_endings,
       run: () =>
         (prompt = {
-          title: 'Alternate ending',
-          hint: `Bar ${barNumber()} is played only on the passes ticked; with none ticked it is played every time.`,
-          field: { kind: 'bits', label: 'Times through the repeat', value: masterBar?.alternate_endings ?? 0, count: 8 },
+          title: t('Alternate ending'),
+          hint: t('Bar {bar} is played only on the passes ticked; with none ticked it is played every time.', { bar: barNumber() }),
+          field: { kind: 'bits', label: t('Times through the repeat'), value: masterBar?.alternate_endings ?? 0, count: 8 },
           apply: (passes: number) => setBar('alternate_endings', passes || null),
         }),
     },
     section: {
-      label: 'Section or rehearsal mark…',
+      label: t('Section or rehearsal mark…'),
       icon: 'section',
       active: () => !!masterBar?.section,
       run: () =>
         (prompt = {
-          title: 'Section',
-          hint: `Named from bar ${barNumber()}, for example Verse, Chorus or A. Leave it empty for none.`,
-          field: { kind: 'text', label: 'Name', value: masterBar?.section ?? '' },
+          title: t('Section'),
+          hint: t('Named from bar {bar}, for example Verse, Chorus or A. Leave it empty for none.', { bar: barNumber() }),
+          field: { kind: 'text', label: t('Name'), value: masterBar?.section ?? '' },
           apply: (name: string) => setBar('section', name || null),
         }),
     },
     barTempo: {
-      label: 'Tempo change…',
+      label: t('Tempo change…'),
       icon: 'tempo',
       active: () => !!editor?.tempo_change,
       run: () =>
         (prompt = {
-          title: 'Tempo change',
-          hint: `From the cursor's beat in bar ${barNumber()} on. Leave it empty to carry on at the tempo before.`,
-          field: { kind: 'number', label: 'Tempo (bpm)', value: editor?.tempo_change ?? null, min: 20, max: 400 },
+          title: t('Tempo change'),
+          hint: t("From the cursor's beat in bar {bar} on. Leave it empty to carry on at the tempo before.", { bar: barNumber() }),
+          field: { kind: 'number', label: t('Tempo (bpm)'), value: editor?.tempo_change ?? null, min: 20, max: 400 },
           apply: (tempo: number | null) => edit((d) => d.setTempoChange(tempo || 0, !!editor?.tempo_gradual)),
         }),
     },
     tempoGradual: {
-      label: 'Change tempo by degrees, up to the next change',
+      label: t('Change tempo by degrees, up to the next change'),
       active: () => !!editor?.tempo_gradual,
       disabled: () => !editor?.tempo_change,
       run: () => edit((d) => d.setTempoChange(editor?.tempo_change ?? 0, !editor?.tempo_gradual)),
     },
     fermata: {
-      label: 'Fermata',
+      label: t('Fermata'),
       icon: 'fermata',
       active: () => !!beatEffects.fermata,
       run: () => setBeatEffect('fermata', beatEffects.fermata ? null : true),
     },
     chordName: {
-      label: 'Chord name and diagram…',
+      label: t('Chord name and diagram…'),
       icon: 'chordDiagram',
       active: () => !!beatEffects.chord || !!beatEffects.diagram,
       disabled: () => !editor?.beat_effects,
       run: () => (chordOpen = true),
     },
     timer: {
-      label: 'Timer: show the time elapsed',
+      label: t('Timer: show the time elapsed'),
       icon: 'timer',
       active: () => !!masterBar?.timer,
       run: () => setBar('timer', masterBar?.timer ? null : true),
     },
     volumeChange: {
-      label: 'Volume change…',
+      label: t('Volume change…'),
       icon: 'volumeChange',
       active: () => beatEffects.volume !== undefined,
       run: () =>
         (prompt = {
-          title: 'Volume change',
-          hint: 'The track plays at this volume from this beat on, until the next change. At 75 it is as loud as its slider in the mixer sets it; the slider still turns the whole track up and down. Leave it empty for no change here.',
-          field: { kind: 'number', label: 'Volume (0 to 100; 75 is the level of the mixer)', value: beatEffects.volume ?? null, min: 0, max: 100 },
+          title: t('Volume change'),
+          hint: t('The track plays at this volume from this beat on, until the next change. At 75 it is as loud as its slider in the mixer sets it; the slider still turns the whole track up and down. Leave it empty for no change here.'),
+          field: { kind: 'number', label: t('Volume (0 to 100; 75 is the level of the mixer)'), value: beatEffects.volume ?? null, min: 0, max: 100 },
           apply: (volume: number | null) => setBeatEffect('volume', volume),
         }),
     },
     panChange: {
-      label: 'Pan change…',
+      label: t('Pan change…'),
       icon: 'panChange',
       active: () => beatEffects.pan !== undefined,
       run: () =>
         (prompt = {
-          title: 'Pan change',
-          hint: 'The track moves this far from where the mixer puts it, from this beat on until the next change. Leave it empty for no change here.',
-          field: { kind: 'number', label: 'Pan (-100 left to 100 right; 0 is where the mixer puts it)', value: beatEffects.pan ?? null, min: -100, max: 100 },
+          title: t('Pan change'),
+          hint: t('The track moves this far from where the mixer puts it, from this beat on until the next change. Leave it empty for no change here.'),
+          field: { kind: 'number', label: t('Pan (-100 left to 100 right; 0 is where the mixer puts it)'), value: beatEffects.pan ?? null, min: -100, max: 100 },
           apply: (pan: number | null) => setBeatEffect('pan', pan),
         }),
     },
     beatText: {
-      label: 'Text…',
+      label: t('Text…'),
       icon: 'beatText',
       active: () => !!beatEffects.text,
       run: () =>
         (prompt = {
-          title: 'Text',
-          hint: 'Written above the beat. Leave it empty for none.',
-          field: { kind: 'text', label: 'Text', value: beatEffects.text ?? '' },
+          title: t('Text'),
+          hint: t('Written above the beat. Leave it empty for none.'),
+          field: { kind: 'text', label: t('Text'), value: beatEffects.text ?? '' },
           apply: (text: string) => setBeatEffect('text', text || null),
         }),
     },
     lyrics: {
-      label: 'Lyrics…',
+      label: t('Lyrics…'),
       icon: 'lyrics',
       active: () => !!beatEffects.lyrics?.length,
       run: () =>
         (prompt = {
-          title: 'Lyrics',
-          hint: 'What is sung on this beat: one line here for each line of the lyrics, up to five.',
-          field: { kind: 'lines', label: 'Syllables', value: beatEffects.lyrics ?? [] },
+          title: t('Lyrics'),
+          hint: t('What is sung on this beat: one line here for each line of the lyrics, up to five.'),
+          field: { kind: 'lines', label: t('Syllables'), value: beatEffects.lyrics ?? [] },
           apply: (lines: string[]) => setBeatEffect('lyrics', lines.length ? lines.slice(0, 5) : null),
         }),
     },
 
-    addTrack: { label: 'Add a track…', icon: 'addTrack', run: () => (dialog = 'addTrack') },
-    trackSettings: { label: 'Instrument, tuning, capo and mix…', icon: 'trackSettings', run: () => (dialog = 'track') },
-    drumKit: { label: 'Drum kit…', disabled: () => !onDrums(), run: () => (kitDialog = true) },
-    removeTrack: { label: 'Remove the track', icon: 'removeTrack', disabled: () => trackCount() < 2, run: () => edit((d) => d.removeTrack(trackIndex())) },
-    trackUp: { label: 'Move the track up', icon: 'moveUp', disabled: () => trackIndex() === 0, run: () => moveTrack(-1) },
-    trackDown: { label: 'Move the track down', icon: 'moveDown', disabled: () => trackIndex() >= trackCount() - 1, run: () => moveTrack(1) },
-    previousTrack: { label: 'Previous track or staff', keys: 'Ctrl+↑', disabled: onFirstStaff, run: () => stepTrack(-1) },
-    nextTrack: { label: 'Next track or staff', keys: 'Ctrl+↓', disabled: onLastStaff, run: () => stepTrack(1) },
+    addTrack: { label: t('Add a track…'), icon: 'addTrack', run: () => (dialog = 'addTrack') },
+    trackSettings: { label: t('Instrument, tuning, capo and mix…'), icon: 'trackSettings', run: () => (dialog = 'track') },
+    drumKit: { label: t('Drum kit…'), disabled: () => !onDrums(), run: () => (kitDialog = true) },
+    removeTrack: { label: t('Remove the track'), icon: 'removeTrack', disabled: () => trackCount() < 2, run: () => edit((d) => d.removeTrack(trackIndex())) },
+    trackUp: { label: t('Move the track up'), icon: 'moveUp', disabled: () => trackIndex() === 0, run: () => moveTrack(-1) },
+    trackDown: { label: t('Move the track down'), icon: 'moveDown', disabled: () => trackIndex() >= trackCount() - 1, run: () => moveTrack(1) },
+    previousTrack: { label: t('Previous track or staff'), keys: 'Ctrl+↑', disabled: onFirstStaff, run: () => stepTrack(-1) },
+    nextTrack: { label: t('Next track or staff'), keys: 'Ctrl+↓', disabled: onLastStaff, run: () => stepTrack(1) },
     mute: {
-      label: 'Mute the track',
+      label: t('Mute the track'),
       active: () => !!currentMix()?.mute,
       run: () => {
         const mix = currentMix();
@@ -1385,7 +1455,7 @@
       },
     },
     solo: {
-      label: 'Solo the track',
+      label: t('Solo the track'),
       active: () => !!currentMix()?.solo,
       run: () => {
         const mix = currentMix();
@@ -1393,82 +1463,82 @@
       },
     },
 
-    play: { label: 'Play from the cursor or the selection', icon: 'play', keys: 'Space', run: togglePlay },
-    metronome: { label: 'Metronome', icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
-    countIn: { label: 'Count-in bar', icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
+    play: { label: t('Play from the cursor or the selection'), icon: 'play', keys: 'Space', run: togglePlay },
+    metronome: { label: t('Metronome'), icon: 'metronome', active: () => metronome, run: () => (metronome = !metronome) },
+    countIn: { label: t('Count-in bar'), icon: 'countIn', active: () => countIn, run: () => (countIn = !countIn) },
     beatLights: {
-      label: 'Visual metronome',
+      label: t('Visual metronome'),
       icon: 'beatLights',
       active: () => prefs.beatLights,
       run: () => (prefs.beatLights = !prefs.beatLights),
     },
-    loop: { label: 'Loop', icon: 'loop', active: () => loop, run: () => setLoop(!loop) },
-    trainer: { label: 'Speed trainer…', icon: 'trainer', active: () => training, run: () => (trainerOpen = true) },
-    slower: { label: 'Slower', keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
-    faster: { label: 'Faster', keys: ']', disabled: () => speed >= MAX_SPEED, run: () => setSpeed(speed + SPEED_STEP) },
+    loop: { label: t('Loop'), icon: 'loop', active: () => loop, run: () => setLoop(!loop) },
+    trainer: { label: t('Speed trainer…'), icon: 'trainer', active: () => training, run: () => (trainerOpen = true) },
+    slower: { label: t('Slower'), keys: '[', disabled: () => speed <= MIN_SPEED, run: () => setSpeed(speed - SPEED_STEP) },
+    faster: { label: t('Faster'), keys: ']', disabled: () => speed >= MAX_SPEED, run: () => setSpeed(speed + SPEED_STEP) },
     speedOther: {
-      label: 'Other…',
+      label: t('Other…'),
       active: () => !SPEEDS.includes(speed),
       run: () =>
         (prompt = {
-          title: 'Playback speed',
-          hint: 'How fast the score is played, as a percentage of the tempo written. The pitch stays as it is.',
-          field: { kind: 'number', label: 'Speed (%)', value: speed, min: MIN_SPEED, max: MAX_SPEED },
+          title: t('Playback speed'),
+          hint: t('How fast the score is played, as a percentage of the tempo written. The pitch stays as it is.'),
+          field: { kind: 'number', label: t('Speed (%)'), value: speed, min: MIN_SPEED, max: MAX_SPEED },
           apply: (percent: number | null) => setSpeed(percent ?? 100),
         }),
     },
     soundDefault: {
-      label: `${DEFAULT_SOUNDFONT.name} (comes with gtrTab)`,
+      label: t('{name} (comes with gtrTab)', { name: DEFAULT_SOUNDFONT.name }),
       active: () => prefs.sound === 'default',
       run: () => useSound('default'),
     },
     soundCustom: {
-      label: 'SoundFont from a file…',
+      label: t('SoundFont from a file…'),
       active: () => prefs.sound === 'custom',
       run: chooseSound,
     },
     soundModels: {
-      label: 'Built-in models, without samples',
+      label: t('Built-in models, without samples'),
       active: () => prefs.sound === 'models',
       run: () => useSound('models'),
     },
     replayRepeats: {
-      label: 'Repeats again after D.C. and D.S.',
+      label: t('Repeats again after D.C. and D.S.'),
       icon: 'repeatEnd',
       active: () => replayRepeats,
       run: () => (replayRepeats = !replayRepeats),
     },
 
-    zoomIn: { label: 'Zoom in', icon: 'zoomIn', disabled: () => zoom >= ZOOMS[ZOOMS.length - 1], run: () => stepZoom(1) },
-    zoomOut: { label: 'Zoom out', icon: 'zoomOut', disabled: () => zoom <= ZOOMS[0], run: () => stepZoom(-1) },
-    compact: { label: 'Narrow palette', icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
-    inspector: { label: 'Inspector', icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
-    multitrack: { label: 'Show every track', icon: 'multitrack', active: () => prefs.multitrack, run: () => (prefs.multitrack = !prefs.multitrack) },
+    zoomIn: { label: t('Zoom in'), icon: 'zoomIn', disabled: () => zoom >= ZOOMS[ZOOMS.length - 1], run: () => stepZoom(1) },
+    zoomOut: { label: t('Zoom out'), icon: 'zoomOut', disabled: () => zoom <= ZOOMS[0], run: () => stepZoom(-1) },
+    compact: { label: t('Narrow palette'), icon: 'palette', active: () => compact, run: () => (prefs.compact = !compact) },
+    inspector: { label: t('Inspector'), icon: 'inspector', active: () => inspectorOpen, run: () => (prefs.inspector = !inspectorOpen) },
+    multitrack: { label: t('Show every track'), icon: 'multitrack', active: () => prefs.multitrack, run: () => (prefs.multitrack = !prefs.multitrack) },
     instrument: {
-      label: 'Fretboard, keyboard or drum kit',
+      label: t('Fretboard, keyboard or drum kit'),
       icon: 'tuning',
       active: () => prefs.instrument,
       run: () => (prefs.instrument = !prefs.instrument),
     },
     soundChange: {
-      label: 'Change of sound…',
+      label: t('Change of sound…'),
       icon: 'soundChange',
       active: () => beatEffects.sound !== undefined,
       run: () => {
         const track = score?.tracks[trackIndex()];
         const others = track?.sounds ?? [];
         prompt = {
-          title: 'Change of sound',
+          title: t('Change of sound'),
           hint: others.length
             ? 'The track plays with this sound from this beat on, until the next change. What is written stays as it is.'
             : 'The track has no other sound to change to yet: add one on the pedalboard, with the + beside its sounds.',
           field: {
             kind: 'choice',
-            label: 'From this beat on',
+            label: t('From this beat on'),
             value: beatEffects.sound ?? null,
             options: [
-              { value: null, label: 'No change here' },
-              { value: 0, label: `Its own sound (${track?.name ?? ''})` },
+              { value: null, label: t('No change here') },
+              { value: 0, label: t('Its own sound ({name})', { name: track?.name ?? '' }) },
               ...others.map((s, i) => ({ value: i + 1, label: s.name })),
             ],
           },
@@ -1477,65 +1547,66 @@
       },
     },
     audioTrack: {
-      label: 'Audio track…',
+      label: t('Audio track…'),
       icon: 'soundChange',
       run: () => (score?.audio ? (prefs.audio = true) : importRecording()),
     },
     audioPanel: {
-      label: 'Audio track',
+      label: t('Audio track'),
       active: () => prefs.audio && !!score?.audio,
       disabled: () => !score?.audio,
       run: () => (prefs.audio = !prefs.audio),
     },
     pedalboard: {
-      label: 'Pedalboard',
+      label: t('Pedalboard'),
       icon: 'pedalboard',
       active: () => prefs.pedalboard,
       run: () => (prefs.pedalboard = !prefs.pedalboard),
     },
     trackEffects: {
-      label: 'Effects…',
+      label: t('Effects…'),
       run: () => {
         pedalMaster = false;
         prefs.pedalboard = true;
       },
     },
     masterEffects: {
-      label: 'Master effects…',
+      label: t('Master effects…'),
       run: () => {
         pedalMaster = true;
         prefs.pedalboard = true;
       },
     },
     lineIn: {
-      label: 'Line in…',
+      label: t('Line in…'),
       icon: 'lineIn',
       run: () => (lineDialog = true),
     },
     /** In the transport bar while the line in plays. */
     lineInOn: {
-      label: 'Line in: playing',
+      label: t('Line in: playing'),
       icon: 'lineIn',
       active: () => lineOn,
       run: () => (lineDialog = true),
     },
     tuner: {
-      label: 'Tuner…',
+      label: t('Tuner…'),
       run: () => {
         stop();
         tunerOpen = true;
       },
     },
-    chordLibrary: { label: 'Chord library…', run: () => (chordLibraryOpen = true) },
-    scaleLibrary: { label: 'Scale library…', run: () => (scaleLibrary = { root: 0, scale: 0, found: null }) },
+    chordLibrary: { label: t('Chord library…'), run: () => (chordLibraryOpen = true) },
+    scaleLibrary: { label: t('Scale library…'), run: () => (scaleLibrary = { root: 0, scale: 0, found: null }) },
     findScale: {
-      label: 'Find the scale of the selection…',
+      label: t('Find the scale of the selection…'),
       disabled: () => onDrums(),
       run: findScale,
     },
-    trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
-    shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '? / F1', run: () => (shortcutsOpen = true) },
-    commandPalette: { label: 'Command palette…', icon: 'search', keys: 'Ctrl+K / Ctrl+Shift+P', run: () => (paletteOpen = true) },
+    trackPane: { label: t('Track pane'), icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
+    shortcuts: { label: t('Keyboard shortcuts'), icon: 'shortcuts', keys: '? / F1', run: () => (shortcutsOpen = true) },
+    preferences: { label: t('Preferences…'), icon: 'preferences', keys: 'Ctrl+,', run: () => (prefsOpen = true) },
+    commandPalette: { label: t('Command palette…'), icon: 'search', keys: 'Ctrl+K / Ctrl+Shift+P', run: () => (paletteOpen = true) },
   } satisfies Record<string, Command>;
   // Each is known by its name here, for the keys the user gives it.
   for (const [id, command] of Object.entries(cmd)) (command as Command).id = id;
@@ -1561,10 +1632,10 @@
   }
 
   const palette: PaletteSection[] = [
-    { id: 'values', title: 'Note values', commands: [...noteValues, cmd.dot, cmd.triplet, cmd.rest, cmd.tie] },
+    { id: 'values', title: t('Note values'), commands: [...noteValues, cmd.dot, cmd.triplet, cmd.rest, cmd.tie] },
     {
       id: 'note',
-      title: 'On the note',
+      title: t('On the note'),
       commands: [
         cmd.hammer, cmd.slideShift, cmd.slideLegato, cmd.bend,
         cmd.vibrato, cmd.wideVibrato, cmd.palmMute, cmd.letRing,
@@ -1574,7 +1645,7 @@
     },
     {
       id: 'beat',
-      title: 'On the beat',
+      title: t('On the beat'),
       commands: [
         ...dynamics, cmd.crescendo, cmd.decrescendo, cmd.strokeDown, cmd.strokeUp,
         cmd.strumDown, cmd.strumUp, cmd.tremolo, cmd.whammy,
@@ -1583,13 +1654,13 @@
     },
     {
       id: 'bars',
-      title: 'Bars and score',
+      title: t('Bars and score'),
       commands: [
         cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.keySignature, cmd.scoreInfo,
         cmd.repeatStart, cmd.repeatEnd, cmd.endings, cmd.section,
       ],
     },
-    { id: 'voice', title: 'Voice', commands: voices },
+    { id: 'voice', title: t('Voice'), commands: voices },
   ];
 
   const menus = $derived.by((): Menu[] => {
@@ -1598,23 +1669,23 @@
       run: () => openRecent(path),
     }));
     const tracks: MenuEntry[] = (score?.tracks ?? []).map((track, i) => ({
-      label: track.name || `Track ${i + 1}`,
+      label: track.name || t('Track {number}', { number: i + 1 }),
       active: () => editor?.cursor.track === i,
       run: () => pickTrack(i, null),
     }));
     return [
       {
-        label: 'File',
+        label: t('File'),
         items: [
           cmd.new,
           cmd.open,
-          ...(recentItems.length ? [{ label: 'Open recent', items: recentItems }] : []),
+          ...(recentItems.length ? [{ label: t('Open recent'), items: recentItems }] : []),
           '-',
           cmd.save,
           cmd.saveAs,
           '-',
           {
-            label: 'Export',
+            label: t('Export'),
             items: [
               cmd.exportPdf, cmd.exportPng, cmd.exportSvg, '-',
               cmd.exportGuitarPro, cmd.exportMusicXml, cmd.exportMidi, cmd.exportAscii, '-',
@@ -1625,26 +1696,27 @@
         ],
       },
       {
-        label: 'Edit',
+        label: t('Edit'),
         items: [
           cmd.undo, cmd.redo, '-', cmd.cut, cmd.copy, cmd.paste, '-',
-          cmd.insertBeat, cmd.delete, cmd.deleteBeats,
+          cmd.insertBeat, cmd.delete, cmd.deleteBeats, '-',
+          cmd.preferences,
         ],
       },
       {
-        label: 'Note',
+        label: t('Note'),
         items: [
-          { label: 'Note value', items: noteValues },
-          { label: 'Voice', items: voices },
-          { label: 'Drum piece', items: drumPieces },
+          { label: t('Note value'), items: noteValues },
+          { label: t('Voice'), items: voices },
+          { label: t('Drum piece'), items: drumPieces },
           '-',
           cmd.rest, cmd.tie, cmd.dot,
-          { label: 'Tuplet', items: tuplets(false) },
-          { label: 'Tuplet inside the tuplet', items: tuplets(true) },
+          { label: t('Tuplet'), items: tuplets(false) },
+          { label: t('Tuplet inside the tuplet'), items: tuplets(true) },
           '-',
           cmd.hammer,
           {
-            label: 'Slide',
+            label: t('Slide'),
             items: [cmd.slideShift, cmd.slideLegato, '-', cmd.slideInBelow, cmd.slideInAbove, cmd.slideOutDown, cmd.slideOutUp],
           },
           cmd.bend,
@@ -1652,7 +1724,7 @@
           cmd.vibrato,
           cmd.wideVibrato,
           {
-            label: 'Harmonic',
+            label: t('Harmonic'),
             items: [
               cmd.harmonicNatural, cmd.harmonicArtificial, cmd.harmonicPinch, cmd.harmonicTapped, cmd.harmonicSemi,
               '-',
@@ -1664,20 +1736,20 @@
           '-',
           cmd.trill,
           cmd.grace,
-          { label: 'Fretting-hand finger', items: fingering('left_finger', 'T1234') },
-          { label: 'Picking-hand finger', items: fingering('right_finger', 'pimac') },
+          { label: t('Fretting-hand finger'), items: fingering('left_finger', 'T1234') },
+          { label: t('Picking-hand finger'), items: fingering('right_finger', 'pimac') },
         ],
       },
       {
-        label: 'Beat',
+        label: t('Beat'),
         items: [
-          { label: 'Dynamic', items: dynamics },
+          { label: t('Dynamic'), items: dynamics },
           cmd.crescendo,
           cmd.decrescendo,
           '-',
           cmd.strokeDown, cmd.strokeUp,
           {
-            label: 'Strum',
+            label: t('Strum'),
             items: [cmd.strumDown, cmd.strumUp, cmd.arpeggioDown, cmd.arpeggioUp, cmd.rasgueado],
           },
           cmd.tremolo,
@@ -1687,32 +1759,32 @@
           '-',
           cmd.chordName, cmd.beatText, cmd.lyrics, cmd.fermata,
           '-',
-          { label: 'Fade', items: fades },
+          { label: t('Fade'), items: fades },
           cmd.volumeChange, cmd.panChange, cmd.soundChange,
         ],
       },
       {
-        label: 'Score',
+        label: t('Score'),
         items: [
           cmd.insertBar, cmd.removeBar, cmd.timeSignature, cmd.keySignature,
           '-',
           cmd.repeatStart, cmd.repeatEnd, cmd.endings,
-          { label: 'Segno, coda and fine', items: barList('targets', TARGETS) },
-          { label: 'Jumps at the end of the bar', items: barList('jumps', JUMPS) },
+          { label: t('Segno, coda and fine'), items: barList('targets', TARGETS) },
+          { label: t('Jumps at the end of the bar'), items: barList('jumps', JUMPS) },
           '-',
           cmd.section, cmd.barTempo, cmd.tempoGradual, cmd.timer,
-          { label: 'Feel', items: barChoices('feel', FEELS) },
+          { label: t('Feel'), items: barChoices('feel', FEELS) },
           '-',
           cmd.scoreInfo,
           '-',
           cmd.play, cmd.metronome, cmd.countIn, cmd.loop, cmd.trainer, cmd.replayRepeats,
-          { label: 'Playback speed', items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
-          { label: 'Sound', items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
+          { label: t('Playback speed'), items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
+          { label: t('Sound'), items: [cmd.soundDefault, cmd.soundCustom, cmd.soundModels] },
           cmd.masterEffects,
         ],
       },
       {
-        label: 'Track',
+        label: t('Track'),
         items: [
           ...tracks,
           '-',
@@ -1726,48 +1798,48 @@
         ],
       },
       {
-        label: 'View',
+        label: t('View'),
         items: [
           cmd.zoomIn, cmd.zoomOut, '-',
           ...notations,
           cmd.multitrack,
           '-',
           cmd.instrument, cmd.pedalboard, cmd.audioPanel, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
-          { label: 'Theme', items: themes },
+          { label: t('Theme'), items: themes },
         ],
       },
-      { label: 'Tools', items: [cmd.tuner, cmd.lineIn, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
-      { label: 'Help', items: [cmd.commandPalette, cmd.shortcuts] },
+      { label: t('Tools'), items: [cmd.tuner, cmd.lineIn, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
+      { label: t('Help'), items: [cmd.commandPalette, cmd.shortcuts] },
     ];
   });
 
   /** The keys that are not commands, listed with the shortcuts but not to be changed. */
   const fixedKeys: ShortcutGroup[] = [
     {
-      title: 'Moving',
+      title: t('Moving'),
       rows: [
-        { keys: '← → ↑ ↓', label: 'Move between beats and strings, or on a piano the notes of the key' },
-        { keys: 'Shift+arrows', label: 'Extend the selection' },
-        { keys: 'Ctrl+← / Ctrl+→', label: 'Previous or next bar' },
-        { keys: 'Home / End', label: 'First or last bar' },
+        { keys: '← → ↑ ↓', label: t('Move between beats and strings, or on a piano the notes of the key') },
+        { keys: t('Shift+arrows'), label: t('Extend the selection') },
+        { keys: 'Ctrl+← / Ctrl+→', label: t('Previous or next bar') },
+        { keys: 'Home / End', label: t('First or last bar') },
       ],
     },
     {
-      title: 'Entering notes',
+      title: t('Entering notes'),
       rows: [
-        { keys: '0–9', label: 'Fret; two digits typed quickly make one number' },
-        { keys: 'A–G', label: 'On a piano: the note of that name nearest the cursor, before any command on those keys' },
-        { keys: 'Enter', label: 'On a piano: a note where the cursor is' },
-        { keys: 'Alt+↑ / Alt+↓', label: 'On a piano: the note under the cursor a semitone up or down' },
-        { keys: '+ / −', label: 'Shorter or longer note value' },
+        { keys: '0–9', label: t('Fret; two digits typed quickly make one number') },
+        { keys: 'A–G', label: t('On a piano: the note of that name nearest the cursor, before any command on those keys') },
+        { keys: 'Enter', label: t('On a piano: a note where the cursor is') },
+        { keys: 'Alt+↑ / Alt+↓', label: t('On a piano: the note under the cursor a semitone up or down') },
+        { keys: '+ / −', label: t('Shorter or longer note value') },
       ],
     },
     {
-      title: 'Interface',
+      title: t('Interface'),
       rows: [
-        { keys: 'Tab / Shift+Tab', label: 'Move between the bars, palette and score' },
-        { keys: 'Arrows', label: 'Move within a bar, the palette or a menu' },
-        { keys: 'Esc', label: 'Back to the score' },
+        { keys: 'Tab / Shift+Tab', label: t('Move between the bars, palette and score') },
+        { keys: t('Arrows'), label: t('Move within a bar, the palette or a menu') },
+        { keys: 'Esc', label: t('Back to the score') },
       ],
     },
   ];
@@ -1786,7 +1858,7 @@
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen) return;
+    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen || prefsOpen) return;
     if (!doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menubar"]')) return;
@@ -1870,15 +1942,18 @@
       if (autosave) {
         try {
           const recovered = Document.load(autosave.bytes);
-          recovered.markUnsaved();
+          // A score saved before the app started again is as it was; one that was not is work to save.
+          if (!autosave.saved) recovered.markUnsaved();
           setDocument(recovered, autosave.name, autosave.path);
-          message = `Recovered unsaved changes to ${autosave.name}`;
+          if (!autosave.saved) message = t('Recovered unsaved changes to {name}', { name: autosave.name });
           return;
         } catch {
           writeAutosave(null);
         }
       }
       setDocument(new Document(), UNTITLED, null);
+      const reopen = takeReopenAfterRestart();
+      if (reopen) openRecent(reopen);
     });
     // The samples are big, so they are fetched once the app is up; until they arrive,
     // playback uses the built-in models.
@@ -1909,7 +1984,7 @@
       <h1 class="brand">gtrTab</h1>
       <MenuBar {menus} onclose={focusScore} />
       <span class="rule"></span>
-      <div class="cluster" role="toolbar" aria-label="File and edit" use:roving>
+      <div class="cluster" role="toolbar" aria-label={t('File and edit')} use:roving>
         <ToolButton command={cmd.new} />
         <ToolButton command={cmd.open} />
         <ToolButton command={cmd.save} />
@@ -1921,13 +1996,13 @@
     </div>
 
     {#if score && editor}
-      <div class="transport" role="toolbar" aria-label="Playback and view" use:roving>
+      <div class="transport" role="toolbar" aria-label={t('Playback and view')} use:roving>
         <button
           type="button"
           class="tool play"
-          aria-label={playing ? 'Stop' : cmd.play.label}
+          aria-label={playing ? t('Stop') : cmd.play.label}
           aria-keyshortcuts={shownKeys(cmd.play)}
-          use:tip={{ label: playing ? 'Stop' : cmd.play.label, keys: shownKeys(cmd.play) }}
+          use:tip={{ label: playing ? t('Stop') : cmd.play.label, keys: shownKeys(cmd.play) }}
           onmousedown={(e) => e.preventDefault()}
           onclick={togglePlay}
         >
@@ -1949,9 +2024,9 @@
         <button
           type="button"
           class="chip"
-          aria-label="Playback speed: {speed}%"
+          aria-label={t('Playback speed: {speed}%', { speed })}
           aria-keyshortcuts={speedKeys.join(' ') || undefined}
-          use:tip={{ label: 'Playback speed', keys: speedKeys.join(' / ') || undefined }}
+          use:tip={{ label: t('Playback speed'), keys: speedKeys.join(' / ') || undefined }}
           onmousedown={(e) => e.preventDefault()}
           onclick={cmd.speedOther.run}
         >
@@ -1961,8 +2036,8 @@
         <button
           type="button"
           class="chip"
-          aria-label="Tempo: {score.tempo} beats per minute"
-          use:tip={{ label: 'Tempo' }}
+          aria-label={t('Tempo: {tempo} beats per minute', { tempo: score.tempo })}
+          use:tip={{ label: t('Tempo') }}
           onmousedown={(e) => e.preventDefault()}
           onclick={cmd.scoreInfo.run}
         >
@@ -1971,7 +2046,7 @@
         </button>
         <span class="rule"></span>
         <ToolButton command={cmd.zoomOut} />
-        <span class="zoom" aria-label="Zoom {zoom * 100}%">{zoom * 100}%</span>
+        <span class="zoom" aria-label={t('Zoom {percent}%', { percent: zoom * 100 })}>{zoom * 100}%</span>
         <ToolButton command={cmd.zoomIn} />
         <span class="rule"></span>
         <ToolButton command={cmd.compact} />
@@ -1982,8 +2057,8 @@
         <button
           type="button"
           class="tool"
-          aria-label="Theme: {THEME_NAMES[prefs.theme]}"
-          use:tip={{ label: `Theme: ${THEME_NAMES[prefs.theme]}` }}
+          aria-label={t('Theme: {theme}', { theme: THEME_NAMES[prefs.theme] })}
+          use:tip={{ label: t('Theme: {theme}', { theme: THEME_NAMES[prefs.theme] }) }}
           onmousedown={(e) => e.preventDefault()}
           onclick={() => setTheme(THEMES[(THEMES.indexOf(prefs.theme) + 1) % THEMES.length])}
         >
@@ -2004,7 +2079,7 @@
           keys={score.master_bars.map((bar) => bar.key_signature)}
           {playhead}
           {zoom}
-          theme={prefs.theme}
+          theme={look}
           onpick={(bar, beat, string, extend, staff) =>
             edit((d) => {
               if (staff) {
@@ -2040,7 +2115,7 @@
             peaks={recordingPeaks}
             problem={recordingProblem}
             cursorBar={editor.cursor.bar}
-            theme={prefs.theme}
+            theme={look}
             now={recordingNow}
             onsync={(place, millis) => edit((d) => d.syncRecording(place, millis))}
             onunsync={(place) => edit((d) => d.unsyncRecording(place))}
@@ -2112,7 +2187,7 @@
       {/if}
     </div>
   {:else}
-    <main>{failed ? '' : 'Loading…'}</main>
+    <main>{failed ? '' : t('Loading…')}</main>
   {/if}
 
   <!-- The score is drawn on a canvas, which says nothing to a screen reader: this says what
@@ -2120,7 +2195,7 @@
   <p class="sr-only" aria-live="polite" aria-atomic="true" data-position>{position}</p>
 
   <footer class:failed>
-    <span role="status">{message || (shownKeys(cmd.shortcuts) ? `Press ${shownKeys(cmd.shortcuts)} for the keyboard shortcuts` : '')}</span>
+    <span role="status">{message || (shownKeys(cmd.shortcuts) ? t('Press {keys} for the keyboard shortcuts', { keys: shownKeys(cmd.shortcuts)! }) : '')}</span>
     {#if editor && score}
       <span>
         {score.tracks[editor.cursor.track]?.name}{#if (score.tracks[editor.cursor.track]?.staves.length ?? 1) > 1}, staff {editor.cursor.staff + 1}{/if}
@@ -2312,6 +2387,23 @@
     custom={prefs.shortcuts}
     onchange={(custom) => (prefs.shortcuts = custom)}
     onclose={() => (shortcutsOpen = false)}
+  />
+{/if}
+
+{#if prefsOpen}
+  <Preferences
+    {prefs}
+    set={setPref}
+    {languageAtStart}
+    sounds={[cmd.soundDefault, cmd.soundCustom, cmd.soundModels]}
+    shortcuts={{ ...cmd.shortcuts, run: () => ((prefsOpen = false), (shortcutsOpen = true)) }}
+    palette={{ ...cmd.commandPalette, run: () => ((prefsOpen = false), (paletteOpen = true)) }}
+    onrestart={restart}
+    onreset={resetPrefs}
+    onclose={() => {
+      prefsOpen = false;
+      focusScore();
+    }}
   />
 {/if}
 

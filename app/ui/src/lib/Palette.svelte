@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import type { PaletteSection } from './commands';
   import Icon from './ui/Icon.svelte';
   import { roving } from './ui/roving';
@@ -17,7 +18,7 @@
   let { sections, compact, collapsed, ontoggle }: Props = $props();
 </script>
 
-<aside class="palette" class:compact aria-label="Tools" use:roving>
+<aside class="palette" class:compact aria-label={t('Tools')} use:roving>
   {#each sections as section}
     {@const folded = collapsed.includes(section.id)}
     <section>
@@ -26,7 +27,7 @@
         class="title"
         aria-expanded={!folded}
         aria-label={section.title}
-        use:tip={{ label: `${folded ? 'Show' : 'Hide'} ${section.title.toLowerCase()}`, side: 'right' }}
+        use:tip={{ label: folded ? t('Show {section}', { section: section.title }) : t('Hide {section}', { section: section.title }), side: 'right' }}
         onmousedown={(e) => e.preventDefault()}
         onclick={() => ontoggle(section.id)}
       >

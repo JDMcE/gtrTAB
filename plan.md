@@ -324,9 +324,17 @@ Checks owed, none of which a program here can make: listening to each pedal and 
 - [ ] Batch file conversion
 - [ ] The audio track's recording in exported audio and in the copy kept in case the app closes, its bars found by listening for the beat, its sync points kept on their bars when repeats and jumps change, and a row for it in the track pane (left out in phase 9)
 - [ ] The pedals and amplifiers of Guitar Pro 6 and later, and its tracks' sounds and the switches between them, imported onto the tracks' chains and sounds and exported from them (left out in phase 9)
-- [ ] Preferences, themes, localisation scaffolding
+- [x] Preferences, themes, localisation scaffolding. How things stand:
+  - Edit > Preferences… (Ctrl+,) gathers what was spread over the menus: the theme, the contrast, what the score is drawn on, the language, when the palette narrows and the inspector shows, the track pane and the visual metronome, what playback sounds through, and the way to the keyboard shortcuts and the command palette. Reset preferences puts them back as they came, keeping the keys given to commands
+  - High contrast, for the light theme and the dark, follows the system's asking for more contrast until it is set (`applyLook`); it passes the automated accessibility checks in both. The score can be drawn on white paper whatever the theme, as it is printed
+  - Each text is written in English where it is used, wrapped in `t()` or, where it changes with a number, `tn()`, and a translation is a file in `src/locales` of the English and its translation, the plural forms by `Intl.PluralRules` (`i18n.ts`, `locales.ts`). The language is chosen before the app loads, from the preferences or the browser, so that every text is translated where it is made; a new choice takes effect when the app starts again, which the preferences offer to do at once, keeping the score open and work not saved as it was. The page is marked with the language and its direction. `npm run messages` lists every text to translate, and `messages.test.mjs` fails on a text not written out where it is wrapped, or a translation of one the interface no longer has, or with other parameters. The pseudo-language, chosen in the preferences, shows every text translated in brackets with its letters accented and a third longer, so that those not wrapped stand out in English. `i18n.test.mjs`, `e2e/preferences.spec.ts`
 - [ ] Signed installers and auto-update for Windows, macOS, Linux. macOS installers have to be built on a Mac, so they come from a release workflow on GitHub's macOS runners, set up with the first release; nothing has been run on a Mac beyond the CI compile
 - [ ] Offline-capable web app with local file access
+
+Known simplifications, each with when it is removed:
+
+- Only the menus, the commands, the toolbars, the command palette, the shortcuts and the preferences have their texts wrapped for translation so far. The dialogs, the inspector, the pedalboard, the track pane, the audio track, the instrument view, the words the score is put in for a screen reader (`describe.ts`), which want their grammar as much as their words, and the texts the core makes, such as the score's "Untitled" and the problems an import reports, are still in English. (Before the first translation is taken in)
+- The keys are shown as Ctrl, Alt and Shift on every system, rather than as ⌘, ⌥ and ⇧ on a Mac. (With the macOS release)
 
 ## Testing
 

@@ -195,6 +195,8 @@ export interface Autosave {
   name: string;
   path: string | null;
   bytes: Uint8Array;
+  /** Kept only for the app to start again with, and saved already: nothing to recover. */
+  saved?: boolean;
 }
 
 /** Stores unsaved work so it survives a crash or closed tab; `null` clears it. */
@@ -202,15 +204,37 @@ export function writeAutosave(autosave: Autosave | null): void {
   if (autosave === null) return write(AUTOSAVE_KEY, null);
   let binary = '';
   for (const byte of autosave.bytes) binary += String.fromCharCode(byte);
-  write(AUTOSAVE_KEY, { name: autosave.name, path: autosave.path, data: btoa(binary) });
+  write(AUTOSAVE_KEY, { name: autosave.name, path: autosave.path, data: btoa(binary), saved: autosave.saved });
 }
 
 export function readAutosave(): Autosave | null {
-  const stored = read<{ name: string; path: string | null; data: string }>(AUTOSAVE_KEY);
+  const stored = read<{ name: string; path: string | null; data: string; saved?: boolean }>(AUTOSAVE_KEY);
   if (!stored) return null;
   try {
     const bytes = Uint8Array.from(atob(stored.data), (c) => c.charCodeAt(0));
-    return { name: stored.name, path: stored.path, bytes };
+    return { name: stored.name, path: stored.path, bytes, saved: stored.saved };
+  } catch {
+    return null;
+  }
+}
+
+const REOPEN_KEY = 'gtrtab.reopen';
+
+/** Has the app open a saved file again when it starts next, in this window. */
+export function reopenAfterRestart(path: string): void {
+  try {
+    sessionStorage.setItem(REOPEN_KEY, path);
+  } catch {
+    // Without storage the app starts with a new score, and the file is in the recent list.
+  }
+}
+
+/** The file to open again as the app starts, if one was left, which is then forgotten. */
+export function takeReopenAfterRestart(): string | null {
+  try {
+    const path = sessionStorage.getItem(REOPEN_KEY);
+    sessionStorage.removeItem(REOPEN_KEY);
+    return path;
   } catch {
     return null;
   }

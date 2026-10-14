@@ -306,7 +306,7 @@
   });
 </script>
 
-<div class="score">
+<div class="score" data-paper>
   <canvas bind:this={canvas}></canvas>
   <span bind:this={probe} hidden></span>
   <!-- The score takes the keyboard whenever no other control has it. -->

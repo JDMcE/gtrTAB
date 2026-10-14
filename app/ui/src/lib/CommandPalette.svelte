@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from './i18n';
   import type { Found } from './search';
   import { search } from './search';
   import Icon from './ui/Icon.svelte';
@@ -63,25 +64,25 @@
   }
 </script>
 
-<dialog bind:this={dialog} aria-label="Command palette" onclose={() => onclose()}>
+<dialog bind:this={dialog} aria-label={t('Command palette')} onclose={() => onclose()}>
   <div class="search">
     <Icon name="search" size={16} />
     <input
       type="text"
       role="combobox"
-      aria-label="Command"
+      aria-label={t('Command')}
       aria-expanded="true"
       aria-controls="commands"
       aria-autocomplete="list"
       aria-activedescendant={found.length ? option(at) : undefined}
-      placeholder="Type a command"
+      placeholder={t('Type a command')}
       autocomplete="off"
       spellcheck="false"
       bind:value={query}
       onkeydown={onKeydown}
     />
   </div>
-  <ul id="commands" role="listbox" aria-label="Commands" bind:this={list}>
+  <ul id="commands" role="listbox" aria-label={t('Commands')} bind:this={list}>
     {#each found as item, i (item.id)}
       {@const disabled = item.command.disabled?.() ?? false}
       {@const checked = item.command.active?.()}
@@ -105,7 +106,7 @@
         {#if keys}<kbd>{keys}</kbd>{/if}
       </li>
     {:else}
-      <li class="none" role="presentation">No command matches “{query}”</li>
+      <li class="none" role="presentation">{t('No command matches “{query}”', { query })}</li>
     {/each}
   </ul>
 </dialog>
