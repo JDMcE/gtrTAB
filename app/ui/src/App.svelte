@@ -79,6 +79,8 @@
   import { THEMES, applyTheme, loadPrefs, savePrefs, type Theme } from './lib/prefs';
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
+  import CommandPalette from './lib/CommandPalette.svelte';
+  import { listCommands, used, type Found } from './lib/search';
   import TrackPane from './lib/TrackPane.svelte';
   import { describeCursor } from './lib/describe';
   import Icon from './lib/ui/Icon.svelte';
@@ -157,6 +159,7 @@
   let standardKit = $state.raw<DrumPiece[]>([]);
   let kitDialog = $state(false);
   let shortcutsOpen = $state(false);
+  let paletteOpen = $state(false);
   let zoom = $state(1);
 
   let playing = $state(false);
@@ -1516,6 +1519,7 @@
     },
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
+    commandPalette: { label: 'Command palette…', icon: 'search', keys: 'Ctrl+K', run: () => (paletteOpen = true) },
   } satisfies Record<string, Command>;
 
   const speeds: Command[] = SPEEDS.map((percent) => ({
@@ -1712,7 +1716,7 @@
         ],
       },
       { label: 'Tools', items: [cmd.tuner, cmd.lineIn, '-', cmd.chordLibrary, cmd.scaleLibrary, cmd.findScale] },
-      { label: 'Help', items: [cmd.shortcuts] },
+      { label: 'Help', items: [cmd.commandPalette, cmd.shortcuts] },
     ];
   });
 
@@ -1768,6 +1772,7 @@
     {
       title: 'Interface',
       rows: [
+        { keys: 'Ctrl+K / Ctrl+Shift+P', label: 'Command palette: any command by name' },
         { keys: '? / F1', label: 'This list' },
         { keys: 'Tab / Shift+Tab', label: 'Move between the bars, palette and score' },
         { keys: 'Arrows', label: 'Move within a bar, the palette or a menu' },
@@ -1776,10 +1781,19 @@
     },
   ];
 
+  /** Closes the command palette, and runs what was chosen there as the menus would. */
+  function runFromPalette(chosen?: Found) {
+    paletteOpen = false;
+    focusScore();
+    if (!chosen) return;
+    prefs.recentCommands = used(prefs.recentCommands, chosen.id);
+    chosen.command.run();
+  }
+
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen) return;
+    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen) return;
     if (!doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menubar"]')) return;
@@ -1810,7 +1824,8 @@
         case 'v': return cmd.paste.run;
         case 's': return () => save(shift);
         case 'o': return open;
-        case 'p': return cmd.print.run;
+        case 'p': return shift ? cmd.commandPalette.run : cmd.print.run;
+        case 'k': return cmd.commandPalette.run;
         case 'n': return newScore;
         case 'arrowleft': return move('prev_bar');
         case 'arrowright': return move('next_bar');
@@ -2334,6 +2349,10 @@
 
 {#if shortcutsOpen}
   <Shortcuts groups={shortcutGroups} onclose={() => (shortcutsOpen = false)} />
+{/if}
+
+{#if paletteOpen}
+  <CommandPalette commands={listCommands(menus)} recent={prefs.recentCommands} onclose={runFromPalette} />
 {/if}
 
 <style>

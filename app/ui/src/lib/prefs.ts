@@ -35,6 +35,8 @@ export interface Prefs {
   pedalboard: boolean;
   /** The audio track shown under the score, if the score has one. */
   audio: boolean;
+  /** Ids of the commands last run from the command palette, the latest first. */
+  recentCommands: string[];
 }
 
 const KEY = 'gtrtab.ui';
@@ -52,6 +54,7 @@ const DEFAULTS: Prefs = {
   instrument: false,
   pedalboard: false,
   audio: true,
+  recentCommands: [],
 };
 
 export function loadPrefs(): Prefs {
