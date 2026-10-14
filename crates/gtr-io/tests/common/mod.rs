@@ -115,6 +115,8 @@ pub fn band() -> Score {
 
     let mut masters = vec![MasterBar::new(TimeSignature::COMMON); 4];
     masters[0].section = Some("Intro".into());
+    masters[2].line_break = true;
+    masters[3].page_break = true;
     masters[0].repeat_start = true;
     masters[0].key_signature = 1;
     masters[1].key_signature = 1;
@@ -284,6 +286,7 @@ pub fn band() -> Score {
         tracks: vec![guitar, bass, piano, drums],
         effects: Vec::new(),
         audio: None,
+        style: Default::default(),
     };
     // A pause is everybody's: every beat that starts at the same moment has it.
     let voices = (score.tracks.iter_mut().flat_map(|t| &mut t.staves))

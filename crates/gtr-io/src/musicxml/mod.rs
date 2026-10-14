@@ -23,6 +23,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
 pub fn export(score: &Score) -> Exported {
     let mut skipped = Skipped::default();
     let xml = write::write(score, &mut skipped);
+    skipped.add_if(!score.style.is_default(), "the stylesheet");
     Exported {
         bytes: xml.into_bytes(),
         skipped: skipped.list(),

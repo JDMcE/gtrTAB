@@ -2,7 +2,7 @@ use gtr_model::{
     Bar, Beat, BeatEffects, ChordDiagram, Clef, Duration, Instrument, KitPiece, MasterBar, Mix,
     Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
-use gtr_model::{Pedal, Rational, Sound, TempoChange};
+use gtr_model::{Pedal, Rational, Sound, Style, TempoChange};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -914,6 +914,14 @@ impl Editor {
 
     pub fn set_info(&mut self, info: ScoreInfo) -> Result<(), EditError> {
         self.run(Command::SetInfo { info })
+    }
+
+    /// Sets how the score is set out, in one step to undo.
+    pub fn set_style(&mut self, style: Style) -> Result<(), EditError> {
+        if style == self.score.style {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetStyle { style }))
     }
 
     // --- Tracks ---

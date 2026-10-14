@@ -455,6 +455,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         tracks,
         effects: Vec::new(),
         audio: None,
+        style: Default::default(),
     })
 }
 

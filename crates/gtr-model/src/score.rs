@@ -23,6 +23,10 @@ pub struct Score {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     #[ts(optional)]
     pub audio: Option<crate::AudioTrack>,
+    /// How the score is set out.
+    #[serde(default, skip_serializing_if = "crate::Style::is_default")]
+    #[ts(optional, as = "Option<crate::Style>")]
+    pub style: crate::Style,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
@@ -97,6 +101,19 @@ pub struct MasterBar {
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     #[ts(optional, as = "Option<bool>")]
     pub timer: bool,
+    /// A new line of music starts with this bar.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
+    pub line_break: bool,
+    /// A new page starts with this bar, and so a new line.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[ts(optional, as = "Option<bool>")]
+    pub page_break: bool,
+    /// How wide the bar is, as a percentage of the room its notes would have; `None` for
+    /// as it comes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(optional)]
+    pub width: Option<u16>,
 }
 
 /// A new tempo from a beat inside a bar.
@@ -294,8 +311,14 @@ impl MasterBar {
             tempo_changes: Vec::new(),
             feel: None,
             timer: false,
+            line_break: false,
+            page_break: false,
+            width: None,
         }
     }
+
+    /// The narrowest and widest a bar can be made, as a percentage.
+    pub const WIDTHS: std::ops::RangeInclusive<u16> = 25..=400;
 
     pub fn is_valid(&self) -> bool {
         self.time_signature.is_valid()
@@ -309,6 +332,7 @@ impl MasterBar {
             })
             && (self.tempo_changes.windows(2)).all(|w| w[0].position < w[1].position)
             && (self.section.as_ref()).is_none_or(|s| s.chars().count() <= 120)
+            && self.width.is_none_or(|w| MasterBar::WIDTHS.contains(&w))
     }
 }
 
@@ -661,6 +685,8 @@ pub enum ModelError {
     InvalidEffects,
     #[error("the audio track's mix or sync points are not valid")]
     InvalidAudio,
+    #[error("the stylesheet has a setting out of range")]
+    InvalidStyle,
     #[error("track {track} has no staff, or settings that are out of range")]
     InvalidTrack { track: usize },
     #[error("track {track} staff {staff} has too many strings")]
@@ -690,6 +716,7 @@ impl Score {
             tracks: vec![Track::empty("Guitar", Instrument::default(), 1)],
             effects: Vec::new(),
             audio: None,
+            style: Default::default(),
         }
     }
 
@@ -707,6 +734,9 @@ impl Score {
         }
         if self.audio.as_ref().is_some_and(|a| !a.is_valid()) {
             return Err(ModelError::InvalidAudio);
+        }
+        if !self.style.is_valid() {
+            return Err(ModelError::InvalidStyle);
         }
         for (track, t) in self.tracks.iter().enumerate() {
             if t.staves.is_empty()

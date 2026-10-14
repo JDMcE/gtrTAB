@@ -3,6 +3,7 @@ import type { AudioTrack } from "./AudioTrack";
 import type { MasterBar } from "./MasterBar";
 import type { Pedal } from "./Pedal";
 import type { ScoreInfo } from "./ScoreInfo";
+import type { Style } from "./Style";
 import type { Track } from "./Track";
 
 export type Score = { info: ScoreInfo, 
@@ -21,4 +22,8 @@ effects?: Array<Pedal>,
 /**
  * A recording to play along with, which the bars are timed to.
  */
-audio?: AudioTrack, };
+audio?: AudioTrack, 
+/**
+ * How the score is set out.
+ */
+style?: Style, };

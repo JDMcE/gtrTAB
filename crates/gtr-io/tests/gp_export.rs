@@ -18,6 +18,9 @@ fn outline(bend: &mut Bend) {
 /// first beat that is the mixer's own is the mixer's; and with `outlines`, pitch curves
 /// are compared by their outline alone.
 fn as_written(mut score: Score, outlines: bool) -> Score {
+    for master in &mut score.master_bars {
+        (master.line_break, master.page_break) = (false, false);
+    }
     for track in &mut score.tracks {
         let mix = track.mix;
         let first =
@@ -57,9 +60,13 @@ fn a_score_with_everything_reads_back_as_it_was() {
     let score = band();
     let written = export(&score).unwrap();
     common::keep("band.gp", &written.bytes);
-    assert_eq!(written.skipped, [] as [&str; 0]);
+    assert_eq!(
+        written.skipped,
+        ["where lines and pages were made to break"]
+    );
     let read = import(&written.bytes).unwrap();
     assert_eq!(read.skipped, [] as [&str; 0]);
+    let score = as_written(score, false);
     assert_eq!(difference(&score, &read.score), None);
     assert_eq!(score, read.score);
 }
@@ -103,7 +110,8 @@ fn what_the_format_cannot_say_is_reported() {
         written.skipped,
         [
             "the exact shape of curves with more than four points",
-            "volumes louder than Guitar Pro goes"
+            "volumes louder than Guitar Pro goes",
+            "where lines and pages were made to break"
         ]
     );
     // The curve keeps its start, its furthest reach and its end.

@@ -196,6 +196,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score, ImportE
         tracks,
         effects: Vec::new(),
         audio: None,
+        style: Default::default(),
     })
 }
 
@@ -617,6 +618,18 @@ fn read_part(
                             master.time_signature = signature;
                             global.set[bar].time = true;
                         }
+                    }
+                }
+                "print" => {
+                    // Where the file starts a new line or page; the first bar always does.
+                    let master = &mut global.masters[bar];
+                    let yes = |name: &str| node.attribute(name) == Some("yes");
+                    // A new page is a new line already, whatever another part says.
+                    if bar > 0 && yes("new-page") {
+                        master.page_break = true;
+                        master.line_break = false;
+                    } else if bar > 0 && yes("new-system") && !master.page_break {
+                        master.line_break = true;
                     }
                 }
                 "backup" => {

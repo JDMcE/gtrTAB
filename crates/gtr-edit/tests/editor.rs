@@ -923,3 +923,41 @@ fn a_track_switches_sound_part_way_and_a_sound_taken_away_keeps_the_others_right
     e.set_track_info(0, "Bass", Instrument::Bass).unwrap();
     assert_eq!(e.score().tracks[0].sounds.len(), 3);
 }
+
+#[test]
+fn the_stylesheet_is_set_in_one_step_to_undo_and_must_be_in_range() {
+    let mut e = Editor::new(Score::blank());
+    let mut style = gtr_model::Style {
+        size: 140,
+        bars_per_line: Some(4),
+        ..Default::default()
+    };
+    e.set_style(style).unwrap();
+    assert_eq!(e.score().style, style);
+    assert!(e.state().dirty);
+    assert!(e.undo().unwrap());
+    assert_eq!(e.score().style, gtr_model::Style::default());
+    style.size = 10;
+    assert!(e.set_style(style).is_err());
+    assert_eq!(e.score().style, gtr_model::Style::default());
+}
+
+#[test]
+fn a_bar_is_made_to_start_a_line_or_a_page_and_given_a_width() {
+    let mut e = Editor::new(Score::blank());
+    e.insert_bar().unwrap();
+    e.set_bar_property("line_break", &serde_json::json!(true))
+        .unwrap();
+    e.set_bar_property("width", &serde_json::json!(150))
+        .unwrap();
+    let bar = e.cursor().bar;
+    assert!(e.score().master_bars[bar].line_break);
+    assert_eq!(e.score().master_bars[bar].width, Some(150));
+    assert!(
+        e.set_bar_property("width", &serde_json::json!(1000))
+            .is_err()
+    );
+    e.set_bar_property("width", &serde_json::Value::Null)
+        .unwrap();
+    assert_eq!(e.score().master_bars[bar].width, None);
+}

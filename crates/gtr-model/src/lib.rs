@@ -9,6 +9,7 @@ mod pedal;
 mod playback;
 mod recording;
 mod score;
+mod style;
 mod tuning;
 
 pub use demo::demo_score;
@@ -30,4 +31,5 @@ pub use score::{
     Bar, Beat, Feel, Jump, MasterBar, ModelError, Note, Score, ScoreInfo, Staff, Target,
     TempoChange, TimeSignature, Track, Voice,
 };
+pub use style::{BarNumbers, Style, TabRhythm};
 pub use tuning::Tuning;

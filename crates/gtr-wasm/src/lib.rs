@@ -750,6 +750,19 @@ impl Document {
         Ok(self.editor.set_tuning(Tuning::new(strings), capo)?)
     }
 
+    /// The stylesheet a score comes with, as JSON.
+    #[wasm_bindgen(js_name = defaultStyleJson)]
+    pub fn default_style_json() -> String {
+        serde_json::to_string(&gtr_model::Style::default()).unwrap_or_default()
+    }
+
+    /// Sets the score's stylesheet, a `gtr_model::Style` as JSON, in one step to undo.
+    #[wasm_bindgen(js_name = setStyle)]
+    pub fn set_style(&mut self, style_json: &str) -> Result<(), JsError> {
+        let style: gtr_model::Style = serde_json::from_str(style_json)?;
+        Ok(self.editor.set_style(style)?)
+    }
+
     /// Sets the title, credits and copyright. `info_json` holds `gtr_model::ScoreInfo`
     /// fields; the ones left out are cleared.
     #[wasm_bindgen(js_name = setInfo)]

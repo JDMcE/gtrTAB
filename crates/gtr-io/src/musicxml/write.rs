@@ -379,6 +379,7 @@ fn bar_marks(master: &MasterBar, start: Option<u32>, skipped: &mut Skipped) -> S
         "that a tempo changes by degrees",
     );
     skipped.add_if(master.timer, "timers");
+    skipped.add_if(master.width.is_some(), "widths of bars");
     if let Some(feel) = master.feel {
         let swing = match FEELS.iter().find(|(named, ..)| *named == feel) {
             Some((_, first, second, eighths)) => format!(
@@ -424,6 +425,12 @@ fn part(w: &mut Writer, index: usize, skipped: &mut Skipped) {
     let mut previous: Option<&MasterBar> = None;
     for (bar, master) in score.master_bars.iter().enumerate() {
         let _ = writeln!(w.out, "<measure number=\"{}\">", bar + 1);
+        // Where the score was made to start a new line or page; the first part says so for all.
+        if index == 0 && master.page_break {
+            w.out.push_str("<print new-page=\"yes\"/>\n");
+        } else if index == 0 && master.line_break {
+            w.out.push_str("<print new-system=\"yes\"/>\n");
+        }
 
         // What the staves are, at the start and wherever the key or the time changes.
         let key = previous.is_none_or(|p| p.key_signature != master.key_signature);

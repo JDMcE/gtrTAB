@@ -1,7 +1,9 @@
 //! Puts a score on the page: breaks it into lines, stacks the staves of each line and has
 //! each staff drawn.
 
-use gtr_model::{Bar, Clef, MasterBar, Rational, Score, Staff, Target, TempoPoint};
+use gtr_model::{
+    Bar, BarNumbers, Clef, MasterBar, Rational, Score, Staff, Style, TabRhythm, Target, TempoPoint,
+};
 use serde::Deserialize;
 
 use crate::display::r;
@@ -14,11 +16,6 @@ use crate::{Align, BarBox, BarStatus, Color, Font, Item, Layout, RowBox, SystemB
 
 pub(crate) const MARGIN_X: f64 = 36.0;
 const HEADER_HEIGHT: f64 = 96.0;
-const SYSTEM_GAP: f64 = 18.0;
-/// Space between the staves of two tracks on the same line.
-const TRACK_GAP: f64 = 16.0;
-/// Space between a track's notation and its tab.
-const STAFF_GAP: f64 = 12.0;
 /// Room at the start of a line for the letters TAB.
 const TAB_PREFIX: f64 = 28.0;
 /// Room at the start of a line for a clef.
@@ -63,6 +60,9 @@ pub struct View {
     /// Every bar on one line, each as wide as it needs, for scrolling along sideways. The
     /// heading is laid out to the width given, and the line runs on past it.
     pub single_line: bool,
+    /// Marks where lines and pages were made to break and bars given a width, for whoever
+    /// is setting the score out.
+    pub design: bool,
 }
 
 /// One staff of a track with what its notation needs.
@@ -96,8 +96,22 @@ pub fn layout_track(score: &Score, track: usize, width: f64) -> Layout {
     layout(score, &view, width)
 }
 
-/// Lays out the score as `view` asks, wrapped to `width` pixels.
+/// Lays out the score as `view` asks, wrapped to `width` pixels, in the size its
+/// stylesheet sets: larger music is laid out to a narrower width and scaled up to fit.
 pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
+    let scale = score.style.size as f64 / 100.0;
+    let laid = lay_out(score, view, width / scale);
+    match score.style.size {
+        100 => laid,
+        _ => laid.scaled(scale),
+    }
+}
+
+fn lay_out(score: &Score, view: &View, width: f64) -> Layout {
+    let style: &Style = &score.style;
+    let line_gap = style.line_gap as f64;
+    let track_gap = style.track_gap as f64;
+    let staff_gap = style.staff_gap as f64;
     let edit_track = view.track.min(score.tracks.len() - 1);
     let voice = view.voice.min(Bar::MAX_VOICES - 1);
     let shown: Vec<usize> = match view.multitrack {
@@ -182,6 +196,9 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 key,
                 repeat,
             );
+            // The notes stand as far apart as the stylesheet and the bar's own width ask.
+            let spread = style.spacing as f64 / 100.0 * master.width.unwrap_or(100) as f64 / 100.0;
+            measured.width = measured.fixed + (measured.width - measured.fixed) * spread;
             // A bar is at least as wide as what is written over it.
             let marks = marks_width(master, i, times[i]);
             measured.width = measured.width.max(marks);
@@ -201,7 +218,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
     let width = width.max(2.0 * MARGIN_X + widest_prefix + MIN_BAR_WIDTH);
 
     let mut items = vec![];
-    let header_height = header(score, width, &mut items);
+    let header_height = header(score, &shown, width, &mut items);
 
     // X of every beat laid out so far, as `[row][voice][bar][beat]`.
     let mut positions: Vec<Vec<Vec<Vec<f64>>>> =
@@ -218,16 +235,31 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             true => f64::INFINITY,
             false => width - MARGIN_X - left,
         };
-        // Take as many bars as fit, but always at least one.
+        // Take as many bars as fit, but always at least one, up to a bar that starts a
+        // line of its own. With a number of bars to a line, that many go on it, made to fit.
+        let breaks =
+            |bar: usize| !view.single_line && (masters[bar].line_break || masters[bar].page_break);
         let mut end = first + 1;
         let mut natural = measured[first].width;
-        while end < measured.len() && natural + measured[end].width <= available {
+        let counted = style
+            .bars_per_line
+            .filter(|_| !view.single_line)
+            .map(usize::from);
+        while end < measured.len()
+            && !breaks(end)
+            && match counted {
+                Some(count) => end - first < count,
+                None => natural + measured[end].width <= available,
+            }
+        {
             natural += measured[end].width;
             end += 1;
         }
+        let full = counted.is_some_and(|count| end - first == count);
         let fixed: f64 = measured[first..end].iter().map(|m| m.fixed).sum();
-        let mut stretch = (available - fixed) / (natural - fixed).max(1.0);
-        if end == measured.len() || view.single_line {
+        // Bars made to fit a line are squeezed no further than this.
+        let mut stretch = ((available - fixed) / (natural - fixed).max(1.0)).max(0.35);
+        if (end == measured.len() && !full) || view.single_line {
             // Leave a short final line ragged rather than stretching it across the page.
             stretch = stretch.min(1.0);
         }
@@ -446,11 +478,17 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 let staff_height = (part.staff.tuning.strings.len() - 1) as f64 * STRING_SPACING;
                 let head = match (lines.is_none() && row_lines.is_none(), row_lines) {
                     (true, _) => ABOVE_STAFF,
-                    (false, Some(_)) => STAFF_GAP,
+                    (false, Some(_)) => staff_gap,
                     (false, None) => 8.0,
                 };
-                // Under a notation staff the tab leaves the rhythm to the notation.
-                let rhythm = !part.standard && !slash;
+                // Under a notation staff the tab leaves the rhythm to the notation, unless
+                // the stylesheet asks for it on both.
+                let rhythm = !slash
+                    && match style.tab_rhythm {
+                        TabRhythm::Always => true,
+                        TabRhythm::Alone => !part.standard,
+                        TabRhythm::Never => false,
+                    };
                 let below = if rhythm { BELOW_STAFF } else { 12.0 };
                 let y = cursor + head + over_tab.height;
                 for (v, xs) in (positions[row].iter().enumerate()).take(part.staff_voices()) {
@@ -509,8 +547,14 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
 
             let (line_top, line_bottom) = row_lines.unwrap_or((cursor, cursor));
             if lines.is_none() {
-                // Bar numbers go above the first staff of the line.
-                for bar in range.clone() {
+                // Bar numbers go above the first staff of the line, over the bars the
+                // stylesheet has numbered.
+                let numbered = (range.clone()).filter(|&bar| match style.bar_numbers {
+                    BarNumbers::Every => true,
+                    BarNumbers::Lines => bar == first,
+                    BarNumbers::None => false,
+                });
+                for bar in numbered {
                     let invalid = matches!(
                         bars[bar].status,
                         BarStatus::Incomplete | BarStatus::Overfull
@@ -576,7 +620,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 beats: positions[row][voice][range.clone()].to_vec(),
             });
             if row + 1 < parts.len() {
-                cursor += if part.last { TRACK_GAP } else { STAFF_GAP };
+                cursor += if part.last { track_gap } else { staff_gap };
             }
         }
 
@@ -601,7 +645,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
                 Color::Ink,
             ));
         }
-        if first == 0 {
+        if first == 0 && style.tempo {
             items.push(Item::Text {
                 x: MARGIN_X,
                 y: r(top + 6.0),
@@ -619,6 +663,9 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             });
         }
 
+        if view.design {
+            design_marks(masters, &bars, range.clone(), first, edit_lines, &mut items);
+        }
         systems.push(SystemBox {
             top: r(top),
             y: r(edit_y),
@@ -626,8 +673,9 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             cursor_top: r(edit_lines.0),
             cursor_bottom: r(edit_lines.1),
             rows,
+            new_page: first > 0 && masters[first].page_break && !view.single_line,
         });
-        top = cursor + SYSTEM_GAP;
+        top = cursor + line_gap;
         first = end;
     }
 
@@ -969,18 +1017,33 @@ fn bar_lines(
 
 /// Draws the title and credits at the top of the first page and returns the height they
 /// take.
-fn header(score: &Score, width: f64, items: &mut Vec<Item>) -> f64 {
+fn header(score: &Score, shown: &[usize], width: f64, items: &mut Vec<Item>) -> f64 {
     let info = &score.info;
+    let style = &score.style;
     let title = match info.title.as_str() {
         "" => "Untitled",
         title => title,
     };
-    items.push(Item::text(width / 2.0, 38.0, title, 24.0, Font::Text));
-    let mut y = 64.0;
+    let (title_size, subtitle_size) = (style.title_size as f64, style.subtitle_size as f64);
+    let title_y = 14.0 + title_size;
+    items.push(Item::text(
+        width / 2.0,
+        title_y,
+        title,
+        title_size,
+        Font::Text,
+    ));
+    let mut y = title_y + 26.0;
     if !info.subtitle.is_empty() {
-        let subtitle = Item::text(width / 2.0, y, info.subtitle.as_str(), 15.0, Font::Text);
+        let subtitle = Item::text(
+            width / 2.0,
+            y,
+            info.subtitle.as_str(),
+            subtitle_size,
+            Font::Text,
+        );
         items.push(subtitle);
-        y += 20.0;
+        y += subtitle_size + 5.0;
     }
     let credits: Vec<&str> = [info.artist.as_str(), info.album.as_str()]
         .into_iter()
@@ -1012,6 +1075,13 @@ fn header(score: &Score, width: f64, items: &mut Vec<Item>) -> f64 {
         ));
         left += 15.0;
     }
+    // The tunings that are not the usual one for their instrument, and the capos.
+    if style.tuning {
+        for line_text in tunings(score, shown) {
+            items.push(line(MARGIN_X, left, line_text, Align::Left));
+            left += 15.0;
+        }
+    }
     for (label, name) in [("Music by", &info.music), ("Tabbed by", &info.transcriber)] {
         if !name.is_empty() {
             items.push(line(
@@ -1026,10 +1096,74 @@ fn header(score: &Score, width: f64, items: &mut Vec<Item>) -> f64 {
     (left.max(right) + 12.0).max(HEADER_HEIGHT)
 }
 
+/// Marks a line's breaks and widths, which are only seen while setting the score out: an
+/// arrow at the start of a line that a bar was made to start, and a bar's width over it.
+fn design_marks(
+    masters: &[MasterBar],
+    bars: &[BarBox],
+    range: std::ops::Range<usize>,
+    first: usize,
+    (top, bottom): (f64, f64),
+    items: &mut Vec<Item>,
+) {
+    let master = &masters[first];
+    if first > 0 && (master.line_break || master.page_break) {
+        let mark = if master.page_break { "⤓" } else { "↵" };
+        let y = (top + bottom) / 2.0;
+        items.push(Item::text(MARGIN_X / 2.0, y, mark, 14.0, Font::Text).colored(Color::Muted));
+    }
+    for bar in range {
+        if let Some(width) = masters[bar].width {
+            items.push(Item::Text {
+                // Above the staff, at the other end of the bar from its number.
+                x: r(bars[bar].x + bars[bar].w - 3.0),
+                y: r(top - 9.0),
+                s: format!("{width}%"),
+                size: 9.0,
+                font: Font::Text,
+                align: Align::Right,
+                knockout: false,
+                c: Color::Muted,
+            });
+        }
+    }
+}
+
+/// A line for each staff shown with strings that is not in its instrument's usual tuning or
+/// has a capo, naming its open strings from the lowest: `Guitar: D A D G B E, capo 2`.
+fn tunings(score: &Score, shown: &[usize]) -> Vec<String> {
+    const NAMES: [&str; 12] = [
+        "C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B",
+    ];
+    let mut lines = Vec::new();
+    for &index in shown {
+        let track = &score.tracks[index];
+        if track.instrument.is_percussion() {
+            continue;
+        }
+        for staff in track.staves.iter().filter(|staff| !staff.is_pitched()) {
+            let usual = staff.tuning == track.instrument.default_tuning();
+            if usual && staff.capo == 0 {
+                continue;
+            }
+            let strings: Vec<&str> = (staff.tuning.strings.iter().rev())
+                .map(|&pitch| NAMES[pitch as usize % 12])
+                .collect();
+            let mut text = format!("{}: {}", track.name, strings.join(" "));
+            if staff.capo > 0 {
+                text += &format!(", capo {}", staff.capo);
+            }
+            lines.push(text);
+        }
+    }
+    lines
+}
+
 #[cfg(test)]
 mod tests {
     use gtr_model::{
-        Beat, Duration, Instrument, Note, NoteValue, TimeSignature, Track, Voice, demo_score,
+        Beat, Duration, Instrument, Note, NoteValue, TimeSignature, Track, Tuning, Voice,
+        demo_score,
     };
 
     use super::*;
@@ -1767,5 +1901,215 @@ mod tests {
             })
             .unwrap();
         assert_eq!(title_x, 400.0);
+    }
+
+    /// The demo riff over and over, `bars` bars long.
+    fn riff(bars: usize) -> Score {
+        let mut score = demo_score();
+        let riff = score.tracks[0].staves[0].bars.clone();
+        score.master_bars = vec![MasterBar::new(TimeSignature::COMMON); bars];
+        score.tracks[0].staves[0].bars = (0..bars).map(|bar| riff[bar % 2].clone()).collect();
+        score
+    }
+
+    /// How many bars each line has.
+    fn lines(layout: &Layout) -> Vec<usize> {
+        let mut counts = vec![0; layout.systems.len()];
+        for bar in &layout.bars {
+            counts[bar.system] += 1;
+        }
+        counts
+    }
+
+    /// Where the last bar of each line ends.
+    fn line_ends(layout: &Layout) -> Vec<f64> {
+        let mut ends = vec![0.0; layout.systems.len()];
+        for bar in &layout.bars {
+            ends[bar.system] = bar.x + bar.w;
+        }
+        ends
+    }
+
+    #[test]
+    fn a_bar_made_to_start_a_line_starts_one_and_the_line_before_still_fills_the_page() {
+        let mut score = riff(12);
+        score.master_bars[2].line_break = true;
+        let laid = layout(&score, &View::default(), 1000.0);
+        assert_eq!(lines(&laid)[0], 2);
+        assert_eq!(laid.bars[2].system, 1);
+        let ends = line_ends(&laid);
+        assert!((ends[0] - ends[1]).abs() < 1.0, "{ends:?}");
+        // On one line of every bar, it is a bar like the others.
+        let single = View {
+            single_line: true,
+            ..View::default()
+        };
+        assert_eq!(layout(&score, &single, 1000.0).systems.len(), 1);
+    }
+
+    #[test]
+    fn a_number_of_bars_to_a_line_puts_that_many_on_each() {
+        let mut score = riff(11);
+        score.style.bars_per_line = Some(3);
+        let laid = layout(&score, &View::default(), 1000.0);
+        assert_eq!(lines(&laid), [3, 3, 3, 2]);
+        // A break cuts a line short, and the count starts again from it.
+        score.master_bars[4].line_break = true;
+        assert_eq!(
+            lines(&layout(&score, &View::default(), 1000.0)),
+            [3, 1, 3, 3, 1]
+        );
+        // More than fit are squeezed onto the line rather than spilling over.
+        score.style.bars_per_line = Some(9);
+        score.master_bars[4].line_break = false;
+        assert_eq!(lines(&layout(&score, &View::default(), 800.0)), [9, 2]);
+    }
+
+    #[test]
+    fn a_bar_made_to_start_a_page_starts_one() {
+        let mut score = riff(6);
+        let page = crate::Page::A4;
+        assert_eq!(
+            layout(&score, &View::default(), page.width)
+                .pages(page)
+                .len(),
+            1
+        );
+        score.master_bars[4].page_break = true;
+        let laid = layout(&score, &View::default(), page.width);
+        let pages = laid.pages(page);
+        assert_eq!(pages.len(), 2);
+        let first_line_of_page_two = laid.systems.iter().position(|s| s.new_page).unwrap();
+        assert_eq!(laid.bars[4].system, first_line_of_page_two);
+    }
+
+    #[test]
+    fn the_size_of_the_music_scales_everything_on_the_page_together() {
+        let mut score = riff(12);
+        let usual = layout(&score, &View::default(), 1000.0);
+        score.style.size = 150;
+        let large = layout(&score, &View::default(), 1000.0);
+        // As wide as asked for, give or take the rounding to a tenth of a pixel.
+        assert!((large.width - 1000.0).abs() < 0.5, "{}", large.width);
+        assert_eq!(large.string_spacing, usual.string_spacing * 1.5);
+        assert!(large.systems.len() > usual.systems.len());
+        let title_size = |layout: &Layout| {
+            (layout.items.iter()).find_map(|item| match item {
+                Item::Text { s, size, .. } if s == "Demo riff" => Some(*size),
+                _ => None,
+            })
+        };
+        assert_eq!(title_size(&large), Some(36.0));
+        // Every bar is still on the page.
+        assert!(large.bars.iter().all(|bar| bar.x + bar.w <= 1000.5));
+    }
+
+    #[test]
+    fn spacing_and_a_bar_s_own_width_spread_the_notes() {
+        let single = View {
+            single_line: true,
+            ..View::default()
+        };
+        let mut score = riff(4);
+        let usual = layout(&score, &single, 1000.0);
+        score.style.spacing = 200;
+        let spread = layout(&score, &single, 1000.0);
+        assert!(
+            spread.bars[1].w > usual.bars[1].w * 1.6,
+            "{} {}",
+            spread.bars[1].w,
+            usual.bars[1].w
+        );
+        score.style.spacing = 100;
+        score.master_bars[1].width = Some(200);
+        let wide = layout(&score, &single, 1000.0);
+        assert!(wide.bars[1].w > usual.bars[1].w * 1.6);
+        assert_eq!(wide.bars[3].w, usual.bars[3].w);
+    }
+
+    #[test]
+    fn the_stylesheet_chooses_which_bars_are_numbered() {
+        let mut score = riff(12);
+        let numbers = |layout: &Layout| -> Vec<String> {
+            (layout.items.iter())
+                .filter_map(|item| match item {
+                    Item::Text { s, size, .. } if *size == 10.0 && s.parse::<usize>().is_ok() => {
+                        Some(s.clone())
+                    }
+                    _ => None,
+                })
+                .collect()
+        };
+        assert_eq!(numbers(&layout(&score, &View::default(), 1000.0)).len(), 12);
+        score.style.bar_numbers = BarNumbers::Lines;
+        let laid = layout(&score, &View::default(), 1000.0);
+        let starts: Vec<String> = (0..laid.bars.len())
+            .filter(|&bar| bar == 0 || laid.bars[bar - 1].system != laid.bars[bar].system)
+            .map(|bar| (bar + 1).to_string())
+            .collect();
+        assert_eq!(numbers(&laid), starts);
+        score.style.bar_numbers = BarNumbers::None;
+        assert!(numbers(&layout(&score, &View::default(), 1000.0)).is_empty());
+    }
+
+    #[test]
+    fn the_stylesheet_chooses_where_the_rhythm_goes_under_the_tab() {
+        let mut score = riff(2);
+        let count =
+            |score: &Score, notation: Notation| layout(score, &view(notation), 1000.0).items.len();
+        let (both, tab) = (count(&score, Notation::Both), count(&score, Notation::Tab));
+        score.style.tab_rhythm = TabRhythm::Always;
+        assert!(count(&score, Notation::Both) > both);
+        assert_eq!(count(&score, Notation::Tab), tab);
+        score.style.tab_rhythm = TabRhythm::Never;
+        assert_eq!(count(&score, Notation::Both), both);
+        assert!(count(&score, Notation::Tab) < tab);
+    }
+
+    #[test]
+    fn the_heading_has_the_tempo_tuning_and_title_sizes_the_stylesheet_asks_for() {
+        let mut score = riff(2);
+        let laid = layout(&score, &View::default(), 1000.0);
+        assert!(texts(&laid).iter().any(|t| t.contains("= 120")));
+        assert!(!texts(&laid).iter().any(|t| t.starts_with("Guitar:")));
+
+        score.tracks[0].staves[0].tuning = Tuning::guitar_drop_d();
+        score.tracks[0].staves[0].capo = 2;
+        score.style.tempo = false;
+        score.style.title_size = 30;
+        let laid = layout(&score, &View::default(), 1000.0);
+        assert!(texts(&laid).contains(&"Guitar: D A D G B E, capo 2"));
+        assert!(!texts(&laid).iter().any(|t| t.contains("= 120")));
+        let title = laid
+            .items
+            .iter()
+            .find(|item| matches!(item, Item::Text { s, .. } if s == "Demo riff"));
+        assert!(matches!(title, Some(Item::Text { size, .. }) if *size == 30.0));
+
+        score.style.tuning = false;
+        assert!(
+            !texts(&layout(&score, &View::default(), 1000.0))
+                .iter()
+                .any(|t| t.starts_with("Guitar:"))
+        );
+    }
+
+    #[test]
+    fn breaks_and_widths_are_marked_only_while_setting_the_score_out() {
+        let mut score = riff(12);
+        score.master_bars[3].line_break = true;
+        score.master_bars[5].width = Some(150);
+        let marks = |design: bool| {
+            let view = View {
+                design,
+                ..View::default()
+            };
+            let laid = layout(&score, &view, 1000.0);
+            (texts(&laid).iter())
+                .filter(|t| **t == "↵" || **t == "150%")
+                .count()
+        };
+        assert_eq!(marks(true), 2);
+        assert_eq!(marks(false), 0);
     }
 }

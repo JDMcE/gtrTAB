@@ -11,7 +11,7 @@ use zip::{ZipArchive, ZipWriter, write::SimpleFileOptions};
 pub const EXTENSION: &str = "gtrtab";
 
 /// Bump when the JSON layout changes, and add a step to [`migrate`].
-pub const FORMAT_VERSION: u64 = 10;
+pub const FORMAT_VERSION: u64 = 11;
 
 const SCORE_ENTRY: &str = "score.json";
 const RECORDING_ENTRY: &str = "recording";
@@ -159,8 +159,8 @@ fn migrate(from: u64, score: &mut Value) {
         list_signs_and_jumps(score);
     }
     // Version 8 added the pedals of each track and of the mix, version 9 a track's other
-    // sounds and the beats that switch to them, and version 10 the audio track, all as
-    // optional fields.
+    // sounds and the beats that switch to them, version 10 the audio track, and version 11
+    // the stylesheet and the breaks and widths of bars, all as optional fields.
 }
 
 /// Version 7 lets a bar be several signs and have several jumps: what was one of each, if
@@ -211,6 +211,27 @@ mod tests {
     fn round_trip() {
         let score = demo_score();
         assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+    }
+
+    #[test]
+    fn the_stylesheet_and_the_breaks_and_widths_of_bars_are_kept() {
+        let mut score = demo_score();
+        score.style.size = 120;
+        score.style.bar_numbers = gtr_model::BarNumbers::Lines;
+        score.style.bars_per_line = Some(4);
+        score.master_bars[1].line_break = true;
+        score.master_bars[1].page_break = true;
+        score.master_bars[0].width = Some(150);
+        assert_eq!(load(&save(&score).unwrap()).unwrap(), score);
+        // A score set out as it comes writes none of it.
+        let saved = save(&demo_score()).unwrap();
+        let mut json = String::new();
+        let mut zip = ZipArchive::new(Cursor::new(saved)).unwrap();
+        zip.by_name(SCORE_ENTRY)
+            .unwrap()
+            .read_to_string(&mut json)
+            .unwrap();
+        assert!(!json.contains("style") && !json.contains("line_break") && !json.contains("width"));
     }
 
     #[test]

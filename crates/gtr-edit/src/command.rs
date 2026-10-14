@@ -1,6 +1,6 @@
 use gtr_model::{
     Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Pedal, Score,
-    ScoreInfo, Sound, Staff, TimeSignature, Track, Tuning, Voice,
+    ScoreInfo, Sound, Staff, Style, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +85,9 @@ pub enum Command {
     SetInfo {
         info: ScoreInfo,
     },
+    SetStyle {
+        style: Style,
+    },
     /// Adds a track, which must have a bar for every bar of the score.
     InsertTrack {
         index: usize,
@@ -155,6 +158,8 @@ pub enum EditError {
     InvalidTimeSignature,
     #[error("that is not a valid setting for a bar")]
     InvalidBarProperty,
+    #[error("the stylesheet has a setting out of range")]
+    InvalidStyle,
     #[error("a key signature has at most seven sharps or flats")]
     InvalidKeySignature,
     #[error(
@@ -432,6 +437,14 @@ impl Command {
             Command::SetInfo { info } => Ok(Command::SetInfo {
                 info: std::mem::replace(&mut score.info, info),
             }),
+            Command::SetStyle { style } => {
+                if !style.is_valid() {
+                    return Err(EditError::InvalidStyle);
+                }
+                Ok(Command::SetStyle {
+                    style: std::mem::replace(&mut score.style, style),
+                })
+            }
             Command::InsertTrack { index, track } => {
                 if index > score.tracks.len() {
                     return Err(EditError::InvalidLocation);

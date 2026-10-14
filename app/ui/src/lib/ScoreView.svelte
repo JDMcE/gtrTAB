@@ -27,9 +27,22 @@
     ) => void;
     /** Reports the first bar in view whenever it changes. */
     onview?: (bar: number) => void;
+    /** In design mode a bar's right edge can be dragged to widen or narrow it. */
+    design?: boolean;
+    /** Each bar's width as a percentage, where one has been given. */
+    widths?: (number | null | undefined)[];
+    /** A bar dragged to a new width, as a percentage. */
+    onwiden?: (bar: number, percent: number) => void;
   }
 
-  let { getLayout, revision, editor, keys, playhead, zoom, theme, onpick, onview }: Props = $props();
+  let { getLayout, revision, editor, keys, playhead, zoom, theme, onpick, onview, design = false, widths = [], onwiden }: Props =
+    $props();
+
+  /** How near a bar's right edge, in score pixels, a press is to take hold of it. */
+  const EDGE = 5;
+  /** The bar whose edge is being dragged: where it started, and where it is now. */
+  let dragging = $state<{ bar: number; from: number; to: number } | null>(null);
+  let overEdge = $state(false);
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
@@ -208,6 +221,18 @@
     }
     if (playhead) column(playhead, color('--select'));
 
+    // The edge of a bar being dragged, where it will be let go.
+    if (dragging) {
+      const bar = layout.bars[dragging.bar];
+      const system = layout.systems[bar.system];
+      context.strokeStyle = accent;
+      context.lineWidth = 2 / zoom;
+      context.beginPath();
+      context.moveTo(dragging.to, system.top);
+      context.lineTo(dragging.to, system.bottom);
+      context.stroke();
+    }
+
     const at = locate(layout, editor.cursor, editor.cursor.string);
     if (at && !playhead) {
       context.strokeStyle = accent;
@@ -229,7 +254,7 @@
   }
 
   $effect(() => {
-    void [layout, editor, keys, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, scrollLeft, fontsReady];
+    void [layout, editor, keys, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, scrollLeft, fontsReady, dragging];
     draw();
   });
 
@@ -266,11 +291,67 @@
   });
   $effect(() => onview?.(firstVisible));
 
+  /**
+   * In design mode, where on the page the right edge of the cursor's bar is, as `x,y` from
+   * the score's top left corner in view pixels: the place it is dragged from, for whoever
+   * drives the score from outside, as the end-to-end tests do.
+   */
+  const cursorEdge = $derived.by(() => {
+    const bar = design ? layout?.bars[editor.cursor.bar] : undefined;
+    if (!layout || !bar) return undefined;
+    const system = layout.systems[bar.system];
+    const x = (bar.x + bar.w) * zoom + offsetX - scrollLeft;
+    const y = ((system.cursor_top + system.cursor_bottom) / 2) * zoom - scrollTop;
+    return `${Math.round(x)},${Math.round(y)}`;
+  });
+
+  /** Where a pointer is on the score, in score pixels. */
+  function pointAt(event: PointerEvent) {
+    const bounds = scroller.getBoundingClientRect();
+    return {
+      x: (event.clientX - bounds.left - offsetX + scroller.scrollLeft) / zoom,
+      y: (event.clientY - bounds.top + scroller.scrollTop) / zoom,
+    };
+  }
+
+  /** The bar whose right edge is at a point, if any: in design mode, that edge is dragged. */
+  function edgeAt(x: number, y: number): number | null {
+    if (!layout || !design) return null;
+    const at = layout.bars.findIndex((b) => {
+      const s = layout.systems[b.system];
+      return y >= s.cursor_top - 12 && y <= s.cursor_bottom + 12 && Math.abs(b.x + b.w - x) <= EDGE;
+    });
+    return at < 0 ? null : at;
+  }
+
+  function onPointerMove(event: PointerEvent) {
+    const { x, y } = pointAt(event);
+    if (dragging) dragging = { ...dragging, to: Math.max(layout!.bars[dragging.bar].x + 12, x) };
+    else overEdge = edgeAt(x, y) !== null;
+  }
+
+  function onPointerUp() {
+    if (!dragging || !layout) return;
+    const { bar, from, to } = dragging;
+    dragging = null;
+    const box = layout.bars[bar];
+    const was = widths[bar] ?? 100;
+    // The bar's notes take up what it is dragged to, less the room that does not stretch.
+    const percent = Math.round((was * (box.w + to - from)) / box.w / 5) * 5;
+    if (percent !== was) onwiden?.(bar, percent);
+  }
+
   function onPointerDown(event: PointerEvent) {
     if (!layout || event.button !== 0) return;
-    const bounds = scroller.getBoundingClientRect();
-    const x = (event.clientX - bounds.left - offsetX + scroller.scrollLeft) / zoom;
-    const y = (event.clientY - bounds.top + scroller.scrollTop) / zoom;
+    const { x, y } = pointAt(event);
+    const edge = edgeAt(x, y);
+    if (edge !== null) {
+      const right = layout.bars[edge].x + layout.bars[edge].w;
+      dragging = { bar: edge, from: right, to: right };
+      scroller.setPointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
 
     // Pages side by side have lines at the same height: the one clicked is on the page
     // clicked, between its first bar's start and its last bar's end, with room either side.
@@ -355,6 +436,12 @@
       scrollLeft = scroller.scrollLeft;
     }}
     onpointerdown={onPointerDown}
+    onpointermove={onPointerMove}
+    onpointerup={onPointerUp}
+    onpointercancel={() => (dragging = null)}
+    class:resize={overEdge || !!dragging}
+    data-lines={layout?.systems.length}
+    data-edge={cursorEdge}
   >
     <div
       style:width="{Math.max(viewWidth, (layout?.width ?? 0) * zoom)}px"
@@ -383,6 +470,10 @@
   .scroller {
     overflow: auto;
     cursor: text;
+  }
+
+  .scroller.resize {
+    cursor: col-resize;
   }
 
   /* On pages, the room around them is the desk. */

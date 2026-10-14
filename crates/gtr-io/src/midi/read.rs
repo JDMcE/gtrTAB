@@ -370,6 +370,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score, ImportE
         tracks,
         effects: Vec::new(),
         audio: None,
+        style: Default::default(),
     })
 }
 

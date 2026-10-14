@@ -57,4 +57,17 @@ feel?: Feel,
 /**
  * The time elapsed when the piece reaches this bar is written above it.
  */
-timer?: boolean, };
+timer?: boolean, 
+/**
+ * A new line of music starts with this bar.
+ */
+line_break?: boolean, 
+/**
+ * A new page starts with this bar, and so a new line.
+ */
+page_break?: boolean, 
+/**
+ * How wide the bar is, as a percentage of the room its notes would have; `None` for
+ * as it comes.
+ */
+width?: number, };

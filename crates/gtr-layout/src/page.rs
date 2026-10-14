@@ -65,7 +65,8 @@ impl Layout {
 
     /// Where each page starts: its first line of music, and how far that line and those
     /// after it are moved up to the page's top. The first page has the heading and as many
-    /// lines of music as fit, and each after it as many as fit below its top margin. A line
+    /// lines of music as fit, and each after it as many as fit below its top margin, or up
+    /// to a line that was made to start a new page. A line
     /// of music is never cut in two; one taller than a page has a page to itself and runs
     /// off the end of it.
     fn page_starts(&self, page: Page) -> Vec<(usize, f64)> {
@@ -76,7 +77,7 @@ impl Layout {
         let mut used = ends(0);
         for (line, top) in tops.iter().enumerate().skip(1) {
             let height = ends(line) - top;
-            if used + height > page.height - page.margin {
+            if used + height > page.height - page.margin || self.systems[line].new_page {
                 starts.push((line, top - page.margin));
                 used = page.margin;
             }

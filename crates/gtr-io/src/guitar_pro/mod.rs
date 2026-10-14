@@ -49,6 +49,13 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
 pub fn export(score: &Score) -> Result<Exported, ExportError> {
     let mut skipped = Skipped::default();
     let bytes = write::write(score, &mut skipped)?;
+    let masters = &score.master_bars;
+    skipped.add_if(
+        masters.iter().any(|m| m.line_break || m.page_break),
+        "where lines and pages were made to break",
+    );
+    skipped.add_if(masters.iter().any(|m| m.width.is_some()), "widths of bars");
+    skipped.add_if(!score.style.is_default(), "the stylesheet");
     Ok(Exported {
         bytes,
         skipped: skipped.list(),

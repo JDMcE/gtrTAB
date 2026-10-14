@@ -39,6 +39,7 @@
     type Target,
     type EditorState,
     type Layout,
+    type Style,
     type AudioTrack,
     type Instrument,
     type Mix,
@@ -80,6 +81,7 @@
   } from './lib/soundfont';
   import { THEMES, applyLook, applyTheme, defaultPrefs, loadPrefs, savePrefs, type Prefs, type Theme } from './lib/prefs';
   import Preferences from './lib/Preferences.svelte';
+  import StyleDialog from './lib/StyleDialog.svelte';
   import ScoreView from './lib/ScoreView.svelte';
   import Shortcuts from './lib/Shortcuts.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
@@ -164,6 +166,7 @@
   let effectDialog = $state<EffectKind | null>(null);
   let prompt = $state.raw<Prompt | null>(null);
   let chordOpen = $state(false);
+  let styleOpen = $state(false);
   /** The pieces of the drum kit, read from the core once it has loaded. */
   /** The kit every drum track starts with. */
   let standardKit = $state.raw<DrumPiece[]>([]);
@@ -758,7 +761,12 @@
   }));
   /** The view for the screen, which only there may be one line. */
   const screenViewJson = $derived(
-    JSON.stringify({ notation: prefs.notation, multitrack: prefs.multitrack, single_line: prefs.layout === 'screen' }),
+    JSON.stringify({
+      notation: prefs.notation,
+      multitrack: prefs.multitrack,
+      single_line: prefs.layout === 'screen',
+      design: prefs.design,
+    }),
   );
   /** The score laid out for the screen in the layout chosen, `width` wide where that matters. */
   const screenLayout = (width: number): Layout =>
@@ -1140,6 +1148,19 @@
     !!score && !!editor && score.tracks[editor.cursor.track]?.staves[editor.cursor.staff]?.tuning.strings.length === 0,
   );
   const masterBar = $derived(score?.master_bars[editor?.cursor.bar ?? 0]);
+
+  // --- Stylesheet and design ---
+
+  /** The stylesheet a score comes with, read from the core once it has loaded. */
+  let standardStyle = $state.raw<Style | null>(null);
+  const currentStyle = (): Style => score?.style ?? standardStyle!;
+  const setStyle = (style: Style) => edit((d) => d.setStyle(JSON.stringify(style)));
+  const [MIN_BAR_WIDTH, MAX_BAR_WIDTH, BAR_WIDTH_STEP] = [25, 400, 10];
+  /** Gives the cursor's bar a width, as a percentage; 100 is as it comes. */
+  const setBarWidth = (percent: number) => {
+    const width = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, Math.round(percent)));
+    setBar('width', width === 100 ? null : width);
+  };
   const setBar = (field: string, value: unknown) =>
     edit((d) => d.setBarProperty(field, JSON.stringify(value)));
   const barNumber = () => (editor?.cursor.bar ?? 0) + 1;
@@ -1630,6 +1651,56 @@
     },
     trackPane: { label: t('Track pane'), icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
     shortcuts: { label: t('Keyboard shortcuts'), icon: 'shortcuts', keys: '? / F1', run: () => (shortcutsOpen = true) },
+    designMode: {
+      label: t('Design mode: set out lines, pages and bar widths'),
+      icon: 'design',
+      active: () => prefs.design,
+      run: () => (prefs.design = !prefs.design),
+    },
+    stylesheet: { label: t('Stylesheet…'), icon: 'design', run: () => (styleOpen = true) },
+    lineBreak: {
+      label: t('Start a new line with this bar'),
+      icon: 'lineBreak',
+      active: () => !!masterBar?.line_break,
+      disabled: () => (editor?.cursor.bar ?? 0) === 0,
+      run: () => setBar('line_break', masterBar?.line_break ? null : true),
+    },
+    pageBreak: {
+      label: t('Start a new page with this bar'),
+      icon: 'pageBreak',
+      active: () => !!masterBar?.page_break,
+      disabled: () => (editor?.cursor.bar ?? 0) === 0,
+      run: () => setBar('page_break', masterBar?.page_break ? null : true),
+    },
+    barWider: {
+      label: t('Wider bar'),
+      icon: 'barWider',
+      disabled: () => (masterBar?.width ?? 100) >= MAX_BAR_WIDTH,
+      run: () => setBarWidth((masterBar?.width ?? 100) + BAR_WIDTH_STEP),
+    },
+    barNarrower: {
+      label: t('Narrower bar'),
+      icon: 'barNarrower',
+      disabled: () => (masterBar?.width ?? 100) <= MIN_BAR_WIDTH,
+      run: () => setBarWidth((masterBar?.width ?? 100) - BAR_WIDTH_STEP),
+    },
+    barWidthReset: {
+      label: t('Bar width as it comes'),
+      disabled: () => masterBar?.width == null,
+      run: () => setBarWidth(100),
+    },
+    barsPerLine: {
+      label: t('Bars on each line…'),
+      icon: 'barsPerLine',
+      active: () => !!score?.style?.bars_per_line,
+      run: () =>
+        (prompt = {
+          title: t('Bars on each line'),
+          hint: t('Every line has this many bars, unless a bar starts a new one before then. Leave it empty for as many as fit.'),
+          field: { kind: 'number', label: t('Bars'), value: score?.style?.bars_per_line ?? null, min: 1, max: 32 },
+          apply: (count: number | null) => setStyle({ ...currentStyle(), bars_per_line: count || null }),
+        }),
+    },
     preferences: { label: t('Preferences…'), icon: 'preferences', keys: 'Ctrl+,', run: () => (prefsOpen = true) },
     commandPalette: { label: t('Command palette…'), icon: 'search', keys: 'Ctrl+K / Ctrl+Shift+P', run: () => (paletteOpen = true) },
   } satisfies Record<string, Command>;
@@ -1656,7 +1727,16 @@
     zoom = ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, at + by))];
   }
 
-  const palette: PaletteSection[] = [
+  const palette: PaletteSection[] = $derived([
+    ...(prefs.design
+      ? [
+          {
+            id: 'design',
+            title: t('Design'),
+            commands: [cmd.lineBreak, cmd.pageBreak, cmd.barWider, cmd.barNarrower, cmd.barsPerLine, cmd.stylesheet],
+          },
+        ]
+      : []),
     { id: 'values', title: t('Note values'), commands: [...noteValues, cmd.dot, cmd.triplet, cmd.rest, cmd.tie] },
     {
       id: 'note',
@@ -1686,7 +1766,7 @@
       ],
     },
     { id: 'voice', title: t('Voice'), commands: voices },
-  ];
+  ]);
 
   const menus = $derived.by((): Menu[] => {
     const recentItems: MenuEntry[] = recent.map((path) => ({
@@ -1800,7 +1880,15 @@
           cmd.section, cmd.barTempo, cmd.tempoGradual, cmd.timer,
           { label: t('Feel'), items: barChoices('feel', FEELS) },
           '-',
-          cmd.scoreInfo,
+          cmd.scoreInfo, cmd.stylesheet,
+          {
+            label: t('Lines and pages'),
+            items: [
+              cmd.lineBreak, cmd.pageBreak, '-',
+              cmd.barWider, cmd.barNarrower, cmd.barWidthReset, '-',
+              cmd.barsPerLine,
+            ],
+          },
           '-',
           cmd.play, cmd.metronome, cmd.countIn, cmd.loop, cmd.trainer, cmd.replayRepeats,
           { label: t('Playback speed'), items: [...speeds, cmd.speedOther, '-', cmd.slower, cmd.faster] },
@@ -1828,7 +1916,7 @@
           cmd.zoomIn, cmd.zoomOut, '-',
           { label: t('Layout'), items: layouts },
           ...notations,
-          cmd.multitrack,
+          cmd.multitrack, cmd.designMode,
           '-',
           cmd.instrument, cmd.pedalboard, cmd.audioPanel, cmd.trackPane, cmd.inspector, cmd.compact, cmd.beatLights,
           { label: t('Theme'), items: themes },
@@ -1884,7 +1972,7 @@
   // --- Keyboard ---
 
   function onKeydown(event: KeyboardEvent) {
-    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen || prefsOpen) return;
+    if (event.defaultPrevented || dialog || effectDialog || prompt || chordOpen || shortcutsOpen || paletteOpen || prefsOpen || styleOpen) return;
     if (!doc) return;
     const target = event.target instanceof Element ? event.target : null;
     if (target?.closest('input, select, textarea, [role="menubar"]')) return;
@@ -1962,6 +2050,7 @@
     run(async () => {
       await init();
       standardKit = JSON.parse(Document.drumKitJson());
+      standardStyle = JSON.parse(Document.defaultStyleJson());
       pedalSpecs = JSON.parse(Document.pedalKindsJson());
       pedalPresets = JSON.parse(Document.pedalPresetsJson());
       const autosave = readAutosave();
@@ -2100,6 +2189,14 @@
       <div class="stage">
         <ScoreView
           getLayout={screenLayout}
+          design={prefs.design}
+          widths={score.master_bars.map((bar) => bar.width)}
+          onwiden={(bar, percent) =>
+            edit((d) => {
+              d.goToBar(bar);
+              const width = Math.max(MIN_BAR_WIDTH, Math.min(MAX_BAR_WIDTH, percent));
+              d.setBarProperty('width', JSON.stringify(width === 100 ? null : width));
+            })}
           revision={`${editor.revision}:${editor.cursor.track}:${editor.cursor.staff}:${editor.cursor.voice}:${viewJson}:${fileName}`}
           {editor}
           keys={score.master_bars.map((bar) => bar.key_signature)}
@@ -2413,6 +2510,18 @@
     custom={prefs.shortcuts}
     onchange={(custom) => (prefs.shortcuts = custom)}
     onclose={() => (shortcutsOpen = false)}
+  />
+{/if}
+
+{#if styleOpen && standardStyle}
+  <StyleDialog
+    style={currentStyle()}
+    standard={standardStyle}
+    onapply={setStyle}
+    onclose={() => {
+      styleOpen = false;
+      focusScore();
+    }}
   />
 {/if}
 

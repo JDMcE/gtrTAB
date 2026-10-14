@@ -13,6 +13,7 @@
 <line x1="36" y1="183.5" x2="540" y2="183.5" stroke="#8e8e96" stroke-width="1"/>
 <line x1="36" y1="174.5" x2="540" y2="174.5" stroke="#8e8e96" stroke-width="1"/>
 <text x="500" y="38" font-family="system-ui, sans-serif" font-size="24" font-weight="400" text-anchor="middle" dominant-baseline="central" fill="#1b1b1f">Untitled</text>
+<text x="36" y="64" font-family="system-ui, sans-serif" font-size="11" font-weight="400" text-anchor="start" dominant-baseline="central" fill="#1b1b1f">Steel guitar: E A D G B E, capo 2</text>
 <text x="123" y="183.5" font-family="Bravura" font-size="36" font-weight="400" text-anchor="middle" dominant-baseline="alphabetic" fill="#1b1b1f"></text>
 <path d="M124 175.5 Q138 165.5 152 175.5" fill="none" stroke="#1b1b1f" stroke-width="1.1"/>
 <line x1="118.3" y1="184.5" x2="118.3" y2="215" stroke="#1b1b1f" stroke-width="1.2"/>

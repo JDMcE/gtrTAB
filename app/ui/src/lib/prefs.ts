@@ -29,6 +29,8 @@ export interface Prefs {
    * wide as the window, or one line holding every bar.
    */
   layout: 'pages' | 'pagesAcross' | 'parchment' | 'screen';
+  /** Design mode: the breaks and widths of bars are marked, and bars widened by dragging. */
+  design: boolean;
   /** Every track shown in the score, not just the one being edited. */
   multitrack: boolean;
   /** Track pane shown under the score. */
@@ -65,6 +67,7 @@ const DEFAULTS: Prefs = {
   collapsed: [],
   notation: 'both',
   layout: 'parchment',
+  design: false,
   multitrack: false,
   tracks: true,
   tracksHeight: null,
