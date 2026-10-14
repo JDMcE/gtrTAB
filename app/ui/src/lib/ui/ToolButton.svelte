@@ -2,7 +2,7 @@
   import type { Command } from '../commands';
   import Icon from './Icon.svelte';
   import { tip } from './tooltip';
-  import { shownKeys } from '../keys.svelte';
+  import { aria, keyOf, shownKeys } from '../keys.svelte';
 
   interface Props {
     command: Command;
@@ -12,7 +12,7 @@
 
   let { command, side = 'bottom', size = 20 }: Props = $props();
   const disabled = $derived(command.disabled?.() ?? false);
-  const keys = $derived(shownKeys(command));
+  const keys = $derived(keyOf(command));
 </script>
 
 <!-- Disabled tools stay focusable so that their tooltip still says what they are. A click
@@ -21,7 +21,7 @@
   type="button"
   class="tool"
   aria-label={command.label}
-  aria-keyshortcuts={keys}
+  aria-keyshortcuts={aria(shownKeys(command))}
   aria-pressed={command.active ? command.active() : undefined}
   aria-disabled={disabled}
   use:tip={{ label: command.label, keys, side }}

@@ -3,7 +3,7 @@
   import { t } from './i18n';
   import { languages, type Language } from './locales';
   import type { Contrast, Paper, Prefs, Theme } from './prefs';
-  import { shownKeys } from './keys.svelte';
+  import { keyOf } from './keys.svelte';
   import Dialog from './ui/Dialog.svelte';
 
   interface Props {
@@ -139,7 +139,7 @@
       <div class="buttons">
         <button type="button" class="btn" onclick={() => shortcuts.run()}>{t('Keyboard shortcuts…')}</button>
         <button type="button" class="btn" onclick={() => palette.run()}>
-          {t('Command palette')}{#if shownKeys(palette)}&ensp;<kbd>{shownKeys(palette)}</kbd>{/if}
+          {t('Command palette')}{#if keyOf(palette)}&ensp;<kbd>{keyOf(palette)}</kbd>{/if}
         </button>
       </div>
     </section>

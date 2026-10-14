@@ -1,7 +1,7 @@
 // Run with `npm test`: Node reads the TypeScript module directly.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { bind, chordOf, fixedKey, keymap, keysOf, reset, unbind } from './keymap.ts';
+import { ariaKeys, bind, chordOf, fixedKey, keyLabel, keymap, keysOf, reset, unbind } from './keymap.ts';
 
 const press = (key, extra = {}) => ({
   key,
@@ -90,4 +90,30 @@ test('the keys that move the cursor and enter notes cannot be given to a command
   for (const chord of ['Ctrl+↑', 'Ctrl+↓', 'Alt+1', 'R', 'Shift+B', 'Ctrl+Delete', 'Space', 'F2']) {
     assert.ok(!fixedKey(chord), chord);
   }
+});
+
+test('on a Mac the keys are shown with its symbols, in its order, and elsewhere as written', () => {
+  assert.equal(keyLabel('Ctrl+Shift+S', true), '⇧⌘S');
+  assert.equal(keyLabel('Ctrl+Shift+S', false), 'Ctrl+Shift+S');
+  assert.equal(keyLabel('Alt+1', true), '⌥1');
+  assert.equal(keyLabel('Ctrl+Alt+Shift+K', true), '⌥⇧⌘K');
+  assert.equal(keyLabel('Shift+B', true), '⇧B');
+  assert.equal(keyLabel('Ctrl+Delete', true), '⌘⌦');
+  assert.equal(keyLabel('Ctrl+↑', true), '⌘↑');
+  assert.equal(keyLabel('Ctrl++', true), '⌘+');
+  assert.equal(keyLabel('Space', true), 'Space');
+  assert.equal(keyLabel('?', true), '?');
+  // Several, ranges and words.
+  assert.equal(keyLabel('Ctrl+Y / Ctrl+Shift+Z', true), '⌘Y / ⇧⌘Z');
+  assert.equal(keyLabel('Alt+1 – Alt+4', true), '⌥1 – ⌥4');
+  assert.equal(keyLabel('Shift+arrows', true), '⇧ arrows');
+  assert.equal(keyLabel('← → ↑ ↓', true), '← → ↑ ↓');
+});
+
+test('a screen reader is given the keys by the names a browser has for them', () => {
+  assert.equal(ariaKeys('Ctrl+Shift+S', false), 'Control+Shift+S');
+  assert.equal(ariaKeys('Ctrl+Shift+S', true), 'Meta+Shift+S');
+  assert.equal(ariaKeys('Ctrl+↑', false), 'Control+ArrowUp');
+  assert.equal(ariaKeys('Ctrl+Y / Ctrl+Shift+Z', false), 'Control+Y Control+Shift+Z');
+  assert.equal(ariaKeys('[', false), '[');
 });

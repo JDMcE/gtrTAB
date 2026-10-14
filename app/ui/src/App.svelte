@@ -85,7 +85,7 @@
   import CommandPalette from './lib/CommandPalette.svelte';
   import { listCommands, used, type Found } from './lib/search';
   import { chordOf, keymap } from './lib/keymap';
-  import { shortcuts, shownKeys } from './lib/keys.svelte';
+  import { aria, keyOf, label as keyLabel, shortcuts, shownKeys } from './lib/keys.svelte';
   import TrackPane from './lib/TrackPane.svelte';
   import { describeCursor } from './lib/describe';
   import Icon from './lib/ui/Icon.svelte';
@@ -1870,7 +1870,7 @@
     },
   ];
 
-  const speedKeys = $derived([shownKeys(cmd.slower), shownKeys(cmd.faster)].filter(Boolean));
+  const speedKeys = $derived([shownKeys(cmd.slower), shownKeys(cmd.faster)].filter((k) => k !== undefined));
 
   /** Closes the command palette, and runs what was chosen there as the menus would. */
   function runFromPalette(chosen?: Found) {
@@ -2027,8 +2027,8 @@
           type="button"
           class="tool play"
           aria-label={playing ? t('Stop') : cmd.play.label}
-          aria-keyshortcuts={shownKeys(cmd.play)}
-          use:tip={{ label: playing ? t('Stop') : cmd.play.label, keys: shownKeys(cmd.play) }}
+          aria-keyshortcuts={aria(shownKeys(cmd.play))}
+          use:tip={{ label: playing ? t('Stop') : cmd.play.label, keys: keyOf(cmd.play) }}
           onmousedown={(e) => e.preventDefault()}
           onclick={togglePlay}
         >
@@ -2051,8 +2051,8 @@
           type="button"
           class="chip"
           aria-label={t('Playback speed: {speed}%', { speed })}
-          aria-keyshortcuts={speedKeys.join(' ') || undefined}
-          use:tip={{ label: t('Playback speed'), keys: speedKeys.join(' / ') || undefined }}
+          aria-keyshortcuts={aria(speedKeys.join(' / ') || undefined)}
+          use:tip={{ label: t('Playback speed'), keys: speedKeys.length ? keyLabel(speedKeys.join(' / ')) : undefined }}
           onmousedown={(e) => e.preventDefault()}
           onclick={cmd.speedOther.run}
         >
@@ -2221,7 +2221,7 @@
   <p class="sr-only" aria-live="polite" aria-atomic="true" data-position>{position}</p>
 
   <footer class:failed>
-    <span role="status">{message || (shownKeys(cmd.shortcuts) ? t('Press {keys} for the keyboard shortcuts', { keys: shownKeys(cmd.shortcuts)! }) : '')}</span>
+    <span role="status">{message || (keyOf(cmd.shortcuts) ? t('Press {keys} for the keyboard shortcuts', { keys: keyOf(cmd.shortcuts)! }) : '')}</span>
     {#if editor && score}
       <span>
         {score.tracks[editor.cursor.track]?.name}{#if (score.tracks[editor.cursor.track]?.staves.length ?? 1) > 1}, staff {editor.cursor.staff + 1}{/if}

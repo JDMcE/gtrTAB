@@ -146,3 +146,54 @@ export function fixedKey(chord: Chord): boolean {
     /^(Shift\+)?(Enter|Tab|Escape)$/.test(chord)
   );
 }
+
+/** The symbols a Mac shows for the modifiers, in the order it shows them, and for some keys. */
+const MAC_MODIFIERS: [string, string][] = [
+  ['Alt', '⌥'],
+  ['Shift', '⇧'],
+  ['Ctrl', '⌘'],
+];
+const MAC_KEYS: Record<string, string> = { Delete: '⌦', Backspace: '⌫', Enter: '↩', Tab: '⇥' };
+
+/**
+ * Keys as they are shown on the system: as written on Windows and Linux, and on a Mac with
+ * its symbols, the modifiers in the Mac's order and run together, as `⇧⌘S`. Takes one chord
+ * or several separated by ` / `, and leaves ranges such as `0–9` as they are.
+ */
+export function keyLabel(keys: string, mac: boolean): string {
+  if (!mac) return keys;
+  return keys
+    .split(' / ')
+    .map((chord) => {
+      // Ranges and lists, such as `Alt+1 – Alt+4` or `← → ↑ ↓`, are labelled a part at a time.
+      if (/\s/.test(chord)) return chord.split(/(\s+)/).map((part) => (/\s/.test(part) ? part : keyLabel(part, mac))).join('');
+      const parts = chord.split('+');
+      // `+` on its own, or as the key of a chord, is the last part left empty.
+      const key = chord.endsWith('+') ? '+' : parts[parts.length - 1];
+      const held = new Set(chord.endsWith('+') ? parts.slice(0, -2) : parts.slice(0, -1));
+      const modifiers = MAC_MODIFIERS.filter(([name]) => held.has(name)).map(([, symbol]) => symbol).join('');
+      const name = MAC_KEYS[key] ?? key;
+      // A word, such as `arrows`, stands a space apart from the symbols.
+      return modifiers && /^[a-z]{2,}/.test(name) ? `${modifiers} ${name}` : modifiers + name;
+    })
+    .join(' / ');
+}
+
+const ARIA_KEYS: Record<string, string> = { '←': 'ArrowLeft', '→': 'ArrowRight', '↑': 'ArrowUp', '↓': 'ArrowDown' };
+
+/**
+ * Keys as `aria-keyshortcuts` has them, for a screen reader: the names of the keys as a
+ * browser gives them, Ctrl being the Command key, `Meta`, on a Mac, and several chords
+ * separated by spaces.
+ */
+export function ariaKeys(keys: string, mac: boolean): string {
+  return keys
+    .split(' / ')
+    .map((chord) =>
+      chord
+        .split(/\+(?=.)/)
+        .map((part) => (part === 'Ctrl' ? (mac ? 'Meta' : 'Control') : (ARIA_KEYS[part] ?? part)))
+        .join('+'),
+    )
+    .join(' ');
+}

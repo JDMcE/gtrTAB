@@ -3,7 +3,7 @@
   import type { Found } from './search';
   import { search } from './search';
   import Icon from './ui/Icon.svelte';
-  import { shownKeys } from './keys.svelte';
+  import { keyOf } from './keys.svelte';
 
   interface Props {
     /** Every command in the menus. */
@@ -86,7 +86,7 @@
     {#each found as item, i (item.id)}
       {@const disabled = item.command.disabled?.() ?? false}
       {@const checked = item.command.active?.()}
-      {@const keys = shownKeys(item.command)}
+      {@const keys = keyOf(item.command)}
       <!-- The keyboard stays in the field; the list follows it there. -->
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <li

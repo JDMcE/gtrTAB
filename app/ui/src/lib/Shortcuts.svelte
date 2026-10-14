@@ -3,6 +3,7 @@
   import { bind, chordOf, defaultsOf, fixedKey, keysOf, reset, unbind, type Bindings } from './keymap';
   import { search, type Found } from './search';
   import { t } from './i18n';
+  import { label as keyLabel } from './keys.svelte';
   import Dialog from './ui/Dialog.svelte';
   import Icon from './ui/Icon.svelte';
   import { tip } from './ui/tooltip';
@@ -57,13 +58,13 @@
     const { bindings, from } = bind(bindable, custom, id, chord);
     onchange(bindings);
     said = from
-      ? t('{key} now runs {command}, and no longer {other}.', { key: chord, command: name(id), other: name(from) })
-      : t('{key} now runs {command}.', { key: chord, command: name(id) });
+      ? t('{key} now runs {command}, and no longer {other}.', { key: keyLabel(chord), command: name(id), other: name(from) })
+      : t('{key} now runs {command}.', { key: keyLabel(chord), command: name(id) });
   }
 
   function take(found: Found, chord: string) {
     onchange(unbind(bindable, custom, found.command.id!, chord));
-    said = t('{key} no longer runs {command}.', { key: chord, command: name(found.command.id!) });
+    said = t('{key} no longer runs {command}.', { key: keyLabel(chord), command: name(found.command.id!) });
   }
 
   function putBack(found: Found) {
@@ -71,7 +72,7 @@
     onchange(reset(bindable, custom, id));
     const own = defaultsOf({ id, keys: found.command.keys });
     said = own.length
-      ? t('{command} has {keys} again.', { command: name(id), keys: own.join(' / ') })
+      ? t('{command} has {keys} again.', { command: name(id), keys: keyLabel(own.join(' / ')) })
       : t('{command} has no key again.', { command: name(id) });
   }
 
@@ -93,7 +94,7 @@
     const chord = chordOf(event);
     if (!chord) return;
     if (fixedKey(chord)) {
-      said = t('{key} moves the cursor, enters notes or moves between controls, and cannot be given to a command. Press another key, or Esc.', { key: chord });
+      said = t('{key} moves the cursor, enters notes or moves between controls, and cannot be given to a command. Press another key, or Esc.', { key: keyLabel(chord) });
       return;
     }
     const id = waiting;
@@ -137,11 +138,11 @@
                   <button
                     type="button"
                     class="key"
-                    aria-label={t('Take {key} from {command}', { key: chord, command: label })}
+                    aria-label={t('Take {key} from {command}', { key: keyLabel(chord), command: label })}
                     use:tip={{ label: t('Take this key away') }}
                     onclick={() => take(found, chord)}
                   >
-                    <kbd>{chord}</kbd>
+                    <kbd>{keyLabel(chord)}</kbd>
                   </button>
                 {/each}
                 {#if waiting === id}
@@ -188,7 +189,7 @@
               <span class="keys">
                 {#each row.keys.split(' / ') as keys, i}
                   {#if i > 0}<span class="or">{t('or')}</span>{/if}
-                  <kbd>{keys}</kbd>
+                  <kbd>{keyLabel(keys)}</kbd>
                 {/each}
               </span>
             </li>

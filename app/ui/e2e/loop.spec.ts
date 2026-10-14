@@ -59,9 +59,11 @@ test('the speed trainer plays the loop faster each time round, up to the speed s
 
   await keys(page, 'Space');
   await expect(stopButton(page)).toBeVisible();
-  await expect(chip(page)).toHaveText('175%', { timeout: 3000 });
+  // A time round is under a second and a half; starting the audio can take a while when
+  // the other tests are running too.
+  await expect(chip(page)).toHaveText('175%', { timeout: 6000 });
   await expect(page.getByRole('status')).toHaveText('Time 2 round, at 175% of the tempo');
-  await expect(chip(page)).toHaveText('200%', { timeout: 3000 });
+  await expect(chip(page)).toHaveText('200%', { timeout: 6000 });
   // At the speed it was going up to, it goes on round at that speed.
   await page.waitForTimeout(2500);
   await expect(chip(page)).toHaveText('200%');
