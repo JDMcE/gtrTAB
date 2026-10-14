@@ -961,3 +961,54 @@ fn a_bar_is_made_to_start_a_line_or_a_page_and_given_a_width() {
         .unwrap();
     assert_eq!(e.score().master_bars[bar].width, None);
 }
+
+#[test]
+fn held_bars_of_the_recording_stay_on_their_bars_as_repeats_and_bars_change() {
+    use gtr_model::{AudioTrack, SyncPoint};
+    let at = |bar, millis| SyncPoint { bar, millis };
+    let held = |e: &Editor| e.score().audio.as_ref().unwrap().sync.clone();
+    let mut e = Editor::new(Score::blank());
+    for _ in 0..3 {
+        e.insert_bar().unwrap();
+    }
+    e.set_audio(Some(AudioTrack {
+        sync: vec![at(0, 0), at(1, 2_000), at(3, 6_000)],
+        ..AudioTrack::new("song.mp3")
+    }))
+    .unwrap();
+
+    // Bars 2 and 3 repeated: the last bar is now played sixth, and still held.
+    e.go_to_bar(1);
+    e.set_bar_property("repeat_start", &serde_json::json!(true))
+        .unwrap();
+    e.go_to_bar(2);
+    e.set_bar_property("repeat_count", &serde_json::json!(2))
+        .unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(1, 2_000), at(5, 6_000)]);
+    // The second time through is held as the second time, and goes with the repeat.
+    e.set_audio(Some(AudioTrack {
+        sync: vec![at(0, 0), at(3, 5_000), at(5, 6_000)],
+        ..AudioTrack::new("song.mp3")
+    }))
+    .unwrap();
+    e.set_bar_property("repeat_count", &serde_json::json!(0))
+        .unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(3, 6_000)]);
+    // Undone in the same step as the repeat, and redone with it.
+    e.undo().unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(3, 5_000), at(5, 6_000)]);
+    assert_eq!(e.score().master_bars[2].repeat_count, 2);
+    e.redo().unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(3, 6_000)]);
+
+    // A bar put in before a held one moves it on; a held bar taken away lets it go.
+    e.go_to_bar(1);
+    e.insert_bar().unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(4, 6_000)]);
+    e.go_to_bar(4);
+    e.remove_bar().unwrap();
+    assert_eq!(held(&e), [at(0, 0)]);
+    e.undo().unwrap();
+    assert_eq!(held(&e), [at(0, 0), at(4, 6_000)]);
+    e.score().validate().unwrap();
+}

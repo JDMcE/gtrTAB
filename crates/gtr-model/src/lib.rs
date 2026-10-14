@@ -26,7 +26,7 @@ pub use playback::{
     BarTiming, TempoPoint, bar_times, gradual_change, play_order, range_order, tempo_points,
     timings,
 };
-pub use recording::{AudioTrack, SyncPoint, synced};
+pub use recording::{AudioTrack, SyncPoint, moved, synced};
 pub use score::{
     Bar, Beat, Feel, Jump, MasterBar, ModelError, Note, Score, ScoreInfo, Staff, Target,
     TempoChange, TimeSignature, Track, Voice,
