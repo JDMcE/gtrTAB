@@ -5,6 +5,7 @@
 import {
   ArrowDown,
   ArrowUp,
+  AudioLines,
   AudioWaveform,
   Cable,
   Drum,
@@ -131,6 +132,7 @@ export const ICONS = {
   pedalboard: { lucide: SlidersVertical },
   lineIn: { lucide: Cable },
   soundChange: { lucide: AudioWaveform },
+  audioTrack: { lucide: AudioLines },
   addSound: { lucide: Plus },
 
   // Tracks

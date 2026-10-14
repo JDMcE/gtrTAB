@@ -93,7 +93,7 @@
   import { listCommands, used, type Found } from './lib/search';
   import { chordOf, keymap } from './lib/keymap';
   import { aria, keyOf, label as keyLabel, shortcuts, shownKeys } from './lib/keys.svelte';
-  import TrackPane from './lib/TrackPane.svelte';
+  import TrackPane, { type AudioRow } from './lib/TrackPane.svelte';
   import { describeCursor } from './lib/describe';
   import Icon from './lib/ui/Icon.svelte';
   import type { IconName } from './lib/ui/icons';
@@ -1122,6 +1122,19 @@
     });
 
   const setAudio = (audio: AudioTrack | null) => edit((d) => d.setAudio(JSON.stringify(audio)));
+
+  /** The audio track as the track pane shows it: the bars heard over the recording. */
+  const audioRow = $derived.by((): AudioRow | null => {
+    if (!score?.audio) return null;
+    const duration = recordingPeaks?.duration ?? Infinity;
+    const heard = recordingBars.filter((b) => b.start < duration && b.start + b.length > 0).map((b) => b.bar);
+    return {
+      name: score.audio.name,
+      mix: score.audio.mix,
+      bars: [...new Set(heard)].sort((a, b) => a - b),
+      shown: prefs.audio,
+    };
+  });
 
   // --- Line in ---
 
@@ -2409,6 +2422,9 @@
             onmove={(from, to) => edit((d) => d.moveTrack(from, to))}
             onproperties={(track) => pickTrack(track, null).then(() => (dialog = 'track'))}
             onresize={(height) => (prefs.tracksHeight = height)}
+            audio={audioRow}
+            onaudiomix={(mix) => score?.audio && setAudio({ ...score.audio, mix })}
+            onaudio={() => (prefs.audio = !prefs.audio)}
           />
         {/if}
       </div>

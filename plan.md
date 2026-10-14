@@ -309,7 +309,7 @@ The synth itself and its SoundFonts come in phase 6; this phase is what is built
 
 Known simplifications, each with the phase that removes it:
 
-- The recording's bars are not found in it by listening for the beat; they are placed by hand. The track pane has no row for it. (Phase 10)
+- The recording's bars are not found in it by listening for the beat; they are placed by hand. (Phase 10)
 - The pedals of a Guitar Pro file's tracks are not imported, and none are exported, nor are its tracks' other sounds and the automations that switch to them: Guitar Pro 6 and later keep a chain of their own pedals and amplifiers for each track and sound, which would have to be matched to the ones here. (Phase 10)
 
 Checks owed, none of which a program here can make: listening to each pedal and preset on each instrument, with the samples and with the models; a guitar through the line in on each system, which also decides the native audio backend; and the audio track with real recordings in the desktop app, whose webviews do not all decode the same formats.
@@ -325,6 +325,7 @@ Checks owed, none of which a program here can make: listening to each pedal and 
 - [ ] The audio track's recording in exported audio and in the copy kept in case the app closes, its bars found by listening for the beat, its sync points kept on their bars when repeats and jumps change, and a row for it in the track pane (left out in phase 9). How things stand:
   - Exported audio has the recording in it, decoded at the rate of the file and placed as playback places it, unless it is muted (`Document::export_audio`). The copy of work not saved keeps its recording beside it in the browser's database, written only when the recording changes, and recovered work comes back with it (`restoreRecording`, `storage.ts`). `e2e/audio.spec.ts`
   - A held bar stays held, the same time through it, when bars are put in or taken away before it or repeats and jumps change the order they are played in, in the same step to undo as the edit (`gtr_model::moved`, `Command::moves_bars`, `History::fold`). A point on a bar taken away, or on a time through a repeat no longer played, is let go. `held_bars_stay_held_when_the_play_through_changes`, `held_bars_of_the_recording_stay_on_their_bars_as_repeats_and_bars_change`
+  - The track pane has a row for the audio track under the tracks, with the recording's name, its mute, solo, volume and pan, the same as the waveform's, and the bars heard over the recording along it. Its name shows and hides the waveform. `e2e/audio.spec.ts`
 - [ ] The pedals and amplifiers of Guitar Pro 6 and later, and its tracks' sounds and the switches between them, imported onto the tracks' chains and sounds and exported from them (left out in phase 9)
 - [x] Preferences, themes, localisation scaffolding. How things stand:
   - Edit > Preferences… (Ctrl+,) gathers what was spread over the menus: the theme, the contrast, what the score is drawn on, the language, when the palette narrows and the inspector shows, the track pane and the visual metronome, what playback sounds through, and the way to the keyboard shortcuts and the command palette. Reset preferences puts them back as they came, keeping the keys given to commands

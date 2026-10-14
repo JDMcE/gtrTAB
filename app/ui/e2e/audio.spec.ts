@@ -178,3 +178,37 @@ test('the recording is in the audio exported, unless it is muted, and in the wor
   const recovered = await exported('recovered.wav');
   expect(level(recovered, 0, 0.02, without)).toBeGreaterThan(0.05);
 });
+
+test('the audio track has a row in the track pane, with its mix and its waveform a click away', async ({ page }) => {
+  await start(page);
+  for (let note = 0; note < 8; note++) {
+    await fret(page, 3);
+    await keys(page, 'ArrowRight');
+  }
+  const tracks = page.getByRole('region', { name: 'Tracks' });
+  await expect(tracks.getByRole('button', { name: 'clicks.wav', exact: true })).toHaveCount(0);
+  await addRecording(page, 'clicks.wav');
+  const name = tracks.getByRole('button', { name: 'clicks.wav', exact: true });
+  await expect(name).toHaveAttribute('aria-pressed', 'true');
+  // Eight seconds of recording: the score's three bars, two seconds each, are all heard over it.
+  const row = tracks.locator('.row.audio');
+  await expect(row.locator('.run')).toHaveCount(1);
+  expect(await row.locator('.run').evaluate((r) => r.getBoundingClientRect().width)).toBeGreaterThan(40);
+
+  // Muted from its row, and the waveform's switch says so; soloed there, the tracks are left out.
+  await tracks.getByRole('button', { name: 'Mute clicks.wav' }).click();
+  await expect(panel(page).getByRole('button', { name: 'Mute the recording' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(row).toHaveClass(/silent/);
+  await tracks.getByRole('button', { name: 'Mute clicks.wav' }).click();
+  await tracks.getByRole('button', { name: 'Solo clicks.wav' }).click();
+  await expect(tracks.locator('.row').first()).toHaveClass(/silent/);
+  await expect(row).not.toHaveClass(/silent/);
+  await expect(tracks.getByRole('slider', { name: 'Volume of clicks.wav' })).toBeVisible();
+
+  // Its name hides the waveform and shows it again.
+  await name.click();
+  await expect(panel(page)).toBeHidden();
+  await expect(name).toHaveAttribute('aria-pressed', 'false');
+  await name.click();
+  await expect(panel(page)).toContainText('clicks.wav');
+});

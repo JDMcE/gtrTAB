@@ -1,7 +1,21 @@
+<script lang="ts" module>
+  import type { Mix } from './model';
+
+  /** The audio track, as its row shows it. */
+  export interface AudioRow {
+    name: string;
+    mix: Mix;
+    /** The bars heard over the recording. */
+    bars: number[];
+    /** Whether its waveform is shown under the score. */
+    shown: boolean;
+  }
+</script>
+
 <script lang="ts">
   import { tick } from 'svelte';
   import type { Command } from './commands';
-  import { INSTRUMENT_ICONS, type Mix, type Score } from './model';
+  import { INSTRUMENT_ICONS, type Score } from './model';
   import Icon from './ui/Icon.svelte';
   import ToolButton from './ui/ToolButton.svelte';
   import { roving } from './ui/roving';
@@ -9,6 +23,8 @@
 
   interface Props {
     score: Score;
+    /** The score's audio track, or `null` without one. */
+    audio: AudioRow | null;
     /** The track being edited. */
     track: number;
     /** The cursor's bar. */
@@ -27,10 +43,14 @@
     onmove: (from: number, to: number) => void;
     onproperties: (track: number) => void;
     onresize: (height: number | null) => void;
+    onaudiomix: (mix: Mix) => void;
+    /** Shows or hides the audio track's waveform. */
+    onaudio: () => void;
   }
 
   let {
     score,
+    audio,
     track,
     bar,
     playBar,
@@ -42,6 +62,8 @@
     onmove,
     onproperties,
     onresize,
+    onaudiomix,
+    onaudio,
   }: Props = $props();
 
   /** Width of one bar in the grid. */
@@ -60,6 +82,8 @@
   let pane: HTMLElement;
   let scroller: HTMLDivElement;
   let infoWidth = $state(0);
+  /** The row of the audio track, in place of a track's number. */
+  const AUDIO = -1;
   /** Slider positions while they are being dragged, before the change is made. */
   let dragging = $state<{ track: number; mix: Mix } | null>(null);
   /** Whether the slider in use is being moved with the pointer, not the keyboard. */
@@ -72,26 +96,33 @@
   const DRAG_START = 5;
 
   const barCount = $derived(score.master_bars.length);
-  const fitted = $derived(HEAD + score.tracks.length * ROW + 14);
+  const rows = $derived(score.tracks.length + (audio ? 1 : 0));
+  const fitted = $derived(HEAD + rows * ROW + 14);
   /** The height the pane has: the one it was dragged to, or enough for the tracks. */
   const shown = $derived(height ?? Math.min(fitted, 190));
 
   /** For each track, the runs of consecutive bars that hold notes, as `[first, length]`. */
   const runs = $derived(
-    score.tracks.map((t) => {
-      const found: [number, number][] = [];
-      for (let i = 0; i < barCount; i++) {
-        const filled = t.staves.some((s) =>
-          s.bars[i]?.voices.some((v) => v.beats.some((b) => b.notes.length > 0)),
-        );
-        if (!filled) continue;
-        const last = found[found.length - 1];
-        if (last && last[0] + last[1] === i) last[1]++;
-        else found.push([i, 1]);
-      }
-      return found;
-    }),
+    score.tracks.map((t) =>
+      runsOf(
+        Array.from({ length: barCount }, (_, i) => i).filter((i) =>
+          t.staves.some((s) => s.bars[i]?.voices.some((v) => v.beats.some((b) => b.notes.length > 0))),
+        ),
+      ),
+    ),
   );
+  const audioRuns = $derived(runsOf(audio?.bars ?? []));
+
+  /** Bars in order, as runs of consecutive bars `[first, length]`. */
+  function runsOf(bars: number[]): [number, number][] {
+    const found: [number, number][] = [];
+    for (const i of bars) {
+      const last = found[found.length - 1];
+      if (last && last[0] + last[1] === i) last[1]++;
+      else if (!last || last[0] + last[1] < i) found.push([i, 1]);
+    }
+    return found;
+  }
 
   const numbers = $derived(
     Array.from({ length: Math.ceil(barCount / NUMBER_EVERY) }, (_, i) => i * NUMBER_EVERY),
@@ -99,10 +130,12 @@
   const sections = $derived(
     score.master_bars.flatMap((m, index) => (m.section ? [{ index, name: m.section }] : [])),
   );
-  const anySolo = $derived(score.tracks.some((t) => t.mix.solo));
+  const anySolo = $derived(score.tracks.some((t) => t.mix.solo) || !!audio?.mix.solo);
 
   const mixOf = (index: number): Mix =>
-    dragging?.track === index ? dragging.mix : score.tracks[index].mix;
+    dragging?.track === index ? dragging.mix : index === AUDIO ? audio!.mix : score.tracks[index].mix;
+
+  const setMix = (index: number, mix: Mix) => (index === AUDIO ? onaudiomix(mix) : onmix(index, mix));
 
   /** Scrolls the grid just far enough to show a bar. */
   function reveal(index: number) {
@@ -136,7 +169,7 @@
     const mix = { ...mixOf(index), [field]: Number(input.value) };
     if (commit) {
       dragging = null;
-      onmix(index, mix);
+      setMix(index, mix);
       // After the mouse the keys go back to the score; from the keyboard they stay here.
       if (pointing) input.blur();
       pointing = false;
@@ -223,6 +256,64 @@
   }
 </script>
 
+{#snippet controls(index: number, name: string, mix: Mix)}
+  <button
+    type="button"
+    class="flag mute"
+    aria-label="Mute {name}"
+    aria-pressed={mix.mute}
+    use:tip={{ label: 'Mute' }}
+    onmousedown={(e) => e.preventDefault()}
+    onclick={() => setMix(index, { ...mix, mute: !mix.mute })}
+  >M</button>
+  <button
+    type="button"
+    class="flag solo"
+    aria-label="Solo {name}"
+    aria-pressed={mix.solo}
+    use:tip={{ label: 'Solo' }}
+    onmousedown={(e) => e.preventDefault()}
+    onclick={() => setMix(index, { ...mix, solo: !mix.solo })}
+  >S</button>
+  <!-- From the keyboard the left and right arrows reach the sliders like the
+       buttons beside them, and the up and down arrows set them. -->
+  <input
+    class="volume"
+    type="range"
+    min="0"
+    max="100"
+    aria-label="Volume of {name}"
+    value={mix.volume}
+    use:tip={{ label: `Volume ${mix.volume}`, keys: '↑ / ↓' }}
+    onpointerdown={() => (pointing = true)}
+    onkeydown={() => (pointing = false)}
+    oninput={(e) => slide(index, 'volume', e, false)}
+    onchange={(e) => slide(index, 'volume', e, true)}
+  />
+  <input
+    class="pan"
+    type="range"
+    min="-100"
+    max="100"
+    step="5"
+    aria-label="Pan of {name}"
+    aria-valuetext={mix.pan === 0 ? 'centre' : `${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`}
+    value={mix.pan}
+    style:width="{PAN_WIDTH}px"
+    style:--from="{Math.min(panAt(0), panAt(mix.pan))}px"
+    style:--to="{Math.max(panAt(0), panAt(mix.pan))}px"
+    use:tip={{
+      label: mix.pan === 0 ? 'Pan: centre' : `Pan: ${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`,
+      keys: '↑ / ↓',
+    }}
+    onpointerdown={() => (pointing = true)}
+    onkeydown={() => (pointing = false)}
+    oninput={(e) => slide(index, 'pan', e, false)}
+    onchange={(e) => slide(index, 'pan', e, true)}
+    ondblclick={() => setMix(index, { ...mix, pan: 0 })}
+  />
+{/snippet}
+
 <section
   class="tracks"
   aria-label="Tracks"
@@ -296,61 +387,7 @@
             <Icon name={INSTRUMENT_ICONS[t.instrument]} size={16} />
             <span>{t.name || `Track ${index + 1}`}</span>
           </button>
-          <button
-            type="button"
-            class="flag mute"
-            aria-label="Mute {t.name}"
-            aria-pressed={mix.mute}
-            use:tip={{ label: 'Mute' }}
-            onmousedown={(e) => e.preventDefault()}
-            onclick={() => onmix(index, { ...mix, mute: !mix.mute })}
-          >M</button>
-          <button
-            type="button"
-            class="flag solo"
-            aria-label="Solo {t.name}"
-            aria-pressed={mix.solo}
-            use:tip={{ label: 'Solo' }}
-            onmousedown={(e) => e.preventDefault()}
-            onclick={() => onmix(index, { ...mix, solo: !mix.solo })}
-          >S</button>
-          <!-- From the keyboard the left and right arrows reach the sliders like the
-               buttons beside them, and the up and down arrows set them. -->
-          <input
-            class="volume"
-            type="range"
-            min="0"
-            max="100"
-            aria-label="Volume of {t.name}"
-            value={mix.volume}
-            use:tip={{ label: `Volume ${mix.volume}`, keys: '↑ / ↓' }}
-            onpointerdown={() => (pointing = true)}
-            onkeydown={() => (pointing = false)}
-            oninput={(e) => slide(index, 'volume', e, false)}
-            onchange={(e) => slide(index, 'volume', e, true)}
-          />
-          <input
-            class="pan"
-            type="range"
-            min="-100"
-            max="100"
-            step="5"
-            aria-label="Pan of {t.name}"
-            aria-valuetext={mix.pan === 0 ? 'centre' : `${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`}
-            value={mix.pan}
-            style:width="{PAN_WIDTH}px"
-            style:--from="{Math.min(panAt(0), panAt(mix.pan))}px"
-            style:--to="{Math.max(panAt(0), panAt(mix.pan))}px"
-            use:tip={{
-              label: mix.pan === 0 ? 'Pan: centre' : `Pan: ${Math.abs(mix.pan)} ${mix.pan < 0 ? 'left' : 'right'}`,
-              keys: '↑ / ↓',
-            }}
-            onpointerdown={() => (pointing = true)}
-            onkeydown={() => (pointing = false)}
-            oninput={(e) => slide(index, 'pan', e, false)}
-            onchange={(e) => slide(index, 'pan', e, true)}
-            ondblclick={() => onmix(index, { ...mix, pan: 0 })}
-          />
+          {@render controls(index, t.name, mix)}
         </div>
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <div class="cells" style:width="{barCount * CELL}px" onclick={(e) => pickBar(e, index)}>
@@ -364,11 +401,36 @@
       </div>
     {/each}
 
+    {#if audio}
+      {@const mix = mixOf(AUDIO)}
+      <div class="row audio" class:silent={mix.mute || (anySolo && !mix.solo)}>
+        <div class="info">
+          <button
+            type="button"
+            class="name"
+            aria-pressed={audio.shown}
+            use:tip={{ label: audio.shown ? "Hide the audio track's waveform" : "Show the audio track's waveform" }}
+            onmousedown={(e) => e.preventDefault()}
+            onclick={onaudio}
+          >
+            <Icon name="audioTrack" size={16} />
+            <span>{audio.name}</span>
+          </button>
+          {@render controls(AUDIO, audio.name, mix)}
+        </div>
+        <div class="cells" style:width="{barCount * CELL}px" aria-hidden="true">
+          {#each audioRuns as [first, length]}
+            <span class="run" style:left="{first * CELL}px" style:width="{length * CELL - 1}px"></span>
+          {/each}
+        </div>
+      </div>
+    {/if}
+
     {#if playBar !== null}
       <span
         class="playhead"
         style:left="{infoWidth + playBar * CELL}px"
-        style:height="{HEAD + score.tracks.length * ROW}px"
+        style:height="{HEAD + rows * ROW}px"
       ></span>
     {/if}
   </div>
@@ -670,6 +732,14 @@
 
   .row.current .run {
     background: var(--accent);
+  }
+
+  .row.audio .run {
+    background: repeating-linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--muted), transparent 35%) 0 2px,
+      transparent 2px 4px
+    );
   }
 
   .row.silent .run {
