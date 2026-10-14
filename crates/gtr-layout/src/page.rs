@@ -94,7 +94,9 @@ impl Layout {
         let mut pages: Vec<Vec<Item>> = vec![Vec::new(); starts.len()];
         for item in &self.items {
             // The line of music an item belongs to is the last that starts above it.
-            let line = tops.partition_point(|top| *top <= item.top()).saturating_sub(1);
+            let line = tops
+                .partition_point(|top| *top <= item.top())
+                .saturating_sub(1);
             let number = starts.partition_point(|(first, _)| *first <= line) - 1;
             let mut item = item.clone();
             item.shift_y(-starts[number].1);
@@ -135,7 +137,11 @@ impl Layout {
         if printed.systems.is_empty() {
             return vec![blank(printed.items.clone())];
         }
-        printed.cut(page, |_, _| {}).into_iter().map(blank).collect()
+        printed
+            .cut(page, |_, _| {})
+            .into_iter()
+            .map(blank)
+            .collect()
     }
 
     /// The score on pages of `page`'s size, as they are printed, set out on the screen one
@@ -200,7 +206,12 @@ impl Layout {
         let sheets: Vec<Sheet> = (0..count)
             .map(|number| {
                 let (x, y) = offset(number);
-                Sheet { x, y, w: page.width, h: page.height }
+                Sheet {
+                    x,
+                    y,
+                    w: page.width,
+                    h: page.height,
+                }
             })
             .collect();
         let (right, bottom) = offset(count - 1);
@@ -303,7 +314,10 @@ mod tests {
             let sheets = whole.sheets(Page::A4, set);
             assert_eq!(sheets.sheets.len(), printed.len());
             // As many items as the printed pages, each on its sheet.
-            assert_eq!(sheets.items.len(), printed.iter().map(|p| p.items.len()).sum::<usize>());
+            assert_eq!(
+                sheets.items.len(),
+                printed.iter().map(|p| p.items.len()).sum::<usize>()
+            );
             let on_a_sheet = |x: f64, y: f64| {
                 (sheets.sheets.iter())
                     .any(|s| x >= s.x && x <= s.x + s.w && y >= s.y && y <= s.y + s.h)
@@ -342,10 +356,19 @@ mod tests {
     #[test]
     fn pages_on_the_screen_keep_the_marks_for_whoever_is_writing() {
         let mut score = long(40);
-        score.tracks[0].staves[0].bars[30].voices[0].beats.truncate(1);
+        score.tracks[0].staves[0].bars[30].voices[0]
+            .beats
+            .truncate(1);
         let whole = layout(&score, &View::default(), Page::A4.width);
-        let marked = (whole.sheets(Page::A4, Pages::Down).items.iter())
-            .any(|item| matches!(item, Item::Rect { c: Color::Error, .. }));
+        let marked = (whole.sheets(Page::A4, Pages::Down).items.iter()).any(|item| {
+            matches!(
+                item,
+                Item::Rect {
+                    c: Color::Error,
+                    ..
+                }
+            )
+        });
         assert!(marked);
     }
 }

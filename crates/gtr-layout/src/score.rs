@@ -1028,7 +1028,9 @@ fn header(score: &Score, width: f64, items: &mut Vec<Item>) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use gtr_model::{Beat, Duration, Instrument, Note, NoteValue, TimeSignature, Track, Voice, demo_score};
+    use gtr_model::{
+        Beat, Duration, Instrument, Note, NoteValue, TimeSignature, Track, Voice, demo_score,
+    };
 
     use super::*;
 

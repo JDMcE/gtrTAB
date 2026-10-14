@@ -426,7 +426,12 @@ impl Document {
     /// screen one under another or, with `across`, side by side. `view_json` is as for
     /// [`Document::layout_json`].
     #[wasm_bindgen(js_name = sheetsJson)]
-    pub fn sheets_json(&self, view_json: &str, paper: &str, across: bool) -> Result<String, JsError> {
+    pub fn sheets_json(
+        &self,
+        view_json: &str,
+        paper: &str,
+        across: bool,
+    ) -> Result<String, JsError> {
         let cursor = self.editor.cursor();
         let view = gtr_layout::View {
             track: cursor.track,
