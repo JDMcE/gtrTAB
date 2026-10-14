@@ -78,12 +78,13 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | Insert | Insert a rest before the cursor |
 | Ctrl+Insert | Insert a bar |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy, cut, paste |
-| Ctrl+Z / Ctrl+Y | Undo, redo |
+| Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | [ / ] | Play slower / faster, also while playing |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
 | Ctrl+P | Print |
-| ? or F1 | List every shortcut |
+| Ctrl+K or Ctrl+Shift+P | Command palette: find any command by name and run it |
+| ? or F1 | List every shortcut, and change them |
 | Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
 | Arrow keys in a bar, the palette or a menu | Move between its controls |
 | In the track pane: Left / Right | Along a track's row: name, mute, solo, volume, pan |
@@ -92,6 +93,8 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | Esc | Back to the score |
 
 Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord.
+
+These are the keys the app comes with. Any command in the menus can be given a key, or have its keys taken away, in the list of shortcuts (? or F1); a key given to one command is taken from the one that had it. The keys that move the cursor and enter notes (the arrows, Home and End, the digits, + and −, Enter) stay as they are.
 
 ## Interface
 

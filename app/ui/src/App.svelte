@@ -81,6 +81,8 @@
   import Shortcuts from './lib/Shortcuts.svelte';
   import CommandPalette from './lib/CommandPalette.svelte';
   import { listCommands, used, type Found } from './lib/search';
+  import { chordOf, keymap } from './lib/keymap';
+  import { shortcuts, shownKeys } from './lib/keys.svelte';
   import TrackPane from './lib/TrackPane.svelte';
   import { describeCursor } from './lib/describe';
   import Icon from './lib/ui/Icon.svelte';
@@ -191,6 +193,10 @@
   let lastDigitAt = 0;
 
   $effect(() => savePrefs($state.snapshot(prefs)));
+  // What the menus, tooltips and palette show beside each command follows the keys given.
+  $effect.pre(() => {
+    shortcuts.custom = prefs.shortcuts;
+  });
 
   function setTheme(theme: Theme) {
     prefs.theme = theme;
@@ -666,6 +672,7 @@
   const viewJson = $derived(JSON.stringify({ notation: prefs.notation, multitrack: prefs.multitrack }));
 
   const voices: Command[] = Array.from({ length: MAX_VOICES }, (_, i) => ({
+    id: `voice${i + 1}`,
     label: `Voice ${i + 1}`,
     icon: `voice${i + 1}` as IconName,
     keys: `Alt+${i + 1}`,
@@ -674,6 +681,7 @@
   }));
 
   const notations: Command[] = NOTATIONS.map(([value, label]) => ({
+    id: `notation.${value}`,
     label,
     active: () => prefs.notation === value,
     run: () => (prefs.notation = value),
@@ -1044,6 +1052,7 @@
   /** A command that sets a property of the bar to one of a list of choices, or clears it. */
   const barChoices = <T extends string>(field: 'feel', choices: [T, string][]): Command[] =>
     choices.map(([value, label]) => ({
+      id: `${field}.${value}`,
       label,
       active: () => masterBar?.[field] === value,
       run: () => setBar(field, masterBar?.[field] === value ? null : value),
@@ -1054,6 +1063,7 @@
     choices.map(([value, label]) => {
       const there = () => ((masterBar?.[field] ?? []) as T[]).includes(value);
       return {
+        id: `${field}.${value}`,
         label,
         active: there,
         run: () => {
@@ -1064,6 +1074,7 @@
     });
 
   const fades: Command[] = FADES.map(([value, label]) => ({
+    id: `fade.${value}`,
     label,
     active: () => beatEffects.fade === value,
     disabled: () => !editor?.beat_effects,
@@ -1083,6 +1094,7 @@
   ];
   const usualTouch = () => (effects.harmonic === 'pinch' ? 5 : 12);
   const harmonicTouches: Command[] = HARMONIC_TOUCHES.map(([frets, sounds]) => ({
+    id: `harmonicTouch.${frets}`,
     label: `Touched ${frets} frets above the note: ${sounds}`,
     active: () =>
       !!effects.harmonic && effects.harmonic !== 'natural' && (effects.harmonic_touch ?? usualTouch()) === frets,
@@ -1105,6 +1117,7 @@
   ): Command => ({ label, icon, keys, active, run: () => technique(name) });
 
   const noteValues: Command[] = NOTE_VALUES.map((value, i) => ({
+    id: `value.${value}`,
     label: `${VALUE_NAMES[i]} note`,
     icon: value,
     active: () => editor?.duration.value === value,
@@ -1112,6 +1125,7 @@
   }));
 
   const dynamics: Command[] = DYNAMICS.map(([value, name]) => ({
+    id: `dynamic.${value}`,
     label: `${name} (${value})`,
     icon: value,
     active: () => beatEffects.dynamic === value,
@@ -1123,6 +1137,7 @@
       const current = () => (nested ? editor?.duration.nested : editor?.duration.tuplet);
       const active = () => current()?.actual === actual && current()?.normal === normal;
       return {
+        id: `${nested ? 'nestedTuplet' : 'tuplet'}.${actual}:${normal}`,
         label: `${actual} in the time of ${normal}`,
         active,
         disabled: () => nested && !editor?.duration.tuplet,
@@ -1136,6 +1151,7 @@
 
   const fingering = (field: 'left_finger' | 'right_finger', marks: string): Command[] =>
     FINGERS.map((finger, i) => ({
+      id: `${field}.${finger}`,
       label: `${marks[i]}  ${finger}`,
       active: () => effects[field] === finger,
       disabled: noNote,
@@ -1158,12 +1174,12 @@
     print: { label: 'Print…', keys: 'Ctrl+P', disabled: noScore, run: print },
 
     undo: { label: 'Undo', icon: 'undo', keys: 'Ctrl+Z', disabled: () => !editor?.can_undo, run: () => edit((d) => d.undo()) },
-    redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
+    redo: { label: 'Redo', icon: 'redo', keys: 'Ctrl+Y / Ctrl+Shift+Z', disabled: () => !editor?.can_redo, run: () => edit((d) => d.redo()) },
     cut: { label: 'Cut', icon: 'cut', keys: 'Ctrl+X', run: () => edit((d) => d.cut()) },
     copy: { label: 'Copy', icon: 'copy', keys: 'Ctrl+C', run: () => edit((d) => d.copy()) },
     paste: { label: 'Paste', icon: 'paste', keys: 'Ctrl+V', disabled: () => !editor?.can_paste, run: () => edit((d) => d.paste()) },
     insertBeat: { label: 'Insert a rest before the cursor', keys: 'Insert', run: () => edit((d) => d.insertBeat()) },
-    delete: { label: 'Remove the note, or the beat if it is a rest', keys: 'Delete', run: () => edit((d) => d.delete()) },
+    delete: { label: 'Remove the note, or the beat if it is a rest', keys: 'Delete / Backspace', run: () => edit((d) => d.delete()) },
     deleteBeats: { label: 'Remove the beat or the selected beats', keys: 'Ctrl+Delete', run: () => edit((d) => d.deleteBeats()) },
 
     dot: { label: 'Dotted', icon: 'dot', keys: '.', active: () => (editor?.duration.dots ?? 0) > 0, run: () => edit((d) => d.toggleDot()) },
@@ -1518,17 +1534,21 @@
       run: findScale,
     },
     trackPane: { label: 'Track pane', icon: 'trackPane', active: () => prefs.tracks, run: () => (prefs.tracks = !prefs.tracks) },
-    shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '?', run: () => (shortcutsOpen = true) },
-    commandPalette: { label: 'Command palette…', icon: 'search', keys: 'Ctrl+K', run: () => (paletteOpen = true) },
+    shortcuts: { label: 'Keyboard shortcuts', icon: 'shortcuts', keys: '? / F1', run: () => (shortcutsOpen = true) },
+    commandPalette: { label: 'Command palette…', icon: 'search', keys: 'Ctrl+K / Ctrl+Shift+P', run: () => (paletteOpen = true) },
   } satisfies Record<string, Command>;
+  // Each is known by its name here, for the keys the user gives it.
+  for (const [id, command] of Object.entries(cmd)) (command as Command).id = id;
 
   const speeds: Command[] = SPEEDS.map((percent) => ({
+    id: `speed.${percent}`,
     label: `${percent}%`,
     active: () => speed === percent,
     run: () => setSpeed(percent),
   }));
 
   const themes: Command[] = THEMES.map((theme) => ({
+    id: `theme.${theme}`,
     label: THEME_NAMES[theme],
     icon: THEME_ICONS[theme],
     active: () => prefs.theme === theme,
@@ -1614,6 +1634,7 @@
       {
         label: 'Note',
         items: [
+          { label: 'Note value', items: noteValues },
           { label: 'Voice', items: voices },
           { label: 'Drum piece', items: drumPieces },
           '-',
@@ -1720,10 +1741,8 @@
     ];
   });
 
-  const keyRows = (...commands: Command[]) =>
-    commands.filter((c) => c.keys).map((c) => ({ keys: c.keys!, label: c.label.replace(/…$/, '') }));
-
-  const shortcutGroups: ShortcutGroup[] = [
+  /** The keys that are not commands, listed with the shortcuts but not to be changed. */
+  const fixedKeys: ShortcutGroup[] = [
     {
       title: 'Moving',
       rows: [
@@ -1731,55 +1750,29 @@
         { keys: 'Shift+arrows', label: 'Extend the selection' },
         { keys: 'Ctrl+← / Ctrl+→', label: 'Previous or next bar' },
         { keys: 'Home / End', label: 'First or last bar' },
-        { keys: 'Ctrl+↑ / Ctrl+↓', label: 'Previous or next track or staff' },
-        { keys: 'Alt+1 – Alt+4', label: 'Voice 1 to 4' },
       ],
     },
     {
       title: 'Entering notes',
       rows: [
         { keys: '0–9', label: 'Fret; two digits typed quickly make one number' },
-        { keys: 'A–G', label: 'On a piano: the note of that name nearest the cursor' },
+        { keys: 'A–G', label: 'On a piano: the note of that name nearest the cursor, before any command on those keys' },
         { keys: 'Enter', label: 'On a piano: a note where the cursor is' },
         { keys: 'Alt+↑ / Alt+↓', label: 'On a piano: the note under the cursor a semitone up or down' },
         { keys: '+ / −', label: 'Shorter or longer note value' },
-        ...keyRows(cmd.dot, cmd.triplet, cmd.rest, cmd.tie, cmd.insertBeat, cmd.delete, cmd.deleteBeats, cmd.insertBar),
-      ],
-    },
-    {
-      title: 'On the note',
-      rows: keyRows(
-        cmd.hammer, cmd.slideShift, cmd.bend, cmd.bendEditor, cmd.vibrato, cmd.palmMute, cmd.letRing,
-        cmd.dead, cmd.ghost, cmd.accent, cmd.harmonicNatural, cmd.tapped,
-      ),
-    },
-    { title: 'On the beat', rows: keyRows(cmd.crescendo, cmd.decrescendo, cmd.whammy) },
-    {
-      title: 'File and edit',
-      rows: [
-        ...keyRows(cmd.new, cmd.open, cmd.save, cmd.saveAs, cmd.print, cmd.undo),
-        { keys: 'Ctrl+Y / Ctrl+Shift+Z', label: 'Redo' },
-        ...keyRows(cmd.cut, cmd.copy, cmd.paste),
-      ],
-    },
-    {
-      title: 'Playback',
-      rows: [
-        { keys: 'Space', label: 'Play from the cursor or the selection; stop' },
-        { keys: '[ / ]', label: 'Slower or faster, also while playing' },
       ],
     },
     {
       title: 'Interface',
       rows: [
-        { keys: 'Ctrl+K / Ctrl+Shift+P', label: 'Command palette: any command by name' },
-        { keys: '? / F1', label: 'This list' },
         { keys: 'Tab / Shift+Tab', label: 'Move between the bars, palette and score' },
         { keys: 'Arrows', label: 'Move within a bar, the palette or a menu' },
         { keys: 'Esc', label: 'Back to the score' },
       ],
     },
   ];
+
+  const speedKeys = $derived([shownKeys(cmd.slower), shownKeys(cmd.faster)].filter(Boolean));
 
   /** Closes the command palette, and runs what was chosen there as the menus would. */
   function runFromPalette(chosen?: Found) {
@@ -1810,96 +1803,61 @@
     action();
   }
 
+  /** The commands that can be given keys, from the menus. */
+  const bindable = $derived(listCommands(menus).filter((found) => found.command.id));
+  const bindableKeys = $derived(bindable.map(({ command }) => ({ id: command.id!, keys: command.keys })));
+  const commandById = $derived(new Map(bindable.map(({ command }) => [command.id!, command])));
+  const keyMap = $derived(keymap(bindableKeys, prefs.shortcuts));
+
   function keyAction(event: KeyboardEvent): (() => unknown) | undefined {
-    const { key, shiftKey: shift } = event;
+    const { key, shiftKey: shift, altKey: alt } = event;
     const ctrl = event.ctrlKey || event.metaKey;
     const move = (direction: string) => () => edit((d) => d.moveCursor(direction, shift));
 
-    if (ctrl) {
-      switch (key.toLowerCase()) {
-        case 'z': return shift ? cmd.redo.run : cmd.undo.run;
-        case 'y': return cmd.redo.run;
-        case 'c': return cmd.copy.run;
-        case 'x': return cmd.cut.run;
-        case 'v': return cmd.paste.run;
-        case 's': return () => save(shift);
-        case 'o': return open;
-        case 'p': return shift ? cmd.commandPalette.run : cmd.print.run;
-        case 'k': return cmd.commandPalette.run;
-        case 'n': return newScore;
-        case 'arrowleft': return move('prev_bar');
-        case 'arrowright': return move('next_bar');
-        case 'arrowup': return cmd.previousTrack.run;
-        case 'arrowdown': return cmd.nextTrack.run;
-        case 'home': return move('first');
-        case 'end': return move('last');
-        case 'delete': return cmd.deleteBeats.run;
-        case 'insert': return cmd.insertBar.run;
+    // Moving the cursor and entering notes are not commands, and their keys stay as they are.
+    if (ctrl && !alt) {
+      switch (key) {
+        case 'ArrowLeft': return move('prev_bar');
+        case 'ArrowRight': return move('next_bar');
+        case 'Home': return move('first');
+        case 'End': return move('last');
       }
-      return undefined;
     }
-    if (event.altKey) {
-      // On a staff without strings, a semitone up or down for the note under the cursor.
-      if (pitched && (key === 'ArrowUp' || key === 'ArrowDown')) {
-        return () => edit((d) => d.shiftPitch(key === 'ArrowUp' ? 1 : -1));
+    // On a staff without strings, a semitone up or down for the note under the cursor.
+    if (alt && !ctrl && pitched && (key === 'ArrowUp' || key === 'ArrowDown')) {
+      return () => edit((d) => d.shiftPitch(key === 'ArrowUp' ? 1 : -1));
+    }
+    if (!ctrl && !alt) {
+      if (pitched) {
+        // Notes are entered by name; the letters keep their other meanings on strings.
+        const letter = key.length === 1 ? 'cdefgab'.indexOf(key.toLowerCase()) : -1;
+        if (letter >= 0) return () => edit((d) => d.enterLetter(letter));
+        if (key === 'Enter') return () => edit((d) => d.enterNote());
       }
-      const voice = /^Digit([1-4])$/.exec(event.code);
-      return voice ? voices[Number(voice[1]) - 1].run : undefined;
-    }
-    if (pitched) {
-      // Notes are entered by name; the letters keep their other meanings on strings.
-      const letter = key.length === 1 ? 'cdefgab'.indexOf(key.toLowerCase()) : -1;
-      if (letter >= 0) return () => edit((d) => d.enterLetter(letter));
-      if (key === 'Enter') return () => edit((d) => d.enterNote());
+      if (/^[0-9]$/.test(key)) {
+        return () => {
+          const now = performance.now();
+          const combine = now - lastDigitAt < DIGIT_WINDOW_MS;
+          lastDigitAt = now;
+          edit((d) => d.typeDigit(Number(key), combine));
+        };
+      }
+      switch (key) {
+        case 'ArrowLeft': return move('left');
+        case 'ArrowRight': return move('right');
+        case 'ArrowUp': return move('up');
+        case 'ArrowDown': return move('down');
+        case 'Home': return move('first');
+        case 'End': return move('last');
+        case '+':
+        case '=': return () => edit((d) => d.shorter());
+        case '-': return () => edit((d) => d.longer());
+      }
     }
 
-    if (/^[0-9]$/.test(key)) {
-      return () => {
-        const now = performance.now();
-        const combine = now - lastDigitAt < DIGIT_WINDOW_MS;
-        lastDigitAt = now;
-        edit((d) => d.typeDigit(Number(key), combine));
-      };
-    }
-    // Letters work the same with Caps Lock on.
-    switch (key.length === 1 ? key.toLowerCase() : key) {
-      case 'ArrowLeft': return move('left');
-      case 'ArrowRight': return move('right');
-      case 'ArrowUp': return move('up');
-      case 'ArrowDown': return move('down');
-      case 'Home': return move('first');
-      case 'End': return move('last');
-      case 'Delete':
-      case 'Backspace': return cmd.delete.run;
-      case 'Insert': return cmd.insertBeat.run;
-      case '+':
-      case '=': return () => edit((d) => d.shorter());
-      case '-': return () => edit((d) => d.longer());
-      case '.': return cmd.dot.run;
-      case '/': return cmd.triplet.run;
-      case 'r': return cmd.rest.run;
-      case 'l': return cmd.tie.run;
-      case 'h': return cmd.hammer.run;
-      case 's': return cmd.slideShift.run;
-      case 'b': return shift ? () => noNote() || cmd.bendEditor.run() : cmd.bend.run;
-      case 'w': return cmd.whammy.run;
-      case '<': return cmd.crescendo.run;
-      case '>': return cmd.decrescendo.run;
-      case 'v': return cmd.vibrato.run;
-      case 'p': return cmd.palmMute.run;
-      case 'i': return cmd.letRing.run;
-      case 'x': return cmd.dead.run;
-      case 'g': return cmd.ghost.run;
-      case 'a': return cmd.accent.run;
-      case 'n': return cmd.harmonicNatural.run;
-      case 't': return cmd.tapped.run;
-      case '?':
-      case 'F1': return cmd.shortcuts.run;
-      case ' ': return togglePlay;
-      case '[': return cmd.slower.run;
-      case ']': return cmd.faster.run;
-    }
-    return undefined;
+    const chord = chordOf(event);
+    const command = chord ? commandById.get(keyMap.get(chord) ?? '') : undefined;
+    return command && (() => command.disabled?.() || command.run());
   }
 
   onMount(() => {
@@ -1968,8 +1926,8 @@
           type="button"
           class="tool play"
           aria-label={playing ? 'Stop' : cmd.play.label}
-          aria-keyshortcuts="Space"
-          use:tip={{ label: playing ? 'Stop' : cmd.play.label, keys: 'Space' }}
+          aria-keyshortcuts={shownKeys(cmd.play)}
+          use:tip={{ label: playing ? 'Stop' : cmd.play.label, keys: shownKeys(cmd.play) }}
           onmousedown={(e) => e.preventDefault()}
           onclick={togglePlay}
         >
@@ -1992,8 +1950,8 @@
           type="button"
           class="chip"
           aria-label="Playback speed: {speed}%"
-          aria-keyshortcuts="[ ]"
-          use:tip={{ label: 'Playback speed', keys: '[ / ]' }}
+          aria-keyshortcuts={speedKeys.join(' ') || undefined}
+          use:tip={{ label: 'Playback speed', keys: speedKeys.join(' / ') || undefined }}
           onmousedown={(e) => e.preventDefault()}
           onclick={cmd.speedOther.run}
         >
@@ -2162,7 +2120,7 @@
   <p class="sr-only" aria-live="polite" aria-atomic="true" data-position>{position}</p>
 
   <footer class:failed>
-    <span role="status">{message || 'Press ? for the keyboard shortcuts'}</span>
+    <span role="status">{message || (shownKeys(cmd.shortcuts) ? `Press ${shownKeys(cmd.shortcuts)} for the keyboard shortcuts` : '')}</span>
     {#if editor && score}
       <span>
         {score.tracks[editor.cursor.track]?.name}{#if (score.tracks[editor.cursor.track]?.staves.length ?? 1) > 1}, staff {editor.cursor.staff + 1}{/if}
@@ -2348,7 +2306,13 @@
 {/if}
 
 {#if shortcutsOpen}
-  <Shortcuts groups={shortcutGroups} onclose={() => (shortcutsOpen = false)} />
+  <Shortcuts
+    fixed={fixedKeys}
+    commands={bindable}
+    custom={prefs.shortcuts}
+    onchange={(custom) => (prefs.shortcuts = custom)}
+    onclose={() => (shortcutsOpen = false)}
+  />
 {/if}
 
 {#if paletteOpen}

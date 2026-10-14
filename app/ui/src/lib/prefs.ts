@@ -37,6 +37,8 @@ export interface Prefs {
   audio: boolean;
   /** Ids of the commands last run from the command palette, the latest first. */
   recentCommands: string[];
+  /** The keys the user has given commands, or taken from them, by command id. */
+  shortcuts: Record<string, string[]>;
 }
 
 const KEY = 'gtrtab.ui';
@@ -55,6 +57,7 @@ const DEFAULTS: Prefs = {
   pedalboard: false,
   audio: true,
   recentCommands: [],
+  shortcuts: {},
 };
 
 export function loadPrefs(): Prefs {

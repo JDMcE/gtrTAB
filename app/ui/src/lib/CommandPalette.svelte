@@ -2,6 +2,7 @@
   import type { Found } from './search';
   import { search } from './search';
   import Icon from './ui/Icon.svelte';
+  import { shownKeys } from './keys.svelte';
 
   interface Props {
     /** Every command in the menus. */
@@ -84,6 +85,7 @@
     {#each found as item, i (item.id)}
       {@const disabled = item.command.disabled?.() ?? false}
       {@const checked = item.command.active?.()}
+      {@const keys = shownKeys(item.command)}
       <!-- The keyboard stays in the field; the list follows it there. -->
       <!-- svelte-ignore a11y_click_events_have_key_events -->
       <li
@@ -100,7 +102,7 @@
         </span>
         <span class="label">{item.command.label}</span>
         <span class="path">{item.path.join(' › ')}</span>
-        {#if item.command.keys}<kbd>{item.command.keys}</kbd>{/if}
+        {#if keys}<kbd>{keys}</kbd>{/if}
       </li>
     {:else}
       <li class="none" role="presentation">No command matches “{query}”</li>

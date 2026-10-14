@@ -2,6 +2,7 @@
   import { tick } from 'svelte';
   import type { Command, Menu, MenuEntry } from '../commands';
   import Icon from './Icon.svelte';
+  import { shownKeys } from '../keys.svelte';
 
   interface Props {
     menus: Menu[];
@@ -134,7 +135,7 @@
           tabindex="-1"
           aria-checked={entry.active ? entry.active() : undefined}
           aria-disabled={entry.disabled?.() ?? false}
-          aria-keyshortcuts={entry.keys}
+          aria-keyshortcuts={shownKeys(entry)}
           onpointerenter={() => !nested && (sub = null)}
           onclick={() => choose(entry)}
         >
@@ -146,7 +147,7 @@
             {/if}
           </span>
           <span class="label">{entry.label}</span>
-          {#if entry.keys}<kbd>{entry.keys}</kbd>{/if}
+          {#if shownKeys(entry)}<kbd>{shownKeys(entry)}</kbd>{/if}
         </button>
       {/if}
     {/each}

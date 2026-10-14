@@ -4,9 +4,11 @@
 import type { IconName } from './ui/icons';
 
 export interface Command {
+  /** Names the command for the keys the user gives it; one without an id cannot be given any. */
+  id?: string;
   label: string;
   icon?: IconName;
-  /** Shortcut as shown to the user, e.g. `Ctrl+Z`. */
+  /** The keys it comes with, as shown to the user, e.g. `Ctrl+Z`; several are separated by ` / `. */
   keys?: string;
   run: () => unknown;
   /** For commands that switch something on and off. */
