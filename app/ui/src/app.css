@@ -104,6 +104,12 @@
   color-scheme: light;
 }
 
+/* Shown as pages, only the pages are white: the desk around them, and its scroll bars, keep
+   the theme. */
+:root[data-paper='white'] .sheets[data-paper] {
+  color-scheme: inherit;
+}
+
 :root[data-paper='white'][data-contrast='high'] [data-paper] {
   --paper: #ffffff;
   --ink: #000000;

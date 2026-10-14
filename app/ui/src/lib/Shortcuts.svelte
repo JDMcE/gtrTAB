@@ -120,87 +120,89 @@
   </div>
   <p class="said" role="status">{said}</p>
 
-  <div class="groups">
-    {#each shown as [menu, items] (menu)}
-      <section>
-        <h3>{menu}</h3>
-        <ul>
-          {#each items as found (found.command.id)}
-            {@const id = found.command.id!}
-            {@const label = found.command.label.replace(/…$/, '')}
-            <li>
-              <span class="name">
-                {label}
-                {#if found.path.length > 1}<small>{found.path.slice(1).join(' › ')}</small>{/if}
-              </span>
-              <span class="keys">
-                {#each keys(found) as chord (chord)}
-                  <button
-                    type="button"
-                    class="key"
-                    aria-label={t('Take {key} from {command}', { key: keyLabel(chord), command: label })}
-                    use:tip={{ label: t('Take this key away') }}
-                    onclick={() => take(found, chord)}
-                  >
-                    <kbd>{keyLabel(chord)}</kbd>
-                  </button>
-                {/each}
-                {#if waiting === id}
-                  <kbd class="waiting" aria-live="polite">{t('Press a key…')}</kbd>
-                {/if}
-                <button
-                  type="button"
-                  class="tool"
-                  aria-label={t('Give {command} a key', { command: label })}
-                  aria-pressed={waiting === id}
-                  use:tip={{ label: t('Give it a key') }}
-                  onclick={() => {
-                    waiting = waiting === id ? null : id;
-                    said = waiting ? t('Press the key for {command}, or Esc.', { command: label }) : '';
-                  }}
-                >
-                  <Icon name="addSound" size={14} />
-                </button>
-                {#if changed(found)}
+  <div class="list">
+    <div class="groups">
+      {#each shown as [menu, items] (menu)}
+        <section>
+          <h3>{menu}</h3>
+          <ul>
+            {#each items as found (found.command.id)}
+              {@const id = found.command.id!}
+              {@const label = found.command.label.replace(/…$/, '')}
+              <li>
+                <span class="name">
+                  {label}
+                  {#if found.path.length > 1}<small>{found.path.slice(1).join(' › ')}</small>{/if}
+                </span>
+                <span class="keys">
+                  {#each keys(found) as chord (chord)}
+                    <button
+                      type="button"
+                      class="key"
+                      aria-label={t('Take {key} from {command}', { key: keyLabel(chord), command: label })}
+                      use:tip={{ label: t('Take this key away') }}
+                      onclick={() => take(found, chord)}
+                    >
+                      <kbd>{keyLabel(chord)}</kbd>
+                    </button>
+                  {/each}
+                  {#if waiting === id}
+                    <kbd class="waiting" aria-live="polite">{t('Press a key…')}</kbd>
+                  {/if}
                   <button
                     type="button"
                     class="tool"
-                    aria-label={t('Give {command} its own keys back', { command: label })}
-                    use:tip={{ label: t('Back to its own keys') }}
-                    onclick={() => putBack(found)}
+                    aria-label={t('Give {command} a key', { command: label })}
+                    aria-pressed={waiting === id}
+                    use:tip={{ label: t('Give it a key') }}
+                    onclick={() => {
+                      waiting = waiting === id ? null : id;
+                      said = waiting ? t('Press the key for {command}, or Esc.', { command: label }) : '';
+                    }}
                   >
-                    <Icon name="undo" size={14} />
+                    <Icon name="addSound" size={14} />
                   </button>
-                {/if}
-              </span>
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/each}
+                  {#if changed(found)}
+                    <button
+                      type="button"
+                      class="tool"
+                      aria-label={t('Give {command} its own keys back', { command: label })}
+                      use:tip={{ label: t('Back to its own keys') }}
+                      onclick={() => putBack(found)}
+                    >
+                      <Icon name="undo" size={14} />
+                    </button>
+                  {/if}
+                </span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/each}
 
-    {#each fixedShown as group (group.title)}
-      <section class="fixed">
-        <h3>{group.title}</h3>
-        <ul>
-          {#each group.rows as row}
-            <li>
-              <span class="name">{row.label}</span>
-              <span class="keys">
-                {#each row.keys.split(' / ') as keys, i}
-                  {#if i > 0}<span class="or">{t('or')}</span>{/if}
-                  <kbd>{keyLabel(keys)}</kbd>
-                {/each}
-              </span>
-            </li>
-          {/each}
-        </ul>
-      </section>
-    {/each}
+      {#each fixedShown as group (group.title)}
+        <section class="fixed">
+          <h3>{group.title}</h3>
+          <ul>
+            {#each group.rows as row}
+              <li>
+                <span class="name">{row.label}</span>
+                <span class="keys">
+                  {#each row.keys.split(' / ') as keys, i}
+                    {#if i > 0}<span class="or">{t('or')}</span>{/if}
+                    <kbd>{keyLabel(keys)}</kbd>
+                  {/each}
+                </span>
+              </li>
+            {/each}
+          </ul>
+        </section>
+      {/each}
 
-    {#if !shown.length && !fixedShown.length}
-      <p class="none">{t('No command matches “{query}”', { query })}</p>
-    {/if}
+      {#if !shown.length && !fixedShown.length}
+        <p class="none">{t('No command matches “{query}”', { query })}</p>
+      {/if}
+    </div>
   </div>
 
   {#snippet footer()}
@@ -234,9 +236,14 @@
     font-size: var(--text-sm);
   }
 
-  .groups {
+  /* The list scrolls down, and the columns inside it are as long as they need to be: columns
+     held to a height would carry on sideways instead. */
+  .list {
     max-height: 58vh;
     overflow-y: auto;
+  }
+
+  .groups {
     columns: 2 340px;
     column-gap: var(--space-6);
   }
