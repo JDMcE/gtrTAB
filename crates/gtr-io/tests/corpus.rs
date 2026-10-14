@@ -108,7 +108,7 @@ fn alternate_endings_are_read_alike_from_both_formats_and_followed() {
 
 #[test]
 fn signs_and_jumps_are_read() {
-    // Guitar Pro 5 lists a bar for each of its nineteen directions, and this file has one
+    // A `.gp5` file lists a bar for each of its nineteen directions, and this file has one
     // on every bar: the five signs, the jumps from the top, the jumps from the segno and
     // from the second segno, and the jumps on to the two codas.
     let score = score("guitarpro5/directions.gp5");
@@ -230,7 +230,7 @@ fn all_beats(score: &Score, track: usize) -> Vec<&Beat> {
 
 #[test]
 fn every_version_is_read() {
-    // The same four notes from Guitar Pro 3, 4, 5, 6 and 7: what `gp_samples.rs` checks
+    // The same four notes in versions 3, 4, 5, 6 and 7: what `gp_samples.rs` checks
     // of every file that the versions share, said out loud for one.
     for name in [
         "guitarpro3/dead.gp3",

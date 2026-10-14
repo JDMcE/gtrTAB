@@ -16,7 +16,7 @@ pub use report::{ExportError, Exported, ImportError, Imported};
 /// A format of another program's that a score can be written in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// Guitar Pro 7 and 8.
+    /// The `.gp` files of versions 7 and 8.
     GuitarPro,
     MusicXml,
     Midi,

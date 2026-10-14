@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { fret, keys, position, start } from './app';
 
-// What came late from Guitar Pro can be written here too: the shortest notes, fades, a
+// What came late from other formats can be written here too: the shortest notes, fades, a
 // second segno and coda, several jumps on a bar, the dotted and Scottish feels, and a
 // tempo that changes by degrees.
 

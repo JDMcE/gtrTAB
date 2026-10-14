@@ -1,7 +1,7 @@
 //! Imports every Guitar Pro file under `tests/corpus/`, and in the directory named by
 //! `GTR_GP_SAMPLES` if that is set, and checks the results hang together: every file
-//! opens, a real piece has bars that add up, and a piece saved by several versions of
-//! Guitar Pro reads as the same music from each. What particular files of the corpus
+//! opens, a real piece has bars that add up, and a piece saved in several versions of
+//! the format reads as the same music from each. What particular files of the corpus
 //! should hold is checked in `corpus.rs`. Run with `--nocapture` for a summary of each file.
 
 use std::collections::BTreeMap;
@@ -192,7 +192,7 @@ fn check_directory(directory: &Path) {
         );
         assert!(!score.tracks.is_empty(), "{name}: no tracks");
         // Files made to show the same thing in each version have the same name in each
-        // version's directory; Guitar Pro 8's are of other things.
+        // version's directory; version 8's are of other things.
         let stem = path.file_stem().unwrap().to_string_lossy().into_owned();
         if !name.starts_with("guitarpro8") {
             by_name.entry(stem).or_default().push((name, score));

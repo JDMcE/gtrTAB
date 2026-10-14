@@ -110,7 +110,7 @@ fn what_the_format_cannot_say_is_reported() {
         written.skipped,
         [
             "the exact shape of curves with more than four points",
-            "volumes louder than Guitar Pro goes",
+            "volumes louder than a .gp file goes",
             "where lines and pages were made to break"
         ]
     );
@@ -176,14 +176,14 @@ fn pedals_sounds_and_the_switches_between_them_read_back_as_they_were() {
     assert_eq!(difference(&score, &read.score), None);
     assert_eq!(score, read.score);
 
-    // A pedal Guitar Pro has nothing like is left out, and said to be.
+    // A pedal the format has nothing like is left out, and said to be.
     let mut wah = score.clone();
     wah.tracks[0].effects.push(Pedal::new(PedalKind::Wah));
     let written = export(&wah).unwrap();
     assert!(
         written
             .skipped
-            .contains(&"pedals Guitar Pro has no match for".to_string())
+            .contains(&"pedals a .gp file has no match for".to_string())
     );
     assert_eq!(
         import(&written.bytes).unwrap().score.tracks[0].effects,

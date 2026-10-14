@@ -1,0 +1,86 @@
+name: Release
+
+# Pushing a tag such as v0.1.0 builds the desktop app on each platform and puts the
+# installers on a draft release of that name. Look the draft over, then publish it by hand.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-latest
+            args: ''
+          # One app for both Intel and Apple silicon Macs.
+          - name: macOS
+            os: macos-latest
+            args: --target universal-apple-darwin
+          # The oldest supported Ubuntu, so the AppImage runs on older systems too.
+          - name: Linux
+            os: ubuntu-22.04
+            args: ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check the tag is the app's version
+        shell: bash
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
+            echo "::error::The tag is $GITHUB_REF_NAME but Cargo.toml says $version"
+            exit 1
+          fi
+
+      - name: Install Linux dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev libxdo-dev libssl-dev build-essential patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ runner.os == 'macOS' && 'wasm32-unknown-unknown,aarch64-apple-darwin,x86_64-apple-darwin' || 'wasm32-unknown-unknown' }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm ci
+        working-directory: app/ui
+      # The app ships with GeneralUser GS, which is not kept in the repository.
+      - run: npm run soundfont
+        working-directory: app/ui
+      - run: npm ci
+        working-directory: app/desktop
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: app/desktop
+          tauriScript: npx tauri
+          args: ${{ matrix.args }}
+          tagName: ${{ github.ref_name }}
+          releaseName: gtrTab ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: false
+          releaseBody: |
+            ## Installing
+
+            These builds are not signed yet, so each system warns before it opens them the first time.
+
+            - **Windows:** run the `-setup.exe`. If Windows says it protected your PC, choose **More info**, then **Run anyway**.
+            - **macOS:** open the `.dmg` and drag gtrTab to Applications. The first time you open it macOS refuses; go to **System Settings › Privacy & Security** and choose **Open Anyway**.
+            - **Linux:** use the `.AppImage` (make it executable first), or the `.deb` or `.rpm` for your distribution.

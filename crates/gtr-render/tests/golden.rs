@@ -311,7 +311,7 @@ fn band() -> Score {
     score
 }
 
-/// What Guitar Pro has that came late to the model: second segnos and codas, several
+/// What other formats have that came late to the model: second segnos and codas, several
 /// jumps on a bar, the dotted and Scottish feels, a tempo that changes by degrees, fades,
 /// notes down to a 256th and a third dot.
 fn late_arrivals() -> Score {

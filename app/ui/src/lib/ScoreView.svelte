@@ -276,7 +276,37 @@
     else if (x > scroller.scrollLeft + viewWidth - room) scroller.scrollLeft = x - viewWidth + room;
   }
 
-  $effect(() => reveal(playhead ?? editor.cursor));
+  /** The line the playhead was last brought to the middle of the view on. */
+  let followed: number | null = null;
+
+  /**
+   * Keeps the line being played in the middle of the view, so the lines to come can be read
+   * ahead. It moves only when the playhead reaches another line, leaving the view to be
+   * scrolled about while one line plays.
+   */
+  function follow(at: { bar: number; beat: number }) {
+    if (!layout || !scroller) return;
+    const p = locate(layout, at);
+    if (!p) return;
+    const line = layout.bars[at.bar].system;
+    if (line !== followed) {
+      followed = line;
+      const middle = ((p.system.top + p.system.bottom) / 2) * zoom;
+      scroller.scrollTop = Math.max(0, middle - viewHeight / 2);
+    }
+    const x = p.x * zoom + offsetX;
+    const room = Math.min(120, viewWidth / 4);
+    if (x < scroller.scrollLeft + room) scroller.scrollLeft = Math.max(0, x - room);
+    else if (x > scroller.scrollLeft + viewWidth - room) scroller.scrollLeft = x - viewWidth + room;
+  }
+
+  $effect(() => {
+    if (playhead) follow(playhead);
+    else {
+      followed = null;
+      reveal(editor.cursor);
+    }
+  });
 
   /** The first bar that is at least partly in view. */
   const firstVisible = $derived.by(() => {

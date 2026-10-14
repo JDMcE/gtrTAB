@@ -9,15 +9,15 @@ and the licence they are under.
 Guitar Pro files from the test data of [alphaTab](https://github.com/CoderLine/alphaTab)
 (`packages/alphatab/test-data`, at commit `aa824f269e2f12339c6254dc16d6aff911c0f075`), copyright Daniel Kuschny and
 contributors, under the Mozilla Public License 2.0; see `alphatab/LICENSE`. They are
-unchanged and keep alphaTab's directories, one for each version of Guitar Pro:
+unchanged and keep alphaTab's directories, one for each version of the format:
 
 | Directory | Files | Version |
 |---|---|---|
-| `guitarpro3/` | `.gp3` | Guitar Pro 3 |
-| `guitarpro4/` | `.gp4` | Guitar Pro 4 |
-| `guitarpro5/` | `.gp5` | Guitar Pro 5 |
-| `guitarpro6/` | `.gpx` | Guitar Pro 6 |
-| `guitarpro7/`, `guitarpro8/` | `.gp` | Guitar Pro 7 and 8 |
+| `guitarpro3/` | `.gp3` | 3 |
+| `guitarpro4/` | `.gp4` | 4 |
+| `guitarpro5/` | `.gp5` | 5 |
+| `guitarpro6/` | `.gpx` | 6 |
+| `guitarpro7/`, `guitarpro8/` | `.gp` | 7 and 8 |
 | `visual-tests/` | `.gp` | three more with repeats, endings and drums |
 
 Each file is a few bars made to show one thing, and many are the same few bars saved by
