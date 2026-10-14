@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test, type Page } from '@playwright/test';
 import { fret, keys, start } from './app';
 
@@ -5,8 +6,8 @@ import { fret, keys, start } from './app';
 // fitted to it by dragging their lines on its waveform, played along with the score, and
 // saved with it.
 
-/** A WAV file of `seconds` of clicks, two a second, at 44.1 kHz. */
-function clicks(seconds: number): Buffer {
+/** A WAV file of `seconds` of clicks, two a second from `offset` seconds in, at 44.1 kHz. */
+function clicks(seconds: number, offset = 0): Buffer {
   const rate = 44_100;
   const frames = seconds * rate;
   const bytes = Buffer.alloc(44 + frames * 2);
@@ -23,7 +24,7 @@ function clicks(seconds: number): Buffer {
   bytes.write('data', 36, 'latin1');
   bytes.writeUInt32LE(frames * 2, 40);
   for (let i = 0; i < frames; i++) {
-    const sinceClick = i % (rate / 2);
+    const sinceClick = i < offset * rate ? rate : (i - offset * rate) % (rate / 2);
     const sample = sinceClick < 800 ? Math.sin(sinceClick / 3) * Math.exp(-sinceClick / 200) * 0.8 : 0;
     bytes.writeInt16LE(Math.round(sample * 32_767), 44 + i * 2);
   }
@@ -33,11 +34,11 @@ function clicks(seconds: number): Buffer {
 const panel = (page: Page) => page.getByRole('region', { name: 'Audio track' });
 const cursorStart = (page: Page) => panel(page).locator('[data-cursor-start]');
 
-async function addRecording(page: Page, name: string): Promise<void> {
+async function addRecording(page: Page, name: string, offset = 0): Promise<void> {
   const chooser = page.waitForEvent('filechooser');
   await page.getByRole('menuitem', { name: 'Track', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Audio track…' }).click();
-  await (await chooser).setFiles({ name, mimeType: 'audio/wav', buffer: clicks(8) });
+  await (await chooser).setFiles({ name, mimeType: 'audio/wav', buffer: clicks(8, offset) });
 }
 
 /** Drags on the waveform from one time to another, in seconds, at the zoom it opens at. */
@@ -123,4 +124,118 @@ test('bars are fitted to a recording, which plays along and is saved with the sc
   await expect(panel(page)).toBeHidden();
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(panel(page)).toContainText('clicks.wav');
+});
+
+/** How loud a WAV file the app wrote is between two times, in seconds, from 0 to 1. */
+function level(bytes: Buffer, from: number, to: number, minus?: Buffer): number {
+  let sum = 0;
+  const frames = Math.round((to - from) * 44_100);
+  for (let frame = Math.round(from * 44_100), n = 0; n < frames; frame++, n++) {
+    const at = 44 + frame * 4;
+    const sample = bytes.readInt16LE(at) - (minus ? minus.readInt16LE(at) : 0);
+    sum += (sample / 32_768) ** 2;
+  }
+  return Math.sqrt(sum / frames);
+}
+
+test('the recording is in the audio exported, unless it is muted, and in the work recovered', async ({ page }, testInfo) => {
+  await start(page);
+  for (let note = 0; note < 4; note++) {
+    await fret(page, 5);
+    await keys(page, 'ArrowRight');
+  }
+  await addRecording(page, 'clicks.wav');
+  await expect(panel(page)).toContainText('clicks.wav');
+
+  /** Exports the score's sound and reads it back. */
+  const exported = async (name: string) => {
+    const download = page.waitForEvent('download');
+    await page.getByRole('menuitem', { name: 'File', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Export', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Audio (WAV)…', exact: true }).click();
+    const saved = testInfo.outputPath(name);
+    await (await download).saveAs(saved);
+    return readFileSync(saved);
+  };
+  const withRecording = await exported('with.wav');
+  await panel(page).getByRole('button', { name: 'Mute the recording' }).click();
+  const without = await exported('without.wav');
+  expect(withRecording.length).toBe(without.length);
+  // What the two differ by is the clicks, two a second, and nothing between them.
+  for (const click of [0, 0.5, 1, 1.5]) {
+    expect(level(withRecording, click, click + 0.02, without)).toBeGreaterThan(0.05);
+    expect(level(withRecording, click + 0.1, click + 0.4, without)).toBeLessThan(0.001);
+  }
+
+  // The work is kept with its recording in case the app closes, and comes back with it.
+  await panel(page).getByRole('button', { name: 'Mute the recording' }).click();
+  // Autosave is not instant.
+  await page.waitForTimeout(2_500);
+  await page.reload();
+  await expect(page.getByRole('status')).toContainText('Recovered unsaved changes');
+  await expect(panel(page)).toContainText('clicks.wav');
+  await expect(panel(page).getByRole('alert')).toHaveCount(0);
+  const recovered = await exported('recovered.wav');
+  expect(level(recovered, 0, 0.02, without)).toBeGreaterThan(0.05);
+});
+
+test('the audio track has a row in the track pane, with its mix and its waveform a click away', async ({ page }) => {
+  await start(page);
+  for (let note = 0; note < 8; note++) {
+    await fret(page, 3);
+    await keys(page, 'ArrowRight');
+  }
+  const tracks = page.getByRole('region', { name: 'Tracks' });
+  await expect(tracks.getByRole('button', { name: 'clicks.wav', exact: true })).toHaveCount(0);
+  await addRecording(page, 'clicks.wav');
+  const name = tracks.getByRole('button', { name: 'clicks.wav', exact: true });
+  await expect(name).toHaveAttribute('aria-pressed', 'true');
+  // Eight seconds of recording: the score's three bars, two seconds each, are all heard over it.
+  const row = tracks.locator('.row.audio');
+  await expect(row.locator('.run')).toHaveCount(1);
+  expect(await row.locator('.run').evaluate((r) => r.getBoundingClientRect().width)).toBeGreaterThan(40);
+
+  // Muted from its row, and the waveform's switch says so; soloed there, the tracks are left out.
+  await tracks.getByRole('button', { name: 'Mute clicks.wav' }).click();
+  await expect(panel(page).getByRole('button', { name: 'Mute the recording' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(row).toHaveClass(/silent/);
+  await tracks.getByRole('button', { name: 'Mute clicks.wav' }).click();
+  await tracks.getByRole('button', { name: 'Solo clicks.wav' }).click();
+  await expect(tracks.locator('.row').first()).toHaveClass(/silent/);
+  await expect(row).not.toHaveClass(/silent/);
+  await expect(tracks.getByRole('slider', { name: 'Volume of clicks.wav' })).toBeVisible();
+
+  // Its name hides the waveform and shows it again.
+  await name.click();
+  await expect(panel(page)).toBeHidden();
+  await expect(name).toHaveAttribute('aria-pressed', 'false');
+  await name.click();
+  await expect(panel(page)).toContainText('clicks.wav');
+});
+
+test('the bars are found in the recording by listening for its beat', async ({ page }) => {
+  await start(page);
+  // Three bars of quarter notes at 120 and an empty one, a beat every half second, as the
+  // clicks have it.
+  for (let note = 0; note < 12; note++) {
+    await fret(page, note % 5);
+    await keys(page, 'ArrowRight');
+  }
+  await keys(page, 'Control+Home');
+  // The clicks start a quarter of a second in, so the bars as written are early.
+  await addRecording(page, 'late.wav', 0.25);
+  await keys(page, 'Control+ArrowRight');
+  await expect(cursorStart(page)).toHaveText('Bar 2: 0:02.000');
+
+  await panel(page).getByRole('button', { name: 'Find the bars' }).click();
+  await expect(page.getByRole('status')).toHaveText('Held 4 bars to the beats they start on');
+  // Each bar is held on the click it starts on, give or take a few thousandths.
+  for (const [bar, second] of [[1, 0], [2, 2], [3, 4], [4, 6]]) {
+    await keys(page, 'Control+Home', ...Array(bar - 1).fill('Control+ArrowRight'));
+    await expect(cursorStart(page)).toHaveText(new RegExp(`^Bar ${bar}: 0:0${second}\\.2[3-7]\\d, held$`));
+  }
+  // In one step to undo.
+  await page.getByRole('button', { name: 'Undo', exact: true }).click();
+  await keys(page, 'Control+Home', 'Control+ArrowRight');
+  await expect(cursorStart(page)).toHaveText('Bar 2: 0:02.000');
 });

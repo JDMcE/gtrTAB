@@ -120,6 +120,33 @@ pub fn detect(name: &str, bytes: &[u8]) -> Option<Format> {
     }
 }
 
+/// Puts files in one zip archive under the names given, as for downloading many at once.
+/// Files that are compressed already (PDF, PNG, Guitar Pro, the native format) are stored
+/// as they are; the rest are compressed.
+pub fn bundle<'a>(
+    files: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+) -> Result<Vec<u8>, ExportError> {
+    use std::io::{Cursor, Write};
+    use zip::{CompressionMethod, ZipWriter, write::SimpleFileOptions};
+
+    let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
+    for (name, bytes) in files {
+        let packed = [".gtrtab", ".gp", ".pdf", ".png", ".mxl"]
+            .iter()
+            .any(|end| name.to_lowercase().ends_with(end));
+        let options = SimpleFileOptions::default()
+            .compression_method(if packed {
+                CompressionMethod::Stored
+            } else {
+                CompressionMethod::Deflated
+            })
+            .large_file(bytes.len() >= u32::MAX as usize);
+        zip.start_file(name, options)?;
+        zip.write_all(bytes)?;
+    }
+    Ok(zip.finish()?.into_inner())
+}
+
 /// Reads a file written by another program, working out which from its contents and its
 /// name. What the file holds that there is no place for is listed in
 /// [`Imported::skipped`].

@@ -21,6 +21,8 @@
   --backdrop: rgb(0 0 0 / 45%);
 
   /* Score */
+  /* Around the pages, when the score is shown as pages. */
+  --desk: light-dark(#dcd9d2, #0f1012);
   --paper: light-dark(#fffefb, #1d1e21);
   --ink: light-dark(#1b1c1f, #e8e6e1);
   --staff: light-dark(#8e8f95, #6f7178);
@@ -60,6 +62,55 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
+}
+
+/*
+ * High contrast, for either theme: text and lines at full strength on plain white or black,
+ * and edges on every control. Set when the user asks for it, or when the system does.
+ */
+:root[data-contrast='high'] {
+  --bg: light-dark(#ffffff, #000000);
+  --panel: light-dark(#ffffff, #000000);
+  --raised: light-dark(#ffffff, #0d0d0d);
+  --border: light-dark(#5c5c5c, #a6a6a6);
+  --border-strong: light-dark(#000000, #ffffff);
+  --text: light-dark(#000000, #ffffff);
+  --muted: light-dark(#2e2e2e, #dedede);
+  --accent: light-dark(#8a2c00, #ffb48c);
+  --on-accent: light-dark(#ffffff, #000000);
+  --hover: light-dark(rgb(0 0 0 / 14%), rgb(255 255 255 / 20%));
+  --pressed: light-dark(rgb(138 44 0 / 22%), rgb(255 180 140 / 32%));
+  --focus: light-dark(#0039b3, #a8c8ff);
+  --error: light-dark(#a30000, #ff9a90);
+  --desk: light-dark(#a8a8a8, #3a3a3a);
+  --paper: light-dark(#ffffff, #000000);
+  --ink: light-dark(#000000, #ffffff);
+  --staff: light-dark(#3d3d3d, #c2c2c2);
+  --select: light-dark(rgb(138 44 0 / 26%), rgb(255 180 140 / 34%));
+}
+
+/*
+ * The score on white paper whatever the theme, as it is printed. Browsers settle light-dark()
+ * in a variable where the variable is set, so the score's colours are given again here
+ * rather than by its colour scheme.
+ */
+:root[data-paper='white'] [data-paper] {
+  --paper: #fffefb;
+  --ink: #1b1c1f;
+  --staff: #8e8f95;
+  --accent: #a84a22;
+  --error: #b92d23;
+  --select: rgb(168 74 34 / 16%);
+  color-scheme: light;
+}
+
+:root[data-paper='white'][data-contrast='high'] [data-paper] {
+  --paper: #ffffff;
+  --ink: #000000;
+  --staff: #3d3d3d;
+  --accent: #8a2c00;
+  --error: #a30000;
+  --select: rgb(138 44 0 / 26%);
 }
 
 @font-face {

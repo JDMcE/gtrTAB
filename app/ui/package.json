@@ -7,6 +7,7 @@
     "wasm": "wasm-pack build ../../crates/gtr-wasm --target web --out-dir ../../app/ui/src/wasm",
     "worklet": "node scripts/build-worklet.mjs",
     "soundfont": "node scripts/fetch-soundfont.mjs",
+    "messages": "node scripts/messages.mjs",
     "dev": "npm run wasm -- --dev && npm run worklet && vite",
     "build": "npm run wasm && npm run worklet && vite build",
     "preview": "vite preview",

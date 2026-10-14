@@ -18,6 +18,9 @@ fn outline(bend: &mut Bend) {
 /// first beat that is the mixer's own is the mixer's; and with `outlines`, pitch curves
 /// are compared by their outline alone.
 fn as_written(mut score: Score, outlines: bool) -> Score {
+    for master in &mut score.master_bars {
+        (master.line_break, master.page_break) = (false, false);
+    }
     for track in &mut score.tracks {
         let mix = track.mix;
         let first =
@@ -57,9 +60,13 @@ fn a_score_with_everything_reads_back_as_it_was() {
     let score = band();
     let written = export(&score).unwrap();
     common::keep("band.gp", &written.bytes);
-    assert_eq!(written.skipped, [] as [&str; 0]);
+    assert_eq!(
+        written.skipped,
+        ["where lines and pages were made to break"]
+    );
     let read = import(&written.bytes).unwrap();
     assert_eq!(read.skipped, [] as [&str; 0]);
+    let score = as_written(score, false);
     assert_eq!(difference(&score, &read.score), None);
     assert_eq!(score, read.score);
 }
@@ -103,7 +110,8 @@ fn what_the_format_cannot_say_is_reported() {
         written.skipped,
         [
             "the exact shape of curves with more than four points",
-            "volumes louder than Guitar Pro goes"
+            "volumes louder than Guitar Pro goes",
+            "where lines and pages were made to break"
         ]
     );
     // The curve keeps its start, its furthest reach and its end.
@@ -115,4 +123,70 @@ fn what_the_format_cannot_say_is_reported() {
         .unwrap();
     assert_eq!(bend, Bend::new([(0, 0), (30, 6), (40, 0), (60, 0)]));
     assert_eq!(read.tracks[1].mix.volume, 94);
+}
+
+#[test]
+fn pedals_sounds_and_the_switches_between_them_read_back_as_they_were() {
+    use gtr_model::{Pedal, PedalKind, Sound};
+    let pedal = |kind, on, knobs: &[u8]| {
+        let mut pedal = Pedal::new(kind);
+        pedal.on = on;
+        pedal.knobs[..knobs.len()].copy_from_slice(knobs);
+        pedal
+    };
+    let mut score = band();
+    let guitar = &mut score.tracks[0];
+    guitar.effects = vec![
+        pedal(PedalKind::Overdrive, true, &[70, 40, 60]),
+        pedal(PedalKind::Amp, true, &[80, 45, 55, 65]),
+        pedal(PedalKind::Reverb, false, &[30, 40, 20]),
+    ];
+    guitar.sounds = vec![
+        Sound {
+            name: "Lead".into(),
+            instrument: Instrument::DistortionGuitar,
+            effects: vec![pedal(PedalKind::Eq, true, &[60, 70, 40])],
+        },
+        Sound {
+            name: "Clean".into(),
+            instrument: Instrument::CleanGuitar,
+            effects: Vec::new(),
+        },
+    ];
+    // To the lead in the second bar, and back to its own in the third.
+    let bars = &mut score.tracks[0].staves[0].bars;
+    bars[1].voices[0].beats[0].effects.sound = Some(1);
+    if let Some(last) = bars[2].voices[0].beats.last_mut() {
+        last.effects.sound = Some(0);
+    }
+    score.effects = vec![
+        pedal(PedalKind::Compressor, true, &[40, 60]),
+        pedal(PedalKind::Reverb, true, &[50, 50, 25]),
+    ];
+
+    let written = export(&score).unwrap();
+    common::keep("pedals.gp", &written.bytes);
+    assert_eq!(
+        written.skipped,
+        ["where lines and pages were made to break"]
+    );
+    let read = import(&written.bytes).unwrap();
+    assert_eq!(read.skipped, [] as [&str; 0]);
+    let score = as_written(score, false);
+    assert_eq!(difference(&score, &read.score), None);
+    assert_eq!(score, read.score);
+
+    // A pedal Guitar Pro has nothing like is left out, and said to be.
+    let mut wah = score.clone();
+    wah.tracks[0].effects.push(Pedal::new(PedalKind::Wah));
+    let written = export(&wah).unwrap();
+    assert!(
+        written
+            .skipped
+            .contains(&"pedals Guitar Pro has no match for".to_string())
+    );
+    assert_eq!(
+        import(&written.bytes).unwrap().score.tracks[0].effects,
+        score.tracks[0].effects
+    );
 }

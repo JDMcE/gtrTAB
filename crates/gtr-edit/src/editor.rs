@@ -2,7 +2,7 @@ use gtr_model::{
     Bar, Beat, BeatEffects, ChordDiagram, Clef, Duration, Instrument, KitPiece, MasterBar, Mix,
     Note, NoteValue, Score, ScoreInfo, Staff, TimeSignature, Track, Tuning, Tuplet, Voice,
 };
-use gtr_model::{Pedal, Rational, Sound, TempoChange};
+use gtr_model::{Pedal, Rational, Sound, Style, TempoChange};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -916,6 +916,14 @@ impl Editor {
         self.run(Command::SetInfo { info })
     }
 
+    /// Sets how the score is set out, in one step to undo.
+    pub fn set_style(&mut self, style: Style) -> Result<(), EditError> {
+        if style == self.score.style {
+            return Ok(());
+        }
+        self.keep_selection(|e| e.run(Command::SetStyle { style }))
+    }
+
     // --- Tracks ---
 
     /// Adds an empty track below the cursor's track and moves the cursor to it. Without a
@@ -1315,10 +1323,28 @@ impl Editor {
         if matches!(&command, Command::Batch(commands) if commands.is_empty()) {
             return Ok(());
         }
+        // The audio track's held bars are kept on their bars, and the same time through
+        // them, when bars are put in, taken away or repeated: the order the bars are
+        // played in is noted before the edit, to find them in after it.
+        let held = (self.score.audio.as_ref())
+            .filter(|audio| !audio.sync.is_empty())
+            .and_then(|_| command.moves_bars(self.score.master_bars.len()))
+            .map(|bars| (bars, gtr_model::play_order(&self.score.master_bars, false)));
         let depth = self.history.depth();
         self.history
             .execute(&mut self.score, command, self.cursor)?;
         self.revision += 1;
+        if let (Some((bars, before)), Some(audio)) = (held, &self.score.audio) {
+            let after = gtr_model::play_order(&self.score.master_bars, false);
+            let sync = gtr_model::moved(&audio.sync, &before, &after, &bars);
+            if sync != audio.sync {
+                let audio = gtr_model::AudioTrack {
+                    sync,
+                    ..audio.clone()
+                };
+                (self.history).fold(&mut self.score, Command::SetAudio { audio: Some(audio) })?;
+            }
+        }
         // The saved state was on the redo stack that this edit just discarded.
         if self.saved_depth.is_some_and(|saved| saved > depth) {
             self.saved_depth = None;

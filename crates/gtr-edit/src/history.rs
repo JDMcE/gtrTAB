@@ -44,6 +44,24 @@ impl<T> History<T> {
         Self::step(&mut self.redo, &mut self.undo, score, current)
     }
 
+    /// Applies a command as part of the last step, so that it is undone and redone with
+    /// it, as a consequence of that step rather than a step of its own. With no step to
+    /// undo, it is only applied.
+    pub fn fold(&mut self, score: &mut Score, command: Command) -> Result<(), EditError> {
+        let Some((last, tag)) = self.undo.pop() else {
+            return command.apply(score).map(drop);
+        };
+        match command.apply(score) {
+            // Undone first, then the step it followed.
+            Ok(inverse) => self.undo.push((Command::Batch(vec![inverse, last]), tag)),
+            Err(e) => {
+                self.undo.push((last, tag));
+                return Err(e);
+            }
+        }
+        Ok(())
+    }
+
     pub fn can_undo(&self) -> bool {
         !self.undo.is_empty()
     }

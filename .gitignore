@@ -11,3 +11,6 @@ app/desktop/gen/
 app/ui/e2e/results/
 app/ui/test-results/
 app/ui/playwright-report/
+
+# Written by `npm run messages`, for translators to start from
+app/ui/src/locales/messages.json

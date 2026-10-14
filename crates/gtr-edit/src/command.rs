@@ -1,6 +1,6 @@
 use gtr_model::{
     Bar, Beat, BeatEffects, Duration, Instrument, KitPiece, MasterBar, Mix, Note, Pedal, Score,
-    ScoreInfo, Sound, Staff, TimeSignature, Track, Tuning, Voice,
+    ScoreInfo, Sound, Staff, Style, TimeSignature, Track, Tuning, Voice,
 };
 use serde::{Deserialize, Serialize};
 
@@ -85,6 +85,9 @@ pub enum Command {
     SetInfo {
         info: ScoreInfo,
     },
+    SetStyle {
+        style: Style,
+    },
     /// Adds a track, which must have a bar for every bar of the score.
     InsertTrack {
         index: usize,
@@ -155,6 +158,8 @@ pub enum EditError {
     InvalidTimeSignature,
     #[error("that is not a valid setting for a bar")]
     InvalidBarProperty,
+    #[error("the stylesheet has a setting out of range")]
+    InvalidStyle,
     #[error("a key signature has at most seven sharps or flats")]
     InvalidKeySignature,
     #[error(
@@ -193,6 +198,39 @@ pub enum EditError {
 }
 
 impl Command {
+    /// Where each of the score's `bars` bars will be once the command has been applied,
+    /// `None` for one it takes away; or `None` altogether if it changes no bar's place,
+    /// repeats or jumps, and so leaves the order the bars are played in as it was.
+    pub fn moves_bars(&self, bars: usize) -> Option<Vec<Option<usize>>> {
+        fn walk(command: &Command, map: &mut Vec<Option<usize>>) -> bool {
+            match command {
+                Command::InsertBar { index, .. } => {
+                    for bar in map.iter_mut().flatten() {
+                        *bar += usize::from(*bar >= *index);
+                    }
+                    true
+                }
+                Command::RemoveBar { index } => {
+                    for slot in map.iter_mut() {
+                        *slot = slot.and_then(|bar| match bar.cmp(index) {
+                            std::cmp::Ordering::Less => Some(bar),
+                            std::cmp::Ordering::Equal => None,
+                            std::cmp::Ordering::Greater => Some(bar - 1),
+                        });
+                    }
+                    true
+                }
+                Command::SetMasterBar { .. } => true,
+                Command::Batch(commands) => {
+                    (commands.iter()).fold(false, |moved, command| walk(command, map) | moved)
+                }
+                _ => false,
+            }
+        }
+        let mut map = (0..bars).map(Some).collect();
+        walk(self, &mut map).then_some(map)
+    }
+
     /// An [`Command::InsertBar`] that adds an empty bar to every staff.
     pub fn insert_empty_bar(score: &Score, index: usize, time_signature: TimeSignature) -> Self {
         Command::InsertBar {
@@ -432,6 +470,14 @@ impl Command {
             Command::SetInfo { info } => Ok(Command::SetInfo {
                 info: std::mem::replace(&mut score.info, info),
             }),
+            Command::SetStyle { style } => {
+                if !style.is_valid() {
+                    return Err(EditError::InvalidStyle);
+                }
+                Ok(Command::SetStyle {
+                    style: std::mem::replace(&mut score.style, style),
+                })
+            }
             Command::InsertTrack { index, track } => {
                 if index > score.tracks.len() {
                     return Err(EditError::InvalidLocation);

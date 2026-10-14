@@ -112,6 +112,33 @@ impl Exported {
     }
 }
 
+/// Files gathered to be downloaded as one zip archive.
+#[wasm_bindgen]
+#[derive(Default)]
+pub struct Bundle {
+    files: Vec<(String, Vec<u8>)>,
+}
+
+#[wasm_bindgen]
+impl Bundle {
+    #[wasm_bindgen(constructor)]
+    pub fn new() -> Bundle {
+        Bundle::default()
+    }
+
+    /// Adds a file under `name`, which may hold folders separated by `/`.
+    pub fn add(&mut self, name: String, bytes: Vec<u8>) {
+        self.files.push((name, bytes));
+    }
+
+    /// The archive of every file added.
+    pub fn zip(&self) -> Result<Vec<u8>, JsError> {
+        Ok(gtr_io::bundle(
+            (self.files.iter()).map(|(name, bytes)| (name.as_str(), bytes.as_slice())),
+        )?)
+    }
+}
+
 /// The paper a name stands for.
 fn page(paper: &str) -> gtr_layout::Page {
     match paper {
@@ -230,6 +257,25 @@ impl Document {
         Ok(self.editor.set_audio(Some(audio))?)
     }
 
+    /// Puts back the file of the score's recording, as kept beside a copy saved without
+    /// it, without changing the score. Returns whether the score's recording is the file
+    /// `name`, and so has it now.
+    #[wasm_bindgen(js_name = restoreRecording)]
+    pub fn restore_recording(&mut self, name: &str, bytes: Vec<u8>) -> bool {
+        let wanted = self.editor.score().audio.as_ref().map(|a| a.name.as_str());
+        if wanted != Some(name) {
+            return false;
+        }
+        self.recordings.insert(name.to_owned(), bytes);
+        true
+    }
+
+    /// How many bytes the file of the score's recording has; 0 without one at hand.
+    #[wasm_bindgen(getter, js_name = recordingSize)]
+    pub fn recording_size(&self) -> usize {
+        self.recording().map_or(0, Vec::len)
+    }
+
     /// The file of the score's recording, if it has one and the file is at hand.
     #[wasm_bindgen(js_name = recordingFile)]
     pub fn recording_file(&self) -> Option<Vec<u8>> {
@@ -256,6 +302,42 @@ impl Document {
             })
             .collect();
         serde_json::Value::from(bars).to_string()
+    }
+
+    /// Listens for the beat of the recording, whose samples are given at `rate` with its
+    /// sides added together, and holds each bar to the beat it starts on, counted out from
+    /// the first bar held now, in one step to undo. Returns how many bars are held.
+    #[wasm_bindgen(js_name = findBars)]
+    pub fn find_bars(&mut self, samples: &[f32], rate: u32) -> Result<usize, JsError> {
+        let score = self.editor.score();
+        let Some(audio) = &score.audio else {
+            return Ok(0);
+        };
+        let order = gtr_model::play_order(&score.master_bars, false);
+        let counts: Vec<usize> = (order.iter())
+            .map(|&bar| usize::from(score.master_bars[bar].time_signature.felt_beats().max(1)))
+            .collect();
+        // How far apart the beats are as written: the middle of the bars' spacings.
+        let mut spacings: Vec<f64> = (gtr_model::timings(score, &order, 1.0).iter())
+            .zip(&counts)
+            .map(|(timing, &count)| timing.length / count as f64)
+            .collect();
+        spacings.sort_by(f64::total_cmp);
+        let expected = spacings.get(spacings.len() / 2).copied().unwrap_or(0.5);
+        let anchor =
+            (audio.sync.first()).map_or((0, 0.0), |p| (p.bar, f64::from(p.millis) / 1000.0));
+        let beats = gtr_audio::beats(samples, rate, expected);
+        let sync = gtr_model::on_beats(&beats, &counts, anchor);
+        if sync.is_empty() {
+            return Err(JsError::new("No beat could be heard in the recording."));
+        }
+        let held = sync.len();
+        let audio = gtr_model::AudioTrack {
+            sync,
+            ..audio.clone()
+        };
+        self.editor.set_audio(Some(audio))?;
+        Ok(held)
     }
 
     /// Changes the audio track's mix or sync points, or with `"null"` takes it away.
@@ -422,6 +504,32 @@ impl Document {
         Ok(serde_json::to_string(&layout)?)
     }
 
+    /// Display list for the score on pages of the paper `paper` names, set out on the
+    /// screen one under another or, with `across`, side by side. `view_json` is as for
+    /// [`Document::layout_json`].
+    #[wasm_bindgen(js_name = sheetsJson)]
+    pub fn sheets_json(
+        &self,
+        view_json: &str,
+        paper: &str,
+        across: bool,
+    ) -> Result<String, JsError> {
+        let cursor = self.editor.cursor();
+        let view = gtr_layout::View {
+            track: cursor.track,
+            staff: cursor.staff,
+            voice: cursor.voice,
+            ..serde_json::from_str(view_json)?
+        };
+        let page = page(paper);
+        let set = match across {
+            true => gtr_layout::Pages::Across,
+            false => gtr_layout::Pages::Down,
+        };
+        let layout = gtr_layout::layout(self.editor.score(), &view, page.width).sheets(page, set);
+        Ok(serde_json::to_string(&layout)?)
+    }
+
     /// Compiles the score to the events the synth plays. `options_json` holds
     /// `gtr_audio::Options` fields; `follow` is the track whose beats move the playback
     /// cursor.
@@ -466,13 +574,16 @@ impl Document {
 
     /// Starts making the whole score into sound for a file, as it plays: every track
     /// that is not muted, through the SoundFont whose bytes are given or through the
-    /// built-in models if none is. `options_json` is as for [`Document::compile_audio`].
+    /// built-in models if none is, with the score's recording if its samples are given,
+    /// left and right in turn at `sample_rate` as sixteen bits each. `options_json` is as
+    /// for [`Document::compile_audio`].
     #[wasm_bindgen(js_name = exportAudio)]
     pub fn export_audio(
         &self,
         options_json: &str,
         sample_rate: u32,
         soundfont: Option<Vec<u8>>,
+        recording: Option<Vec<i16>>,
     ) -> Result<AudioExport, JsError> {
         let options: Options = serde_json::from_str(options_json)?;
         let font = match soundfont {
@@ -485,6 +596,7 @@ impl Document {
         let sample_rate = sample_rate.clamp(8_000, 192_000);
         let mut engine = gtr_audio::Engine::new(sample_rate);
         engine.set_soundfont(font);
+        engine.set_recording(recording.map(gtr_audio::Recording::interleaved));
         engine.load(gtr_audio::compile(self.editor.score(), 0, &options));
         Ok(AudioExport {
             engine,
@@ -722,6 +834,19 @@ impl Document {
     #[wasm_bindgen(js_name = setTuning)]
     pub fn set_tuning(&mut self, strings: Vec<u8>, capo: u8) -> Result<(), JsError> {
         Ok(self.editor.set_tuning(Tuning::new(strings), capo)?)
+    }
+
+    /// The stylesheet a score comes with, as JSON.
+    #[wasm_bindgen(js_name = defaultStyleJson)]
+    pub fn default_style_json() -> String {
+        serde_json::to_string(&gtr_model::Style::default()).unwrap_or_default()
+    }
+
+    /// Sets the score's stylesheet, a `gtr_model::Style` as JSON, in one step to undo.
+    #[wasm_bindgen(js_name = setStyle)]
+    pub fn set_style(&mut self, style_json: &str) -> Result<(), JsError> {
+        let style: gtr_model::Style = serde_json::from_str(style_json)?;
+        Ok(self.editor.set_style(style)?)
     }
 
     /// Sets the title, credits and copyright. `info_json` holds `gtr_model::ScoreInfo`

@@ -1,7 +1,18 @@
 import { expect, type Page } from '@playwright/test';
 
-/** Opens the app and waits for an empty score with the cursor on it. */
-export async function start(page: Page): Promise<void> {
+/**
+ * Opens the app and waits for an empty score with the cursor on it. Unless `pickers` is
+ * set, the browser's pickers of files on disk are hidden, as Playwright cannot answer
+ * them, so that files are picked and saved through uploads and downloads.
+ */
+export async function start(page: Page, { pickers = false } = {}): Promise<void> {
+  if (!pickers) {
+    await page.addInitScript(() => {
+      for (const name of ['showOpenFilePicker', 'showSaveFilePicker', 'showDirectoryPicker']) {
+        Object.defineProperty(window, name, { value: undefined, configurable: true });
+      }
+    });
+  }
   await page.goto('/');
   await expect(position(page)).toHaveText(/^Bar 1, empty/);
 }

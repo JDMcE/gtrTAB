@@ -1,6 +1,8 @@
 // Where the samples the synth plays from come from: the SoundFont that ships with the app,
 // or one the user has picked, which is kept in the browser's storage for next time.
 
+import { request } from './storage';
+
 /** The bank that ships with the app. `npm run soundfont` fetches it; see scripts/fetch-soundfont.mjs. */
 export const DEFAULT_SOUNDFONT = { name: 'GeneralUser GS', file: 'soundfonts/GeneralUser-GS.sf2' };
 
@@ -37,30 +39,12 @@ export function pickSoundFont(): Promise<StoredSoundFont | null> {
   });
 }
 
-const DATABASE = 'gtrtab';
-const STORE = 'soundfont';
 const KEY = 'custom';
-
-/** Runs one request against the store that holds the user's SoundFont. */
-function store<T>(mode: IDBTransactionMode, request: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
-  return new Promise((resolve, reject) => {
-    const opening = indexedDB.open(DATABASE, 1);
-    opening.onupgradeneeded = () => opening.result.createObjectStore(STORE);
-    opening.onerror = () => reject(opening.error);
-    opening.onsuccess = () => {
-      const database = opening.result;
-      const made = request(database.transaction(STORE, mode).objectStore(STORE));
-      made.onerror = () => reject(made.error);
-      made.onsuccess = () => resolve(made.result);
-      made.transaction!.oncomplete = () => database.close();
-    };
-  });
-}
 
 /** Keeps the user's SoundFont for the next time the app starts. */
 export async function storeSoundFont(font: StoredSoundFont): Promise<void> {
   try {
-    await store('readwrite', (s) => s.put(font, KEY));
+    await request('soundfont', 'readwrite', (s) => s.put(font, KEY));
   } catch {
     // Without storage the bank still plays now; it only has to be picked again next time.
   }
@@ -69,7 +53,7 @@ export async function storeSoundFont(font: StoredSoundFont): Promise<void> {
 /** The SoundFont the user picked before, if it is still there. */
 export async function storedSoundFont(): Promise<StoredSoundFont | null> {
   try {
-    return (await store<StoredSoundFont | undefined>('readonly', (s) => s.get(KEY))) ?? null;
+    return (await request<StoredSoundFont | undefined>('soundfont', 'readonly', (s) => s.get(KEY))) ?? null;
   } catch {
     return null;
   }

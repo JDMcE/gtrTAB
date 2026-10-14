@@ -23,6 +23,76 @@ pub struct Layout {
     pub systems: Vec<SystemBox>,
     /// One entry per bar of the score.
     pub bars: Vec<BarBox>,
+    /// The sheets of paper the score is on, when it is shown as pages; empty when it is one
+    /// sheet as long or as wide as the score.
+    pub sheets: Vec<Sheet>,
+}
+
+/// A sheet of paper the score is shown on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct Sheet {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
+}
+
+impl Layout {
+    /// The layout `by` times the size, everything on it and every box of it with it.
+    pub(crate) fn scaled(&self, by: f64) -> Layout {
+        let k = |v: f64| r(v * by);
+        let systems = (self.systems.iter())
+            .map(|system| SystemBox {
+                top: k(system.top),
+                y: k(system.y),
+                bottom: k(system.bottom),
+                cursor_top: k(system.cursor_top),
+                cursor_bottom: k(system.cursor_bottom),
+                rows: (system.rows.iter())
+                    .map(|row| RowBox {
+                        top: k(row.top),
+                        bottom: k(row.bottom),
+                        y: k(row.y),
+                        beats: row
+                            .beats
+                            .iter()
+                            .map(|bar| bar.iter().map(|&x| k(x)).collect())
+                            .collect(),
+                        ..row.clone()
+                    })
+                    .collect(),
+                ..system.clone()
+            })
+            .collect();
+        let bars = (self.bars.iter())
+            .map(|bar| BarBox {
+                x: k(bar.x),
+                w: k(bar.w),
+                beats: bar.beats.iter().map(|&x| k(x)).collect(),
+                slot: bar.slot.map(k),
+                ..bar.clone()
+            })
+            .collect();
+        Layout {
+            width: k(self.width),
+            height: k(self.height),
+            string_spacing: k(self.string_spacing),
+            step: k(self.step),
+            items: self.items.iter().map(|item| item.scaled(by)).collect(),
+            systems,
+            bars,
+            sheets: (self.sheets.iter())
+                .map(|s| Sheet {
+                    x: k(s.x),
+                    y: k(s.y),
+                    w: k(s.w),
+                    h: k(s.h),
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
 }
 
 /// One line of music.
@@ -40,6 +110,10 @@ pub struct SystemBox {
     pub cursor_bottom: f64,
     /// The tracks shown on this line, from the top.
     pub rows: Vec<RowBox>,
+    /// The line starts a new page, as its first bar asks.
+    #[serde(skip)]
+    #[ts(skip)]
+    pub new_page: bool,
 }
 
 /// The space one track takes on a line.
@@ -238,6 +312,103 @@ impl Item {
             | Item::Dot { y, .. }
             | Item::Arc { y, .. }
             | Item::Text { y, .. } => *y,
+        }
+    }
+
+    /// The item `by` times the size, from the page's top left corner.
+    fn scaled(&self, by: f64) -> Item {
+        let k = |v: &f64| r(v * by);
+        match self {
+            Item::Line {
+                x1,
+                y1,
+                x2,
+                y2,
+                w,
+                c,
+            } => Item::Line {
+                x1: k(x1),
+                y1: k(y1),
+                x2: k(x2),
+                y2: k(y2),
+                w: k(w),
+                c: *c,
+            },
+            Item::Rect { x, y, w, h, c } => Item::Rect {
+                x: k(x),
+                y: k(y),
+                w: k(w),
+                h: k(h),
+                c: *c,
+            },
+            Item::Dot { x, y, r } => Item::Dot {
+                x: k(x),
+                y: k(y),
+                r: k(r),
+            },
+            Item::Beam { x1, y1, x2, y2, h } => Item::Beam {
+                x1: k(x1),
+                y1: k(y1),
+                x2: k(x2),
+                y2: k(y2),
+                h: k(h),
+            },
+            Item::Arc { x1, x2, y, h } => Item::Arc {
+                x1: k(x1),
+                x2: k(x2),
+                y: k(y),
+                h: k(h),
+            },
+            Item::Curve {
+                x1,
+                y1,
+                cx,
+                cy,
+                x2,
+                y2,
+            } => Item::Curve {
+                x1: k(x1),
+                y1: k(y1),
+                cx: k(cx),
+                cy: k(cy),
+                x2: k(x2),
+                y2: k(y2),
+            },
+            Item::Text {
+                x,
+                y,
+                s,
+                size,
+                font,
+                align,
+                knockout,
+                c,
+            } => Item::Text {
+                x: k(x),
+                y: k(y),
+                s: s.clone(),
+                size: k(size),
+                font: *font,
+                align: *align,
+                knockout: *knockout,
+                c: *c,
+            },
+        }
+    }
+
+    /// Moves the item along the page.
+    pub(crate) fn shift_x(&mut self, by: f64) {
+        match self {
+            Item::Line { x1, x2, .. } | Item::Beam { x1, x2, .. } | Item::Arc { x1, x2, .. } => {
+                *x1 = r(*x1 + by);
+                *x2 = r(*x2 + by);
+            }
+            Item::Curve { x1, cx, x2, .. } => {
+                *x1 = r(*x1 + by);
+                *cx = r(*cx + by);
+                *x2 = r(*x2 + by);
+            }
+            Item::Rect { x, .. } | Item::Dot { x, .. } | Item::Text { x, .. } => *x = r(*x + by),
         }
     }
 

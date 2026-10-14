@@ -78,12 +78,13 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 | Insert | Insert a rest before the cursor |
 | Ctrl+Insert | Insert a bar |
 | Ctrl+C / Ctrl+X / Ctrl+V | Copy, cut, paste |
-| Ctrl+Z / Ctrl+Y | Undo, redo |
+| Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo, redo |
 | Space | Play from the cursor's bar, or the selected bars; stop |
 | [ / ] | Play slower / faster, also while playing |
 | Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
 | Ctrl+P | Print |
-| ? or F1 | List every shortcut |
+| Ctrl+K or Ctrl+Shift+P | Command palette: find any command by name and run it |
+| ? or F1 | List every shortcut, and change them |
 | Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
 | Arrow keys in a bar, the palette or a menu | Move between its controls |
 | In the track pane: Left / Right | Along a track's row: name, mute, solo, volume, pan |
@@ -93,6 +94,8 @@ The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the
 
 Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord.
 
+These are the keys the app comes with. Any command in the menus can be given a key, or have its keys taken away, in the list of shortcuts (? or F1); a key given to one command is taken from the one that had it. The keys that move the cursor and enter notes (the arrows, Home and End, the digits, + and −, Enter) stay as they are.
+
 ## Interface
 
 - **Bars** along the top: menus, file and edit buttons, then playback, zoom, panel switches and the theme switch. They share one row in a wide window and stack in a narrow one.
@@ -100,8 +103,12 @@ Technique keys act on the note under the cursor, or on every selected note; palm
 - **Menus** hold everything, including the less common techniques: other slides and harmonics, tuplets, arpeggios, rasgueado, slap and pop, and fingering.
 - **Track pane** under the score: a row per track with its name, mute, solo, volume and pan, and a grid with a cell for every bar, filled where the track has notes. Click a name to edit that track, a cell to go to that bar, and double-click a name for the track's settings: instrument, tuning, capo and mix. The mixer works while the score is playing. The buttons above the names add, set up, move and remove tracks. Drag the pane's top edge to resize it; the View menu hides it.
 - **Views** (View menu): each track as notation and tab together, tab only, notation only, or rhythm slashes; and every track at once or only the one being edited. Notes are entered on the tab and the notation follows.
+- **Layouts** (View > Layout): the score on pages, one under another or side by side, as they are printed; on one sheet as wide as the window; or on one line of every bar, scrolling sideways.
+- **Stylesheet** (Score > Stylesheet…): the size of the music, the spacing of the notes, lines and staves, the sizes of the title and subtitle, which bars are numbered, where the rhythm goes under the tab, and how many bars go on a line. It is kept with the score.
+- **Design mode** (View menu): makes a bar start a new line or page, and widens or narrows bars, from Score > Lines and pages, the palette, or by dragging a bar's right edge.
 - **Inspector** on the right: everything set on the beat and note under the cursor, each with a button to remove it and, for bends, the whammy bar, trills and grace notes, one to edit it. Fingering is set here too. It opens by default when the window is wide enough to show it beside a full page.
-- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark.
+- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark, and the contrast until it is set to high or normal.
+- **Preferences** (Edit > Preferences…, Ctrl+,): theme, contrast, the score on white paper whatever the theme, the language, the panels, what playback sounds through, and the keyboard shortcuts.
 
 Repeats, alternate endings, segno, coda and fine, section names, tempo changes, timers and swing are set on the cursor's bar from the Score menu, and playback follows them. Chord names and diagrams, text, lyrics, fermatas and changes of volume or pan are set on the cursor's beat from the Beat menu. The chord dialog finds ways to finger a chord in the track's tuning.
 

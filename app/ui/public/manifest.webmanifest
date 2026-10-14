@@ -1,0 +1,26 @@
+{
+  "name": "gtrTab",
+  "short_name": "gtrTab",
+  "description": "A guitar tablature editor.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#18191c",
+  "theme_color": "#18191c",
+  "icons": [
+    { "src": "icons/icon-128.png", "sizes": "128x128", "type": "image/png" },
+    { "src": "icons/icon-256.png", "sizes": "256x256", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ],
+  "file_handlers": [
+    {
+      "action": "./",
+      "accept": {
+        "application/x-gtrtab": [".gtrtab"],
+        "application/octet-stream": [".gp", ".gpx", ".gp5", ".gp4", ".gp3", ".mxl"],
+        "application/vnd.recordare.musicxml+xml": [".musicxml", ".xml"],
+        "audio/midi": [".mid", ".midi"]
+      }
+    }
+  ]
+}

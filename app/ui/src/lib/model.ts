@@ -14,6 +14,7 @@ import type { Notation } from './generated/Notation';
 import type { NoteValue } from './generated/NoteValue';
 import type { Target } from './generated/Target';
 import type { IconName } from './ui/icons';
+import { t } from './i18n';
 
 export type { AudioTrack } from './generated/AudioTrack';
 export type { SyncPoint } from './generated/SyncPoint';
@@ -61,6 +62,9 @@ export type { Pedal } from './generated/Pedal';
 export type { PedalKind } from './generated/PedalKind';
 export type { RowBox } from './generated/RowBox';
 export type { Score } from './generated/Score';
+export type { Style } from './generated/Style';
+export type { BarNumbers } from './generated/BarNumbers';
+export type { TabRhythm } from './generated/TabRhythm';
 export type { ScoreInfo } from './generated/ScoreInfo';
 export type { Slap } from './generated/Slap';
 export type { Sound } from './generated/Sound';
@@ -94,17 +98,17 @@ export interface Timeline {
 
 /** Instruments in the order they are offered, with the names `gtr_model::Instrument` gives. */
 export const INSTRUMENTS: [Instrument, string][] = [
-  ['steel_guitar', 'Steel guitar'],
-  ['nylon_guitar', 'Nylon guitar'],
-  ['clean_guitar', 'Clean guitar'],
-  ['overdrive_guitar', 'Overdrive guitar'],
-  ['distortion_guitar', 'Distortion guitar'],
-  ['bass', 'Bass'],
-  ['ukulele', 'Ukulele'],
-  ['banjo', 'Banjo'],
-  ['mandolin', 'Mandolin'],
-  ['piano', 'Piano'],
-  ['drums', 'Drums'],
+  ['steel_guitar', t('Steel guitar')],
+  ['nylon_guitar', t('Nylon guitar')],
+  ['clean_guitar', t('Clean guitar')],
+  ['overdrive_guitar', t('Overdrive guitar')],
+  ['distortion_guitar', t('Distortion guitar')],
+  ['bass', t('Bass')],
+  ['ukulele', t('Ukulele')],
+  ['banjo', t('Banjo')],
+  ['mandolin', t('Mandolin')],
+  ['piano', t('Piano')],
+  ['drums', t('Drums')],
 ];
 
 export const INSTRUMENT_ICONS: Record<Instrument, IconName> = {
@@ -150,70 +154,70 @@ export const DEFAULT_TUNINGS: Record<Family, number[]> = {
 };
 
 export const TARGETS: [Target, string][] = [
-  ['segno', 'Segno'],
-  ['segno_segno', 'Second segno'],
-  ['coda', 'Coda'],
-  ['double_coda', 'Second coda'],
-  ['fine', 'Fine'],
+  ['segno', t('Segno')],
+  ['segno_segno', t('Second segno')],
+  ['coda', t('Coda')],
+  ['double_coda', t('Second coda')],
+  ['fine', t('Fine')],
 ];
 
 export const JUMPS: [Jump, string][] = [
-  ['da_capo', 'D.C. (back to the start)'],
-  ['da_capo_al_fine', 'D.C. al Fine'],
-  ['da_capo_al_coda', 'D.C. al Coda'],
-  ['dal_segno', 'D.S. (back to the segno)'],
-  ['dal_segno_al_fine', 'D.S. al Fine'],
-  ['dal_segno_al_coda', 'D.S. al Coda'],
-  ['to_coda', 'To Coda'],
-  ['da_capo_al_double_coda', 'D.C. al Double Coda'],
-  ['dal_segno_al_double_coda', 'D.S. al Double Coda'],
-  ['dal_segno_segno', 'D.S.S. (back to the second segno)'],
-  ['dal_segno_segno_al_fine', 'D.S.S. al Fine'],
-  ['dal_segno_segno_al_coda', 'D.S.S. al Coda'],
-  ['dal_segno_segno_al_double_coda', 'D.S.S. al Double Coda'],
-  ['to_double_coda', 'To Double Coda'],
+  ['da_capo', t('D.C. (back to the start)')],
+  ['da_capo_al_fine', t('D.C. al Fine')],
+  ['da_capo_al_coda', t('D.C. al Coda')],
+  ['dal_segno', t('D.S. (back to the segno)')],
+  ['dal_segno_al_fine', t('D.S. al Fine')],
+  ['dal_segno_al_coda', t('D.S. al Coda')],
+  ['to_coda', t('To Coda')],
+  ['da_capo_al_double_coda', t('D.C. al Double Coda')],
+  ['dal_segno_al_double_coda', t('D.S. al Double Coda')],
+  ['dal_segno_segno', t('D.S.S. (back to the second segno)')],
+  ['dal_segno_segno_al_fine', t('D.S.S. al Fine')],
+  ['dal_segno_segno_al_coda', t('D.S.S. al Coda')],
+  ['dal_segno_segno_al_double_coda', t('D.S.S. al Double Coda')],
+  ['to_double_coda', t('To Double Coda')],
 ];
 
 export const FEELS: [Feel, string][] = [
-  ['straight', 'Straight'],
-  ['swing_eighths', 'Swing eighths'],
-  ['swing_sixteenths', 'Swing sixteenths'],
-  ['dotted_eighths', 'Dotted eighths'],
-  ['dotted_sixteenths', 'Dotted sixteenths'],
-  ['scottish_eighths', 'Scottish eighths (short, long)'],
-  ['scottish_sixteenths', 'Scottish sixteenths'],
+  ['straight', t('Straight')],
+  ['swing_eighths', t('Swing eighths')],
+  ['swing_sixteenths', t('Swing sixteenths')],
+  ['dotted_eighths', t('Dotted eighths')],
+  ['dotted_sixteenths', t('Dotted sixteenths')],
+  ['scottish_eighths', t('Scottish eighths (short, long)')],
+  ['scottish_sixteenths', t('Scottish sixteenths')],
 ];
 
 export const FADES: [Fade, string][] = [
-  ['in', 'Fade in'],
-  ['out', 'Fade out'],
-  ['swell', 'Volume swell'],
+  ['in', t('Fade in')],
+  ['out', t('Fade out')],
+  ['swell', t('Volume swell')],
 ];
 
 /** Key signatures from seven flats to seven sharps, named by their major and minor keys. */
 export const KEYS: [number, string][] = [
-  [-7, 'C♭ major / A♭ minor (7 flats)'],
-  [-6, 'G♭ major / E♭ minor (6 flats)'],
-  [-5, 'D♭ major / B♭ minor (5 flats)'],
-  [-4, 'A♭ major / F minor (4 flats)'],
-  [-3, 'E♭ major / C minor (3 flats)'],
-  [-2, 'B♭ major / G minor (2 flats)'],
-  [-1, 'F major / D minor (1 flat)'],
-  [0, 'C major / A minor'],
-  [1, 'G major / E minor (1 sharp)'],
-  [2, 'D major / B minor (2 sharps)'],
-  [3, 'A major / F♯ minor (3 sharps)'],
-  [4, 'E major / C♯ minor (4 sharps)'],
-  [5, 'B major / G♯ minor (5 sharps)'],
-  [6, 'F♯ major / D♯ minor (6 sharps)'],
-  [7, 'C♯ major / A♯ minor (7 sharps)'],
+  [-7, t('C♭ major / A♭ minor (7 flats)')],
+  [-6, t('G♭ major / E♭ minor (6 flats)')],
+  [-5, t('D♭ major / B♭ minor (5 flats)')],
+  [-4, t('A♭ major / F minor (4 flats)')],
+  [-3, t('E♭ major / C minor (3 flats)')],
+  [-2, t('B♭ major / G minor (2 flats)')],
+  [-1, t('F major / D minor (1 flat)')],
+  [0, t('C major / A minor')],
+  [1, t('G major / E minor (1 sharp)')],
+  [2, t('D major / B minor (2 sharps)')],
+  [3, t('A major / F♯ minor (3 sharps)')],
+  [4, t('E major / C♯ minor (4 sharps)')],
+  [5, t('B major / G♯ minor (5 sharps)')],
+  [6, t('F♯ major / D♯ minor (6 sharps)')],
+  [7, t('C♯ major / A♯ minor (7 sharps)')],
 ];
 
 export const NOTATIONS: [Notation, string][] = [
-  ['both', 'Notation and tab'],
-  ['tab', 'Tab only'],
-  ['standard', 'Notation only'],
-  ['slash', 'Rhythm slashes'],
+  ['both', t('Notation and tab')],
+  ['tab', t('Tab only')],
+  ['standard', t('Notation only')],
+  ['slash', t('Rhythm slashes')],
 ];
 
 /** The most voices a bar can hold. */

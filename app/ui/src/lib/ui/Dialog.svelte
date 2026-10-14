@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { t } from '../i18n';
   import type { Snippet } from 'svelte';
   import Icon from './Icon.svelte';
 
@@ -42,7 +43,7 @@
   <form onsubmit={submit} onkeydown={onKeydown}>
     <header>
       <h2>{title}</h2>
-      <button type="button" class="tool" aria-label="Close" onclick={onclose}>
+      <button type="button" class="tool" aria-label={t('Close')} onclick={onclose}>
         <Icon name="remove" size={16} />
       </button>
     </header>

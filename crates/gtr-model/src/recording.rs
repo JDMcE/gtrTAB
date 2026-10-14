@@ -116,6 +116,80 @@ pub fn synced(lengths: &[f64], sync: &[SyncPoint]) -> Vec<(f64, f64)> {
         .collect()
 }
 
+/// The sync points moved onto the same bars, and the same time through each, after the
+/// play-through has changed from `before` to `after`, each the bars in the order they are
+/// played. `bars` gives each bar of before the edit its number after it, or `None` for
+/// a bar taken away. A point whose bar is gone, or is played fewer times now, is let go,
+/// as is one that would now come before a point ahead of it in the recording.
+pub fn moved(
+    sync: &[SyncPoint],
+    before: &[usize],
+    after: &[usize],
+    bars: &[Option<usize>],
+) -> Vec<SyncPoint> {
+    let mut kept: Vec<SyncPoint> = Vec::with_capacity(sync.len());
+    for point in sync {
+        let Some(&bar) = before.get(point.bar) else {
+            continue;
+        };
+        let time = before[..point.bar].iter().filter(|&&b| b == bar).count();
+        let Some(Some(now)) = bars.get(bar) else {
+            continue;
+        };
+        let place = (after.iter().enumerate())
+            .filter(|&(_, &b)| b == *now)
+            .nth(time)
+            .map(|(place, _)| place);
+        match place {
+            Some(place) if kept.last().is_none_or(|last| last.bar < place) => {
+                kept.push(SyncPoint {
+                    bar: place,
+                    millis: point.millis,
+                })
+            }
+            _ => {}
+        }
+    }
+    kept
+}
+
+/// Sync points holding each bar of the play-through to the beat it starts on, from the
+/// `beats` heard in the recording, in seconds, and how many beats each bar has (`counts`,
+/// in the order the bars are played). `anchor` is a bar's place and where in the recording
+/// it is held now: it starts on the beat nearest there, and the bars before and after it
+/// are counted out from it, beat by beat. Bars that start before the first beat heard or
+/// after the last are not held.
+pub fn on_beats(beats: &[f64], counts: &[usize], anchor: (usize, f64)) -> Vec<SyncPoint> {
+    let Some(nearest) = (0..beats.len()).min_by(|&a, &b| {
+        (beats[a] - anchor.1)
+            .abs()
+            .total_cmp(&(beats[b] - anchor.1).abs())
+    }) else {
+        return Vec::new();
+    };
+    let (place, at) = (anchor.0.min(counts.len()), nearest as i64);
+    // The beat each bar starts on, counted back and on from the anchor's.
+    let mut starts = vec![0i64; counts.len()];
+    for p in (0..place).rev() {
+        starts[p] = starts.get(p + 1).copied().unwrap_or(at) - counts[p] as i64;
+    }
+    let mut beat = at;
+    for (p, count) in counts.iter().enumerate().skip(place) {
+        starts[p] = beat;
+        beat += *count as i64;
+    }
+    (starts.iter().enumerate())
+        .filter_map(|(bar, &start)| {
+            let time = beats.get(usize::try_from(start).ok()?)?;
+            Some(SyncPoint {
+                bar,
+                millis: (time * 1000.0).round().max(0.0) as u32,
+            })
+        })
+        .take(AudioTrack::MAX_SYNC)
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -198,5 +272,67 @@ mod tests {
         );
         track.sync = vec![at(4, 8_000), at(2, 9_000)];
         assert!(!track.is_valid());
+    }
+
+    #[test]
+    fn held_bars_stay_held_when_the_play_through_changes() {
+        let identity = |n: usize| (0..n).map(Some).collect::<Vec<_>>();
+        // Bars 0 to 3, then the same with bars 1 and 2 repeated: 0 1 2 1 2 3.
+        let plain = [0, 1, 2, 3];
+        let repeated = [0, 1, 2, 1, 2, 3];
+        let held = [at(0, 0), at(1, 2_000), at(3, 6_000)];
+        // The repeat added: bar 3 is now played sixth, not fourth.
+        assert_eq!(
+            moved(&held, &plain, &repeated, &identity(4)),
+            [at(0, 0), at(1, 2_000), at(5, 6_000)]
+        );
+        // The second time through a repeat is held as the second time, and taken away
+        // with the repeat.
+        let second = [at(0, 0), at(3, 6_000), at(5, 10_000)];
+        assert_eq!(
+            moved(&second, &repeated, &plain, &identity(4)),
+            [at(0, 0), at(3, 10_000)]
+        );
+        // A bar put in before them moves them on; the bar taken away lets its point go.
+        let inserted = [Some(0), Some(2), Some(3), Some(4)];
+        assert_eq!(
+            moved(&held, &plain, &[0, 1, 2, 3, 4], &inserted),
+            [at(0, 0), at(2, 2_000), at(4, 6_000)]
+        );
+        let removed = [Some(0), None, Some(1), Some(2)];
+        assert_eq!(
+            moved(&held, &plain, &[0, 1, 2], &removed),
+            [at(0, 0), at(2, 6_000)]
+        );
+    }
+
+    #[test]
+    fn points_out_of_order_after_a_change_are_let_go() {
+        // A jump that now plays bar 3 before bar 1: the later point cannot come first.
+        let held = [at(1, 2_000), at(3, 6_000)];
+        let identity = [Some(0), Some(1), Some(2), Some(3)];
+        assert_eq!(
+            moved(&held, &[0, 1, 2, 3], &[0, 3, 1, 2], &identity),
+            [at(2, 2_000)]
+        );
+    }
+
+    #[test]
+    fn bars_are_held_to_the_beats_counted_out_from_the_one_held() {
+        // A beat every half second from a quarter of a second in.
+        let beats: Vec<f64> = (0..14).map(|k| 0.25 + 0.5 * k as f64).collect();
+        // Bars of four, then one of three, then of four.
+        let counts = [4, 4, 3, 4, 4];
+        assert_eq!(
+            on_beats(&beats, &counts, (0, 0.0)),
+            [at(0, 250), at(1, 2_250), at(2, 4_250), at(3, 5_750)]
+        );
+        // Held further in, the bars before it are counted back; those before the first
+        // beat heard, and after the last, are not held.
+        assert_eq!(
+            on_beats(&beats, &counts, (1, 1.3)),
+            [at(1, 1_250), at(2, 3_250), at(3, 4_750), at(4, 6_750)]
+        );
+        assert!(on_beats(&[], &counts, (0, 0.0)).is_empty());
     }
 }

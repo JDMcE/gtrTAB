@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { t } from '../i18n';
   import { tick } from 'svelte';
   import type { Command, Menu, MenuEntry } from '../commands';
   import Icon from './Icon.svelte';
+  import { aria, keyOf, shownKeys } from '../keys.svelte';
 
   interface Props {
     menus: Menu[];
@@ -134,7 +136,7 @@
           tabindex="-1"
           aria-checked={entry.active ? entry.active() : undefined}
           aria-disabled={entry.disabled?.() ?? false}
-          aria-keyshortcuts={entry.keys}
+          aria-keyshortcuts={aria(shownKeys(entry))}
           onpointerenter={() => !nested && (sub = null)}
           onclick={() => choose(entry)}
         >
@@ -146,7 +148,7 @@
             {/if}
           </span>
           <span class="label">{entry.label}</span>
-          {#if entry.keys}<kbd>{entry.keys}</kbd>{/if}
+          {#if keyOf(entry)}<kbd>{keyOf(entry)}</kbd>{/if}
         </button>
       {/if}
     {/each}
@@ -154,7 +156,7 @@
 {/snippet}
 
 <!-- svelte-ignore a11y_no_noninteractive_element_to_interactive_role -->
-<nav class="menubar" role="menubar" aria-label="Menus" bind:this={bar} onkeydown={onKeydown}>
+<nav class="menubar" role="menubar" aria-label={t('Menus')} bind:this={bar} onkeydown={onKeydown}>
   {#each menus as menu, i}
     <div class="slot">
       <button

@@ -211,13 +211,7 @@ export class Player {
       synth.port.postMessage({ type: 'recording', samples: null });
       return;
     }
-    const left = recording.getChannelData(0);
-    const right = recording.numberOfChannels > 1 ? recording.getChannelData(1) : left;
-    const samples = new Int16Array(2 * recording.length);
-    for (let i = 0; i < recording.length; i++) {
-      samples[2 * i] = Math.max(-1, Math.min(1, left[i])) * 32_767;
-      samples[2 * i + 1] = Math.max(-1, Math.min(1, right[i])) * 32_767;
-    }
+    const samples = interleaved(recording);
     synth.port.postMessage({ type: 'recording', samples: samples.buffer }, [samples.buffer]);
   }
 
@@ -274,4 +268,21 @@ function latest<T extends { time: number }>(items: T[], time: number | null): T 
     else high = mid;
   }
   return low > 0 ? items[low - 1] : null;
+}
+
+/** A recording's two sides, left and right in turn as sixteen bits each, as the synth takes them. */
+export function interleaved(recording: AudioBuffer): Int16Array {
+  const left = recording.getChannelData(0);
+  const right = recording.numberOfChannels > 1 ? recording.getChannelData(1) : left;
+  const samples = new Int16Array(2 * recording.length);
+  for (let i = 0; i < recording.length; i++) {
+    samples[2 * i] = Math.max(-1, Math.min(1, left[i])) * 32_767;
+    samples[2 * i + 1] = Math.max(-1, Math.min(1, right[i])) * 32_767;
+  }
+  return samples;
+}
+
+/** Reads a recording's file into samples at `rate`, as for writing the score's sound to a file. */
+export function decodeAt(bytes: Uint8Array, rate: number): Promise<AudioBuffer> {
+  return new OfflineAudioContext(2, 1, rate).decodeAudioData(bytes.slice().buffer as ArrayBuffer);
 }
