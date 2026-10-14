@@ -14,3 +14,6 @@ app/ui/playwright-report/
 
 # Written by `npm run messages`, for translators to start from
 app/ui/src/locales/messages.json
+
+# The roadmap, kept outside the repository
+plan.md

@@ -1,5 +1,5 @@
-//! Guitar Pro 6 (`.gpx`): the same XML score as Guitar Pro 7 has, kept in a container of
-//! the program's own. The container is a small file system of 4096-byte sectors, usually
+//! Version 6 (`.gpx`): the same XML score as the later `.gp` has, kept in a container of
+//! its own. The container is a small file system of 4096-byte sectors, usually
 //! compressed as a stream of bits.
 
 use super::{ImportError, Skipped};

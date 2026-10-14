@@ -28,7 +28,7 @@ pub fn import(bytes: &[u8]) -> Result<Imported, ImportError> {
         gp5::read(bytes, &mut skipped)?
     };
     let mut score = score;
-    // Guitar Pro writes a piano on strings; here it has none, and its notes are pitches.
+    // The format puts a piano on strings; here it has none, and its notes are pitches.
     for track in score
         .tracks
         .iter_mut()
@@ -75,7 +75,7 @@ fn keep_feel_changes(masters: &mut [gtr_model::MasterBar]) {
     }
 }
 
-/// Builds a duration from Guitar Pro's parts, clamping what the model cannot hold.
+/// Builds a duration from the format's parts, clamping what the model cannot hold.
 fn duration(
     value: Option<NoteValue>,
     dots: u8,
@@ -152,7 +152,7 @@ fn bend_from_points(points: impl Iterator<Item = (i32, i32)>) -> Option<Bend> {
         .then_some(Bend { points: curve })
 }
 
-/// Guitar Pro gives every beat a dynamic; the model only marks where the level changes,
+/// The format gives every beat a dynamic; the model only marks where the level changes,
 /// starting from forte.
 fn keep_dynamic_changes(staff: &mut Staff) {
     let mut current = Dynamic::F;
@@ -237,7 +237,7 @@ fn set_lyrics(staff: &mut Staff, line: usize, start: usize, words: &str) {
     }
 }
 
-/// Guitar Pro's slide bit flags, shared by its binary and XML formats.
+/// The slide bit flags, shared by the binary and XML formats.
 fn slide_from_flags(flags: u8) -> Option<Slide> {
     [
         (0x01, Slide::Shift),

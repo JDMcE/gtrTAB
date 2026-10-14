@@ -1,4 +1,4 @@
-//! Guitar Pro 7 and 8 (`.gp`): a zip archive whose `Content/score.gpif` is an XML document.
+//! Versions 7 and 8 (`.gp`): a zip archive whose `Content/score.gpif` is an XML document.
 //! Bars, voices, beats, notes and rhythms are stored in flat lists and refer to each other
 //! by id.
 
@@ -36,7 +36,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score, ImportE
     read_xml(&xml, skipped)
 }
 
-/// Reads the score from its XML, which Guitar Pro 6 has too, in a container of its own.
+/// Reads the score from its XML, which a `.gpx` file has too, in a container of its own.
 pub(super) fn read_xml(xml: &str, skipped: &mut Skipped) -> Result<Score, ImportError> {
     let document = Document::parse(xml).map_err(|e| corrupt(e.to_string()))?;
     read_document(&document, skipped)
@@ -119,7 +119,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
         if !node.has_tag_name("Track") {
             continue;
         }
-        // Guitar Pro 7 gives a drum track a kit of articulations; Guitar Pro 6 only says
+        // A `.gp` file gives a drum track a kit of articulations; a `.gpx` only says
         // that the track is percussion, and has its notes name their pieces themselves.
         let old_drums = (child(node, "GeneralMidi"))
             .is_some_and(|midi| midi.attribute("table") == Some("Percussion"));
@@ -132,7 +132,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
                     .collect::<Vec<u8>>()
             })
             .or(old_drums.then(Vec::new));
-        // Guitar Pro 7 nests properties in <Staff> elements; older files put one set of
+        // Version 7 nests properties in <Staff> elements; older files put one set of
         // properties on the track itself.
         let staff_nodes: Vec<Node> = match child(node, "Staves") {
             Some(staves) => staves
@@ -477,7 +477,7 @@ fn read_document(document: &Document, skipped: &mut Skipped) -> Result<Score, Im
 /// Lines a drum staff is given.
 const DRUM_LINES: usize = 5;
 
-/// The kit of Guitar Pro 6, whose notes name a piece by its place here and one of up to
+/// The kit of `.gpx` files, whose notes name a piece by its place here and one of up to
 /// three ways of hitting it, as the General MIDI numbers that sound: the bass drum; the
 /// snare, its rim shot and side stick; three cowbells; five toms; the hi-hat closed, half
 /// open and open, and by its pedal; two crashes, a splash, the ride with its edge and its
@@ -526,7 +526,7 @@ fn read_sounds(node: Node, track: &mut Track, skipped: &mut Skipped) -> Vec<(usi
         .flat_map(|s| s.children())
         .filter(|n| n.has_tag_name("Sound"))
         .collect();
-    // Guitar Pro 6 has no sounds of its own: a track has a chain, and variations of it.
+    // A `.gpx` file has no sounds of its own: a track has a chain, and variations of it.
     if sounds.is_empty() {
         let mut chains = (child(node, "RSE").into_iter())
             .flat_map(|rse| rse.descendants())
@@ -538,7 +538,7 @@ fn read_sounds(node: Node, track: &mut Track, skipped: &mut Skipped) -> Vec<(usi
         }
         skipped.add_if(
             chains.any(|(chain, _)| !chain.is_empty()),
-            "the variations of Guitar Pro 6's effect chains",
+            "the variations of a track's effect chain",
         );
         return Vec::new();
     }
@@ -778,9 +778,9 @@ fn read_voice<'a>(
     Voice { beats }
 }
 
-/// A pitch curve from Guitar Pro's origin, middle and destination values, which are in
+/// A pitch curve from the format's origin, middle and destination values, which are in
 /// hundredths of a whole tone at offsets in hundredths of the note's length. The middle
-/// value is held between two offsets; Guitar Pro 6 leaves the offsets out where they are
+/// value is held between two offsets; a `.gpx` file leaves the offsets out where they are
 /// the usual ones, and then the middle value is reached half way through.
 fn curve(values: [Option<f64>; 3], offsets: [Option<f64>; 4]) -> Option<Bend> {
     let [origin, middle, destination] = values;
@@ -877,7 +877,7 @@ fn read_beat(
                 let piece = (text(*note, "InstrumentArticulation").parse::<usize>().ok())
                     .and_then(|index| kit.get(index).copied())
                     .or_else(|| {
-                        // Guitar Pro 6: a piece of its kit and a way of hitting it.
+                        // In a `.gpx` file, a piece of its kit and a way of hitting it.
                         let variations = OLD_KIT.get(number("Element")?)?;
                         Some(variations[number("Variation").filter(|v| *v < 3).unwrap_or(0)])
                     })

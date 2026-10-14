@@ -1,4 +1,4 @@
-//! Guitar Pro 3, 4 and 5 (`.gp3`, `.gp4`, `.gp5`): a little-endian binary stream read front
+//! Versions 3, 4 and 5 (`.gp3`, `.gp4`, `.gp5`): a little-endian binary stream read front
 //! to back. Nothing in it is length-prefixed as a whole, so every field has to be read or
 //! skipped, including the ones the importer has no use for. The three versions are one
 //! format that grew: each added fields, and here and there changed what one means, so the
@@ -64,7 +64,7 @@ impl<'a> Reader<'a> {
     }
 
     fn text(bytes: &[u8]) -> String {
-        // Guitar Pro 5 writes strings in the system code page; treat them as Latin-1.
+        // Version 5 keeps strings in the system code page; treat them as Latin-1.
         bytes.iter().map(|&b| char::from(b)).collect()
     }
 
@@ -359,7 +359,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
             .and_then(|index| channels.get(index));
         if let Some(&(program, volume, balance)) = settings {
             track.instrument = Instrument::from_midi_program(program);
-            // Guitar Pro counts both in sixteenths, with 13 its usual volume and 8 the centre.
+            // The format counts both in sixteenths, with 13 its usual volume and 8 the centre.
             track.mix.volume = (u32::from(volume) * u32::from(Mix::UNITY) / 13)
                 .min(u32::from(Mix::MAX_VOLUME)) as u8;
             track.mix.pan = ((i32::from(balance) - 8) * 25 / 2).clamp(-100, 100) as i8;
@@ -473,7 +473,7 @@ pub(super) fn read(bytes: &[u8], skipped: &mut Skipped) -> Result<Score> {
     })
 }
 
-/// Effects Guitar Pro 5 stores on the beat that the model keeps on each note, and the
+/// Effects a `.gp5` file stores on the beat that the model keeps on each note, and the
 /// beat's own effects.
 #[derive(Default)]
 struct BeatWide {
@@ -789,7 +789,7 @@ fn read_mix_change(r: &mut Reader, v: u32) -> Result<MixChange> {
         r.string()?;
         r.string()?;
     }
-    // Guitar Pro counts both in sixteenths, with 13 its usual volume and 8 the centre.
+    // The format counts both in sixteenths, with 13 its usual volume and 8 the centre.
     let [volume, pan, ..] = values;
     Ok(MixChange {
         tempo: u32::try_from(tempo).ok().filter(|t| (1..=1000).contains(t)),
@@ -833,7 +833,7 @@ fn read_note(
     }
     let mut dynamic = Dynamic::F;
     if flags & 0x10 != 0 {
-        // Guitar Pro 5 folds articulation into the stored level: a ghost note is written
+        // A `.gp5` file folds articulation into the stored level: a ghost note is written
         // one level quieter than the passage it is in, an accented note louder.
         let adjust = match flags {
             f if f & 0x04 != 0 => 1,

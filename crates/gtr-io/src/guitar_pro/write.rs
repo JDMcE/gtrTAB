@@ -1,6 +1,6 @@
 //! Guitar Pro export: the `.gp` file of versions 7 and 8, a zip archive whose
-//! `Content/score.gpif` is the XML document that [`super::gp7`] reads. It is written the
-//! way Guitar Pro 7 writes it, with the lists of bars, voices, beats, notes and rhythms
+//! `Content/score.gpif` is the XML document that [`super::gp7`] reads. It is laid out the
+//! way version 7 files are, with the lists of bars, voices, beats, notes and rhythms
 //! that refer to each other by number.
 
 use std::collections::HashMap;
@@ -181,7 +181,7 @@ fn gpif(score: &Score, skipped: &mut Skipped) -> String {
     }
 
     let (master, left_out) = rse::effects(&score.effects, true);
-    skipped.add_if(left_out, "pedals Guitar Pro has no match for");
+    skipped.add_if(left_out, "pedals a .gp file has no match for");
     let info = &score.info;
     let track_ids: Vec<String> = (0..score.tracks.len()).map(|i| i.to_string()).collect();
     let mut out = String::new();
@@ -426,7 +426,7 @@ fn track_xml(
     let pan = |pan: i8| 0.5 + f64::from(pan) / 200.0;
     let volume = |volume: u8, skipped: &mut Skipped| {
         let level = f64::from(volume) / f64::from(Mix::UNITY) * DESK_UNITY;
-        skipped.add_if(level > 1.0, "volumes louder than Guitar Pro goes");
+        skipped.add_if(level > 1.0, "volumes louder than a .gp file goes");
         level.min(1.0)
     };
     let mut desk = [0.5; 16];
@@ -474,7 +474,7 @@ fn track_xml(
         (track.sounds.iter()).map(|s| (s.name.as_str(), s.instrument, s.effects.as_slice()));
     for (name, instrument, chain) in own.chain(others) {
         let (effects, left_out) = rse::effects(chain, false);
-        skipped.add_if(left_out, "pedals Guitar Pro has no match for");
+        skipped.add_if(left_out, "pedals a .gp file has no match for");
         let _ = write!(
             sounds,
             "<Sound><Name>{name}</Name><Label>{name}</Label><Path></Path><Role>User</Role>\
@@ -516,7 +516,7 @@ fn track_xml(
             staff.capo
         );
         if instrument.is_percussion() {
-            // Guitar Pro gives a drum staff six strings of no pitch.
+            // The format gives a drum staff six strings of no pitch.
             out.push_str(
                 "<Property name=\"Tuning\"><Pitches>0 0 0 0 0 0</Pitches>\
                  <Instrument>Undefined</Instrument></Property>\n",
@@ -768,7 +768,7 @@ fn bar_xml(
     let bar: &Bar = &at.staff.bars[at.bar];
     let mut ids = Vec::new();
     for (voice_index, voice) in bar.voices.iter().enumerate().take(Bar::MAX_VOICES) {
-        // A voice with nothing in it is left out, as Guitar Pro leaves it.
+        // A voice with nothing in it is left out, as the format's own files leave it.
         if voice.beats.is_empty() {
             ids.push("-1".to_owned());
             continue;
@@ -819,7 +819,7 @@ fn bar_xml(
     id
 }
 
-/// A pitch curve as Guitar Pro keeps one: where it starts, a level it holds in the middle
+/// A pitch curve as the format keeps one: where it starts, a level it holds in the middle
 /// and where it ends, levels in hundredths of a whole tone and moments in hundredths of
 /// the note. A curve of more points than that keeps its start, its furthest reach and its
 /// end, and `exact` says that it did not fit.

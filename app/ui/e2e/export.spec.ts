@@ -79,7 +79,7 @@ async function exported(page: Page, testInfo: TestInfo, item: string, name: stri
 
 test('the score is exported in the formats of other programs', async ({ page }, testInfo) => {
   await riff(page);
-  // A Guitar Pro file is a zip archive with the score in it.
+  // A `.gp` file is a zip archive with the score in it.
   const gp = await exported(page, testInfo, 'Guitar Pro (.gp)…', 'untitled.gp');
   expect(gp.toString('latin1', 0, 2)).toBe('PK');
   expect(gp.includes('Content/score.gpif')).toBe(true);

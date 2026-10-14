@@ -131,7 +131,7 @@ impl Instrument {
             Instrument::DistortionGuitar => 30,
             Instrument::Bass => 33,
             Instrument::Banjo => 105,
-            // General MIDI has neither; these are the programs Guitar Pro uses for them.
+            // General MIDI has neither; these are the programs `.gp` files use for them.
             Instrument::Ukulele => 24,
             Instrument::Mandolin => 25,
             Instrument::Piano => 0,

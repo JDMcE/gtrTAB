@@ -1,24 +1,81 @@
 # gtrTab
 
-A guitar tablature editor for desktop and web. See [plan.md](plan.md) for the roadmap.
+A free guitar tablature editor. Write tab and standard notation together, hear it played back through a full pedalboard, and practise with it, on Windows, macOS and Linux.
 
-Scores are kept in gtrTab's own format. Guitar Pro files of every version, MusicXML, MIDI and tabs typed as plain text open through File > Open; File > Export writes Guitar Pro (`.gp`), MusicXML, MIDI, text, PDF, PNG, SVG and WAV.
+![A classical study written out in notation and tab in gtrTab](docs/screenshots/editor.png)
 
-For practice, Score has the loop, the speed trainer and the playback speed; View has the fretboard, keyboard or drum kit under the score and the visual metronome; and Tools has the tuner, the chord and scale libraries and the scale finder.
+## Download
 
-For the sound, View > Pedalboard puts each track, and the whole mix, through a chain of pedals: compressor, wah, overdrive, distortion, amp, cabinet, EQ, chorus, delay and reverb, from presets or set by hand. A track can have other sounds, each an instrument's sound through pedals of its own, which Beat > Change of sound switches to part-way through; Tools > Line in plays a guitar through the pedals as it is played. Track > Audio track adds a recording to play along with, slowed down or sped up as the score is, whose bars are fitted to it by dragging their lines on its waveform.
+Get the installer for your system from the [latest release](../../releases/latest):
 
-## Requirements
+| System | File |
+|---|---|
+| Windows | `gtrTab_<version>_x64-setup.exe` |
+| macOS (Intel and Apple silicon) | `gtrTab_<version>_universal.dmg` |
+| Linux | `.AppImage`, or the `.deb` or `.rpm` for your distribution |
+
+The installers are not signed yet, so each system warns you the first time you open gtrTab:
+
+- **Windows:** if Windows says it protected your PC, choose **More info**, then **Run anyway**.
+- **macOS:** drag gtrTab to Applications and open it. When macOS refuses, go to **System Settings › Privacy & Security** and choose **Open Anyway**.
+- **Linux:** make the AppImage executable (`chmod +x`) before running it.
+
+## Features
+
+### Write
+
+- **Tab and notation together.** Type frets on the tab and the notation is written for you. Show a track as tab and notation, tab only, notation only, or rhythm slashes.
+- **Every technique a guitarist needs:** bends and whammy bar dives drawn on a curve, slides, hammer-ons and pull-offs, harmonics, vibrato, palm muting, let ring, tapping, dead and ghost notes, trills, tremolo picking, grace notes, rasgueado, and slap and pop for bass.
+- **Whole songs and bands.** Guitars of any tuning with a capo, bass, drums and piano, each on its own track, with up to four voices on a staff.
+- **The rest of the score:** repeats and alternate endings, segno, coda and fine, sections, tempo and key changes, dynamics, chord names and diagrams, lyrics and text. Playback follows the repeats and jumps.
+
+### Hear it
+
+- **Realistic playback** through the GeneralUser GS SoundFont, with a mixer for each track's volume, pan, mute and solo, and playback slowed down or sped up without changing the pitch.
+- **A pedalboard for every track and for the whole mix:** compressor, wah, overdrive, distortion, amp, cabinet, EQ, chorus, delay and reverb, from presets or dialled in by hand. A track can switch to another sound part-way through a song, say from clean to driven for the chorus.
+- **Plug in and play.** Line in puts your own guitar through the same pedals.
+
+![The pedalboard, with an amp, cabinet and reverb on a track, in the dark theme](docs/screenshots/pedalboard.png)
+
+### Practise
+
+- **Loop a passage** and use the **speed trainer** to bring it up to tempo a step at a time.
+- **See where the notes are** on a fretboard, a piano keyboard or a drum kit under the score as it plays, with a visual metronome alongside.
+- **Play along with a recording.** Add an audio track, line its bars up with the music, and it slows down and speeds up with the score.
+- **A tuner, a chord library and a scale library**, and a scale finder that tells you which scales fit the notes you have written.
+
+![A D minor chord marked across the whole fretboard](docs/screenshots/fretboard.png)
+
+![The chord library, showing every way to play a C major chord in the track's tuning](docs/screenshots/chords.png)
+
+### Share
+
+- **Opens** Guitar Pro files of every version (`.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`), MusicXML, MIDI, and tab typed as plain text, by File › Open or by dropping them on the window.
+- **Exports** to Guitar Pro (`.gp`), MusicXML, MIDI, plain-text tab, PDF, PNG, SVG and WAV audio, and prints.
+- **Converts a whole folder at once** with batch conversion.
+
+### Make it yours
+
+- Light and dark themes, a high-contrast mode, and the score on white paper whatever the theme.
+- The score as printed pages, one long sheet, or a single line that scrolls sideways, with a stylesheet for sizes and spacing, and a design mode for choosing the line and page breaks yourself.
+- Every command can be found by name in the command palette (Ctrl+K), and any of them can be given a keyboard shortcut of your choice. Press **?** in the app to see them all.
+
+## For developers
+
+gtrTab is a Rust core (score model, editing, layout, file formats and the synth) compiled to WebAssembly, with a Svelte interface. The desktop app wraps it in [Tauri](https://tauri.app); the same interface also runs as a web app in the browser.
+
+### Requirements
 
 - Rust (stable) with the `wasm32-unknown-unknown` target
 - Node.js 22 or later
+- On Windows, the Windows SDK, for the desktop app's resources. If the build cannot find `rc.exe`, build from a Developer PowerShell for Visual Studio or point the `RC` environment variable at it.
 
-## Development
+### Building and testing
 
-Install dependencies once:
+Install dependencies once, and fetch the SoundFont (too big for the repository; without it the app plays through its built-in models):
 
 ```sh
-cd app/ui && npm install
+cd app/ui && npm install && npm run soundfont
 cd ../desktop && npm install
 ```
 
@@ -38,94 +95,30 @@ The end-to-end tests need Playwright's browser once: `npx playwright install chr
 
 To see what an importer and the layout make of a file without opening the app, draw it: `cargo run -p gtr-render --example draw -- song.gp5 song.png` writes a PNG, a PDF or an SVG by the name it is given, and takes `tab`, `standard`, `both` or `slash` and `all` for the view.
 
-Playback sounds through the GeneralUser GS SoundFont, which is too big for the repository. Fetch it once with `npm run soundfont` in `app/ui`; without it the app plays through its built-in models.
-
 The interface's types for the score, the editor's state and the laid-out page are generated from the Rust ones into `app/ui/src/lib/generated` whenever the tests run. Commit them with the change that altered them; CI fails if they are out of date. CI runs only when started by hand, from the Actions tab, so run the tests, `cargo clippy` and `cargo fmt --check` before pushing.
 
 The UI scripts rebuild the WASM core into `app/ui/src/wasm` before starting: the editor through `wasm-pack`, and the synth for the audio thread (`crates/gtr-worklet`) with a plain `cargo build`.
 
-## Keyboard
+### Releasing
 
-| Key | Action |
-|---|---|
-| Arrow keys | Move between beats and strings; Shift extends the selection |
-| Ctrl+Left / Ctrl+Right | Previous / next bar |
-| Ctrl+Home / Ctrl+End | First / last bar |
-| Ctrl+Up / Ctrl+Down | Previous / next track, or staff of a piano |
-| Alt+1 to Alt+4 | Voice 1 to 4 |
-| 0-9 | Enter a fret; two digits typed quickly make one number |
-| + / - | Shorter / longer note value |
-| . | Dotted |
-| / | Triplet |
-| R | Rest |
-| L | Tie |
-| H | Hammer-on or pull-off to the next note |
-| S | Shift slide to the next note |
-| B | Full bend |
-| Shift+B | Bend editor |
-| W | Whammy bar editor |
-| < / > | Crescendo / decrescendo |
-| V | Vibrato |
-| P | Palm mute |
-| I | Let ring |
-| X | Dead note |
-| G | Ghost note |
-| A | Accent |
-| N | Natural harmonic |
-| T | Tapping |
-| Delete | Remove the note, or the beat if it is a rest |
-| Ctrl+Delete | Remove the beat or the selected beats |
-| Insert | Insert a rest before the cursor |
-| Ctrl+Insert | Insert a bar |
-| Ctrl+C / Ctrl+X / Ctrl+V | Copy, cut, paste |
-| Ctrl+Z / Ctrl+Y or Ctrl+Shift+Z | Undo, redo |
-| Space | Play from the cursor's bar, or the selected bars; stop |
-| [ / ] | Play slower / faster, also while playing |
-| Ctrl+N / Ctrl+O / Ctrl+S / Ctrl+Shift+S | New, open or import, save, save as |
-| Ctrl+P | Print |
-| Ctrl+K or Ctrl+Shift+P | Command palette: find any command by name and run it |
-| ? or F1 | List every shortcut, and change them |
-| Tab / Shift+Tab | Move between the bars, the palette, the score and the inspector |
-| Arrow keys in a bar, the palette or a menu | Move between its controls |
-| In the track pane: Left / Right | Along a track's row: name, mute, solo, volume, pan |
-| In the track pane: Up / Down on a slider | Set the volume or pan |
-| In the track pane: Alt+Up / Alt+Down on a name | Move the track up or down |
-| Esc | Back to the score |
+Set the version in the root `Cargo.toml`, then push a tag of the same version, such as `v0.1.0`. The Release workflow builds the installers for every system and puts them on a draft release to check and publish.
 
-Technique keys act on the note under the cursor, or on every selected note; palm mute, let ring and accents cover the whole chord.
+### Project layout
 
-These are the keys the app comes with. Any command in the menus can be given a key, or have its keys taken away, in the list of shortcuts (? or F1); a key given to one command is taken from the one that had it. The keys that move the cursor and enter notes (the arrows, Home and End, the digits, + and −, Enter) stay as they are.
-
-## Interface
-
-- **Bars** along the top: menus, file and edit buttons, then playback, zoom, panel switches and the theme switch. They share one row in a wide window and stack in a narrow one.
-- **Palette** on the left: what is used while writing, grouped into note values, techniques on the note, techniques on the beat, and bars and score. Each group folds away, and the palette narrows to two columns in a small window or from the View menu.
-- **Menus** hold everything, including the less common techniques: other slides and harmonics, tuplets, arpeggios, rasgueado, slap and pop, and fingering.
-- **Track pane** under the score: a row per track with its name, mute, solo, volume and pan, and a grid with a cell for every bar, filled where the track has notes. Click a name to edit that track, a cell to go to that bar, and double-click a name for the track's settings: instrument, tuning, capo and mix. The mixer works while the score is playing. The buttons above the names add, set up, move and remove tracks. Drag the pane's top edge to resize it; the View menu hides it.
-- **Views** (View menu): each track as notation and tab together, tab only, notation only, or rhythm slashes; and every track at once or only the one being edited. Notes are entered on the tab and the notation follows.
-- **Layouts** (View > Layout): the score on pages, one under another or side by side, as they are printed; on one sheet as wide as the window; or on one line of every bar, scrolling sideways.
-- **Stylesheet** (Score > Stylesheet…): the size of the music, the spacing of the notes, lines and staves, the sizes of the title and subtitle, which bars are numbered, where the rhythm goes under the tab, and how many bars go on a line. It is kept with the score.
-- **Design mode** (View menu): makes a bar start a new line or page, and widens or narrows bars, from Score > Lines and pages, the palette, or by dragging a bar's right edge.
-- **Inspector** on the right: everything set on the beat and note under the cursor, each with a button to remove it and, for bends, the whammy bar, trills and grace notes, one to edit it. Fingering is set here too. It opens by default when the window is wide enough to show it beside a full page.
-- Every button has a tooltip with its name and shortcut. The theme follows the system until it is switched to light or dark, and the contrast until it is set to high or normal.
-- **Preferences** (Edit > Preferences…, Ctrl+,): theme, contrast, the score on white paper whatever the theme, the language, the panels, what playback sounds through, and the keyboard shortcuts.
-
-Repeats, alternate endings, segno, coda and fine, section names, tempo changes, timers and swing are set on the cursor's bar from the Score menu, and playback follows them. Chord names and diagrams, text, lyrics, fermatas and changes of volume or pan are set on the cursor's beat from the Beat menu. The chord dialog finds ways to finger a chord in the track's tuning.
-
-On a drum track a note's fret is the number of a piece of the kit, such as 36 for the bass drum, 38 for the snare and 42 for the closed hi-hat; Note > Drum piece lists them by name. A piano track has a staff for each hand, and its notes are entered on tab lines like any other track's.
-
-Score > Playback speed plays the score at anything from a quarter of its tempo to twice it, without changing the pitch; the speed in the transport bar shows it and asks for another. File > Export audio (WAV)… writes the score to a sound file as it plays, at the tempo written.
-
-Moving right past the end of a full bar starts a new one. Guitar Pro files of every version (`.gp3`, `.gp4`, `.gp5`, `.gpx`, `.gp`) open through Open or by dropping them on the window.
-
-## Layout
-
-- `crates/` — Rust core: score model, editor, notation and tab layout, playback, file formats and the WASM API.
-- `app/ui/` — Svelte UI shared by the web and desktop apps.
-- `app/desktop/` — Tauri shell.
+- `crates/`: the Rust core: score model, editor, notation and tab layout, playback, file formats and the WASM API.
+- `app/ui/`: the Svelte interface shared by the web and desktop apps.
+- `app/desktop/`: the Tauri shell.
+- `tests/`: files in other formats that the importers are tested against, and the pictures the notation is compared with.
 
 ## Third-party assets
 
-- `app/ui/public/fonts/Bravura.woff2`: the Bravura music font by Steinberg, under the SIL Open Font License (`Bravura-OFL.txt` alongside it).
+- `app/ui/public/fonts/Bravura.woff2` and `Bravura.otf`: the Bravura music font by Steinberg, under the SIL Open Font License (`Bravura-OFL.txt` alongside it).
+- `app/ui/public/fonts/NotoSans-*.ttf`: Noto Sans, the text font of exported PDFs and pictures, under the SIL Open Font License (`NotoSans-OFL.txt` alongside it).
+- The GeneralUser GS SoundFont by S. Christian Collins, which the app plays through and the releases ship with, under its own licence (fetched with it as `GeneralUser-GS.LICENSE.txt`). It is not kept in the repository.
 - Interface icons from [Lucide](https://lucide.dev) (`@lucide/svelte`), under the ISC License. Music symbols in the interface are Bravura glyphs; the guitar technique icons are drawn in `app/ui/src/lib/ui/icons.ts`.
-- `tests/corpus/alphatab/`: Guitar Pro files of every version from the test data of [alphaTab](https://github.com/CoderLine/alphaTab), under the Mozilla Public License 2.0 (`LICENSE` alongside them; `tests/corpus/README.md` says which and from where). They are used by the tests only.
+- `tests/corpus/`: files in other programs' formats that the tests import, used by the tests only: Guitar Pro and MusicXML files from the test data of [alphaTab](https://github.com/CoderLine/alphaTab), under the Mozilla Public License 2.0; the unofficial MusicXML test suite by Reinhold Kainhofer, under the MIT licence; and public-domain MIDI files from the [Mutopia Project](https://www.mutopiaproject.org/). `tests/corpus/README.md` says which came from where, and each licence is alongside its files.
+- The pieces in the screenshots are in the public domain: Matteo Carcassi's Étude Op. 60 No. 1 and J. S. Bach's Prelude BWV 999, from the Mutopia Project.
+
+## Trademarks
+
+Guitar Pro is a trademark of Arobas Music. gtrTab is not affiliated with or endorsed by Arobas Music; it reads and writes Guitar Pro files so that scores can be moved between the two.

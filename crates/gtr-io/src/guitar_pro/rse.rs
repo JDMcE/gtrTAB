@@ -1,5 +1,5 @@
-//! The pedals and amplifiers of Guitar Pro 6 and later, which its Realistic Sound Engine
-//! keeps for each of a track's sounds and for the whole mix: each an id such as
+//! The pedals and amplifiers of `.gpx` and `.gp` files, which their `<RSE>` elements
+//! keep for each of a track's sounds and for the whole mix: each an id such as
 //! `E03_OverdriveScreamer`, whose letter says what sort of unit it is (A for an amplifier,
 //! E for a pedal, M for a unit of the mix) and whose name says what it does, and its
 //! settings, each from 0 to 1.
@@ -133,9 +133,9 @@ pub(crate) fn chain(node: roxmltree::Node) -> (Vec<Pedal>, bool) {
     (pedals, unmatched)
 }
 
-/// A pedal as a unit of Guitar Pro's: the id of one of its units of the same sort, and its
+/// A pedal as a unit of the format's: the id of one of its units of the same sort, and its
 /// settings, or `None` for a sort it has no unit of. `master` asks for one of the units of
-/// the mix, which has only the studio's. Only units seen in Guitar Pro's own files are
+/// the mix, which has only the studio's. Only units seen in real files are
 /// written.
 pub(crate) fn unit(pedal: &Pedal, master: bool) -> Option<(&'static str, Vec<f64>)> {
     let knob = |i: usize| f64::from(pedal.knob(i));
@@ -160,7 +160,7 @@ pub(crate) fn unit(pedal: &Pedal, master: bool) -> Option<(&'static str, Vec<f64
             settings.extend([treble; 4]);
             ("M08_GraphicEQ10Band", settings)
         }
-        // Guitar Pro 6 puts the studio's units in a track's chain as well as the mix's.
+        // A `.gpx` file puts the studio's units in a track's chain as well as the mix's.
         (PedalKind::Reverb, _) => (
             "M04_StudioReverbRoomAmbience",
             vec![1.0, knob(0), knob(1), 0.5, knob(2)],
@@ -170,7 +170,7 @@ pub(crate) fn unit(pedal: &Pedal, master: bool) -> Option<(&'static str, Vec<f64
     })
 }
 
-/// A chain written as Guitar Pro's `<Effect>` elements, and whether any pedal had no unit
+/// A chain written as the format's `<Effect>` elements, and whether any pedal had no unit
 /// to be written as.
 pub(crate) fn effects(chain: &[Pedal], master: bool) -> (String, bool) {
     let mut out = String::new();
@@ -306,7 +306,7 @@ mod tests {
             let document = roxmltree::Document::parse(&xml).unwrap();
             let (read, unmatched) = chain(document.root_element());
             assert!(!unmatched);
-            // Knobs that Guitar Pro has no setting for come back as they start.
+            // Knobs that the format has no setting for come back as they start.
             let mut expected = pedal.clone();
             for (i, knob) in pedal.kind.knobs().iter().enumerate() {
                 let kept = match pedal.kind {
