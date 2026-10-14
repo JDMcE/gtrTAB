@@ -422,6 +422,27 @@ impl Document {
         Ok(serde_json::to_string(&layout)?)
     }
 
+    /// Display list for the score on pages of the paper `paper` names, set out on the
+    /// screen one under another or, with `across`, side by side. `view_json` is as for
+    /// [`Document::layout_json`].
+    #[wasm_bindgen(js_name = sheetsJson)]
+    pub fn sheets_json(&self, view_json: &str, paper: &str, across: bool) -> Result<String, JsError> {
+        let cursor = self.editor.cursor();
+        let view = gtr_layout::View {
+            track: cursor.track,
+            staff: cursor.staff,
+            voice: cursor.voice,
+            ..serde_json::from_str(view_json)?
+        };
+        let page = page(paper);
+        let set = match across {
+            true => gtr_layout::Pages::Across,
+            false => gtr_layout::Pages::Down,
+        };
+        let layout = gtr_layout::layout(self.editor.score(), &view, page.width).sheets(page, set);
+        Ok(serde_json::to_string(&layout)?)
+    }
+
     /// Compiles the score to the events the synth plays. `options_json` holds
     /// `gtr_audio::Options` fields; `follow` is the track whose beats move the playback
     /// cursor.

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Cursor, EditorState, Item, Layout } from './model';
+  import { t } from './i18n';
   import { pitchOfStep, stepOfPitch } from './pitch';
 
   interface Props {
@@ -41,6 +42,7 @@
   let viewWidth = $state(0);
   let viewHeight = $state(0);
   let scrollTop = $state(0);
+  let scrollLeft = $state(0);
   let fontsReady = $state(false);
 
   const pageWidth = $derived(Math.min(viewWidth / zoom, MAX_PAGE_WIDTH));
@@ -48,8 +50,10 @@
     void revision;
     return pageWidth > 0 ? getLayout(pageWidth) : undefined;
   });
-  /** Left edge of the page in view pixels, centring it when the view is wider. */
-  const offsetX = $derived(Math.max(0, (viewWidth - pageWidth * zoom) / 2));
+  /** Left edge of the score in view pixels, centring it when the view is wider. */
+  const offsetX = $derived(Math.max(0, (viewWidth - (layout?.width ?? pageWidth) * zoom) / 2));
+  /** Whether the score is shown as pages on a desk rather than as one sheet. */
+  const onSheets = $derived(!!layout?.sheets.length);
 
   /** Centre of a beat or slot on the page, or `undefined` if it is not laid out. */
   function locate(l: Layout, at: { bar: number; beat: number }, string = 0) {
@@ -86,10 +90,22 @@
     canvas.width = Math.round(viewWidth * dpr);
     canvas.height = Math.round(viewHeight * dpr);
     context.setTransform(1, 0, 0, 1, 0, 0);
-    context.fillStyle = paper;
+    context.fillStyle = onSheets ? color('--desk') : paper;
     context.fillRect(0, 0, canvas.width, canvas.height);
     const scale = dpr * zoom;
-    context.setTransform(scale, 0, 0, scale, offsetX * dpr, -scrollTop * dpr);
+    context.setTransform(scale, 0, 0, scale, (offsetX - scrollLeft) * dpr, -scrollTop * dpr);
+
+    // Pages lie on the desk, each with an edge.
+    if (onSheets) {
+      const edge = color('--border-strong');
+      context.lineWidth = 1 / zoom;
+      for (const sheet of layout.sheets) {
+        context.fillStyle = paper;
+        context.fillRect(sheet.x, sheet.y, sheet.w, sheet.h);
+        context.strokeStyle = edge;
+        context.strokeRect(sheet.x, sheet.y, sheet.w, sheet.h);
+      }
+    }
 
     // Only draw what is on screen, with a margin for tall glyphs.
     const top = scrollTop / zoom - 80;
@@ -213,7 +229,7 @@
   }
 
   $effect(() => {
-    void [layout, editor, keys, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, fontsReady];
+    void [layout, editor, keys, playhead, zoom, theme, viewWidth, viewHeight, scrollTop, scrollLeft, fontsReady];
     draw();
   });
 
@@ -228,25 +244,41 @@
     else if (bottom > scroller.scrollTop + viewHeight) {
       scroller.scrollTop = Math.min(top - 12, bottom - viewHeight + 12);
     }
+    // Across, the beat is kept a little way in from either edge.
+    const x = p.x * zoom + offsetX;
+    const room = Math.min(120, viewWidth / 4);
+    if (x < scroller.scrollLeft + room) scroller.scrollLeft = Math.max(0, x - room);
+    else if (x > scroller.scrollLeft + viewWidth - room) scroller.scrollLeft = x - viewWidth + room;
   }
 
   $effect(() => reveal(playhead ?? editor.cursor));
 
-  /** The first bar of the first line that is at least partly in view. */
+  /** The first bar that is at least partly in view. */
   const firstVisible = $derived.by(() => {
     if (!layout) return 0;
-    const system = layout.systems.findIndex((s) => s.bottom * zoom > scrollTop);
-    return Math.max(0, layout.bars.findIndex((b) => b.system === Math.max(0, system)));
+    const [left, right] = [(scrollLeft - offsetX) / zoom, (scrollLeft - offsetX + viewWidth) / zoom];
+    const [top, bottom] = [scrollTop / zoom, (scrollTop + viewHeight) / zoom];
+    const seen = layout.bars.findIndex((b) => {
+      const s = layout.systems[b.system];
+      return b.x + b.w > left && b.x < right && s.bottom > top && s.top < bottom;
+    });
+    return Math.max(0, seen);
   });
   $effect(() => onview?.(firstVisible));
 
   function onPointerDown(event: PointerEvent) {
     if (!layout || event.button !== 0) return;
     const bounds = scroller.getBoundingClientRect();
-    const x = (event.clientX - bounds.left - offsetX) / zoom;
+    const x = (event.clientX - bounds.left - offsetX + scroller.scrollLeft) / zoom;
     const y = (event.clientY - bounds.top + scroller.scrollTop) / zoom;
 
-    const system = layout.systems.findIndex((s) => y >= s.top && y <= s.bottom);
+    // Pages side by side have lines at the same height: the one clicked is on the page
+    // clicked, between its first bar's start and its last bar's end, with room either side.
+    const across = (system: number) => {
+      const own = layout.bars.filter((b) => b.system === system);
+      return !own.length || (x >= own[0].x - 80 && x <= own[own.length - 1].x + own[own.length - 1].w + 40);
+    };
+    const system = layout.systems.findIndex((s, i) => y >= s.top && y <= s.bottom && across(i));
     if (system < 0) return;
     const inSystem = layout.bars.map((b, i) => ({ b, i })).filter(({ b }) => b.system === system);
     const hit =
@@ -306,7 +338,7 @@
   });
 </script>
 
-<div class="score" data-paper>
+<div class="score" class:sheets={onSheets} data-paper>
   <canvas bind:this={canvas}></canvas>
   <span bind:this={probe} hidden></span>
   <!-- The score takes the keyboard whenever no other control has it. -->
@@ -314,14 +346,20 @@
   <div
     class="scroller"
     role="application"
-    aria-label="Score"
+    aria-label={t('Score')}
     tabindex="0"
     data-score
     bind:this={scroller}
-    onscroll={() => (scrollTop = scroller.scrollTop)}
+    onscroll={() => {
+      scrollTop = scroller.scrollTop;
+      scrollLeft = scroller.scrollLeft;
+    }}
     onpointerdown={onPointerDown}
   >
-    <div style:height="{(layout?.height ?? 0) * zoom}px"></div>
+    <div
+      style:width="{Math.max(viewWidth, (layout?.width ?? 0) * zoom)}px"
+      style:height="{(layout?.height ?? 0) * zoom}px"
+    ></div>
   </div>
 </div>
 
@@ -343,8 +381,13 @@
   }
 
   .scroller {
-    overflow-y: auto;
+    overflow: auto;
     cursor: text;
+  }
+
+  /* On pages, the room around them is the desk. */
+  .score.sheets {
+    background: var(--desk);
   }
 
   /* The score has the keyboard most of the time, so its focus mark is a line along the top

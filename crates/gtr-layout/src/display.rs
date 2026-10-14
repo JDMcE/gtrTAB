@@ -23,6 +23,19 @@ pub struct Layout {
     pub systems: Vec<SystemBox>,
     /// One entry per bar of the score.
     pub bars: Vec<BarBox>,
+    /// The sheets of paper the score is on, when it is shown as pages; empty when it is one
+    /// sheet as long or as wide as the score.
+    pub sheets: Vec<Sheet>,
+}
+
+/// A sheet of paper the score is shown on.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export)]
+pub struct Sheet {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
 }
 
 /// One line of music.
@@ -238,6 +251,22 @@ impl Item {
             | Item::Dot { y, .. }
             | Item::Arc { y, .. }
             | Item::Text { y, .. } => *y,
+        }
+    }
+
+    /// Moves the item along the page.
+    pub(crate) fn shift_x(&mut self, by: f64) {
+        match self {
+            Item::Line { x1, x2, .. } | Item::Beam { x1, x2, .. } | Item::Arc { x1, x2, .. } => {
+                *x1 = r(*x1 + by);
+                *x2 = r(*x2 + by);
+            }
+            Item::Curve { x1, cx, x2, .. } => {
+                *x1 = r(*x1 + by);
+                *cx = r(*cx + by);
+                *x2 = r(*x2 + by);
+            }
+            Item::Rect { x, .. } | Item::Dot { x, .. } | Item::Text { x, .. } => *x = r(*x + by),
         }
     }
 

@@ -24,6 +24,11 @@ export interface Prefs {
   collapsed: string[];
   /** Staves each track is shown on. */
   notation: Notation;
+  /**
+   * What the score is shown on: pages one under another or side by side, one sheet as
+   * wide as the window, or one line holding every bar.
+   */
+  layout: 'pages' | 'pagesAcross' | 'parchment' | 'screen';
   /** Every track shown in the score, not just the one being edited. */
   multitrack: boolean;
   /** Track pane shown under the score. */
@@ -59,6 +64,7 @@ const DEFAULTS: Prefs = {
   inspector: null,
   collapsed: [],
   notation: 'both',
+  layout: 'parchment',
   multitrack: false,
   tracks: true,
   tracksHeight: null,

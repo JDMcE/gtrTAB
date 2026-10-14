@@ -60,6 +60,9 @@ pub struct View {
     pub notation: Notation,
     /// Show every track, one above the other.
     pub multitrack: bool,
+    /// Every bar on one line, each as wide as it needs, for scrolling along sideways. The
+    /// heading is laid out to the width given, and the line runs on past it.
+    pub single_line: bool,
 }
 
 /// One staff of a track with what its notation needs.
@@ -207,9 +210,14 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
     let mut bars: Vec<BarBox> = Vec::with_capacity(measured.len());
     let mut top = header_height;
     let mut first = 0;
+    // As wide as the widest line, which only a single line can be wider than the width given.
+    let mut widest = width;
     while first < measured.len() {
         let left = MARGIN_X + prefix(first);
-        let available = width - MARGIN_X - left;
+        let available = match view.single_line {
+            true => f64::INFINITY,
+            false => width - MARGIN_X - left,
+        };
         // Take as many bars as fit, but always at least one.
         let mut end = first + 1;
         let mut natural = measured[first].width;
@@ -219,7 +227,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         }
         let fixed: f64 = measured[first..end].iter().map(|m| m.fixed).sum();
         let mut stretch = (available - fixed) / (natural - fixed).max(1.0);
-        if end == measured.len() {
+        if end == measured.len() || view.single_line {
             // Leave a short final line ragged rather than stretching it across the page.
             stretch = stretch.min(1.0);
         }
@@ -245,6 +253,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
             x += w;
         }
         let right = x;
+        widest = widest.max(right + MARGIN_X);
         let last = end == measured.len();
         let range = first..end;
 
@@ -636,7 +645,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
     }
 
     Layout {
-        width: r(width),
+        width: r(widest),
         height: r(top + 24.0),
         string_spacing: STRING_SPACING,
         string_count,
@@ -646,6 +655,7 @@ pub fn layout(score: &Score, view: &View, width: f64) -> Layout {
         items,
         systems,
         bars,
+        sheets: Vec::new(),
     }
 }
 
@@ -1018,7 +1028,7 @@ fn header(score: &Score, width: f64, items: &mut Vec<Item>) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use gtr_model::{Beat, Duration, Instrument, Note, NoteValue, Track, Voice, demo_score};
+    use gtr_model::{Beat, Duration, Instrument, Note, NoteValue, TimeSignature, Track, Voice, demo_score};
 
     use super::*;
 
@@ -1723,5 +1733,37 @@ mod tests {
         assert_eq!(found.iter().filter(|t| **t == "\u{E101}").count(), 12);
         assert_eq!(found.iter().filter(|t| **t == "\u{E103}").count(), 1);
         assert!(!found.contains(&"\u{E050}") && !found.contains(&"T"));
+    }
+
+    #[test]
+    fn a_single_line_has_every_bar_at_its_own_width() {
+        let mut score = demo_score();
+        let riff = score.tracks[0].staves[0].bars.clone();
+        score.master_bars = vec![MasterBar::new(TimeSignature::COMMON); 40];
+        score.tracks[0].staves[0].bars = (0..40).map(|bar| riff[bar % 2].clone()).collect();
+        let wrapped = layout(&score, &View::default(), 800.0);
+        let view = View {
+            single_line: true,
+            ..View::default()
+        };
+        let line = layout(&score, &view, 800.0);
+        assert_eq!(line.systems.len(), 1);
+        assert!(wrapped.systems.len() > 4);
+        assert!(line.bars.iter().all(|bar| bar.system == 0));
+        // Nothing is stretched: the bars follow on from one another at their own widths,
+        // and the layout is as wide as the line.
+        for pair in line.bars.windows(2) {
+            assert!((pair[0].x + pair[0].w - pair[1].x).abs() < 0.2);
+        }
+        let end = line.bars.last().map(|bar| bar.x + bar.w).unwrap();
+        assert!(line.width >= end && line.width > 2000.0, "{}", line.width);
+        // The heading is laid out to the width asked for.
+        let title_x = (line.items.iter())
+            .find_map(|item| match item {
+                Item::Text { s, x, .. } if s == "Demo riff" => Some(*x),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(title_x, 400.0);
     }
 }

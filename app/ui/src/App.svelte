@@ -743,6 +743,31 @@
     run: () => edit((d) => d.setVoice(i)),
   }));
 
+  /** What the score is shown on: pages, one sheet wrapped to the window, or one line. */
+  const LAYOUTS: [Prefs['layout'], string][] = [
+    ['pages', t('Pages, one under another')],
+    ['pagesAcross', t('Pages side by side')],
+    ['parchment', t('Parchment: one sheet as wide as the window')],
+    ['screen', t('Screen: every bar on one line')],
+  ];
+  const layouts: Command[] = LAYOUTS.map(([value, label]) => ({
+    id: `layout.${value}`,
+    label,
+    active: () => prefs.layout === value,
+    run: () => (prefs.layout = value),
+  }));
+  /** The view for the screen, which only there may be one line. */
+  const screenViewJson = $derived(
+    JSON.stringify({ notation: prefs.notation, multitrack: prefs.multitrack, single_line: prefs.layout === 'screen' }),
+  );
+  /** The score laid out for the screen in the layout chosen, `width` wide where that matters. */
+  const screenLayout = (width: number): Layout =>
+    JSON.parse(
+      prefs.layout === 'pages' || prefs.layout === 'pagesAcross'
+        ? doc!.sheetsJson(screenViewJson, paper, prefs.layout === 'pagesAcross')
+        : doc!.layoutJson(width, screenViewJson),
+    );
+
   const notations: Command[] = NOTATIONS.map(([value, label]) => ({
     id: `notation.${value}`,
     label,
@@ -1801,6 +1826,7 @@
         label: t('View'),
         items: [
           cmd.zoomIn, cmd.zoomOut, '-',
+          { label: t('Layout'), items: layouts },
           ...notations,
           cmd.multitrack,
           '-',
@@ -2073,7 +2099,7 @@
       <Palette sections={palette} {compact} collapsed={prefs.collapsed} ontoggle={toggleSection} />
       <div class="stage">
         <ScoreView
-          getLayout={(pageWidth) => JSON.parse(doc!.layoutJson(pageWidth, viewJson)) as Layout}
+          getLayout={screenLayout}
           revision={`${editor.revision}:${editor.cursor.track}:${editor.cursor.staff}:${editor.cursor.voice}:${viewJson}:${fileName}`}
           {editor}
           keys={score.master_bars.map((bar) => bar.key_signature)}

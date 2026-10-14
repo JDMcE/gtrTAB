@@ -21,6 +21,8 @@
   --backdrop: rgb(0 0 0 / 45%);
 
   /* Score */
+  /* Around the pages, when the score is shown as pages. */
+  --desk: light-dark(#dcd9d2, #0f1012);
   --paper: light-dark(#fffefb, #1d1e21);
   --ink: light-dark(#1b1c1f, #e8e6e1);
   --staff: light-dark(#8e8f95, #6f7178);
@@ -80,6 +82,7 @@
   --pressed: light-dark(rgb(138 44 0 / 22%), rgb(255 180 140 / 32%));
   --focus: light-dark(#0039b3, #a8c8ff);
   --error: light-dark(#a30000, #ff9a90);
+  --desk: light-dark(#a8a8a8, #3a3a3a);
   --paper: light-dark(#ffffff, #000000);
   --ink: light-dark(#000000, #ffffff);
   --staff: light-dark(#3d3d3d, #c2c2c2);
