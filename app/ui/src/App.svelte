@@ -1439,6 +1439,7 @@
     cut: { label: t('Cut'), icon: 'cut', keys: 'Ctrl+X', run: () => edit((d) => d.cut()) },
     copy: { label: t('Copy'), icon: 'copy', keys: 'Ctrl+C', run: () => edit((d) => d.copy()) },
     paste: { label: t('Paste'), icon: 'paste', keys: 'Ctrl+V', disabled: () => !editor?.can_paste, run: () => edit((d) => d.paste()) },
+    selectAll: { label: t('Select all'), keys: 'Ctrl+A', run: () => edit((d) => d.selectAll()) },
     insertBeat: { label: t('Insert a rest before the cursor'), keys: 'Insert', run: () => edit((d) => d.insertBeat()) },
     delete: { label: t('Remove the note, or the beat if it is a rest'), keys: 'Delete / Backspace', run: () => edit((d) => d.delete()) },
     deleteBeats: { label: t('Remove the beat or the selected beats'), keys: 'Ctrl+Delete', run: () => edit((d) => d.deleteBeats()) },
@@ -1949,7 +1950,7 @@
       {
         label: t('Edit'),
         items: [
-          cmd.undo, cmd.redo, '-', cmd.cut, cmd.copy, cmd.paste, '-',
+          cmd.undo, cmd.redo, '-', cmd.cut, cmd.copy, cmd.paste, cmd.selectAll, '-',
           cmd.insertBeat, cmd.delete, cmd.deleteBeats, '-',
           cmd.preferences,
         ],
@@ -2082,6 +2083,17 @@
         { keys: t('Shift+arrows'), label: t('Extend the selection') },
         { keys: 'Ctrl+← / Ctrl+→', label: t('Previous or next bar') },
         { keys: 'Home / End', label: t('First or last bar') },
+      ],
+    },
+    {
+      title: t('Selecting with the mouse'),
+      rows: [
+        { keys: t('Click'), label: t('Put the cursor on a beat and string') },
+        { keys: t('Drag'), label: t('Select the beats dragged across') },
+        { keys: t('Shift+click'), label: t('Select from the cursor to the beat clicked') },
+        { keys: t('Double-click'), label: t('Select the bar; drag on to select more bars') },
+        { keys: t('Triple-click'), label: t('Select the line') },
+        { keys: t('Drag along the bars'), label: t('In the tracks: select the bars of a track') },
       ],
     },
     {
@@ -2372,6 +2384,7 @@
               }
               d.setCursor(bar, beat, string, extend);
             })}
+          onselect={(from, to) => edit((d) => d.selectBars(from, to))}
           onview={(bar) => (viewBar = bar)}
         />
         {#if prefs.instrument && cursorStaff}
@@ -2444,11 +2457,17 @@
             {score}
             track={editor.cursor.track}
             bar={editor.cursor.bar}
+            selection={editor.selection && [editor.selection[0][0], editor.selection[1][0]]}
             playBar={playhead?.bar ?? null}
             {viewBar}
             height={prefs.tracksHeight}
             commands={[cmd.addTrack, cmd.trackSettings, cmd.trackUp, cmd.trackDown, cmd.removeTrack]}
             onpick={pickTrack}
+            onselect={(track, from, to) =>
+              edit((d) => {
+                if (track !== editor?.cursor.track) d.setTrack(track);
+                d.selectBars(from, to);
+              })}
             onmix={setMix}
             onmove={(from, to) => edit((d) => d.moveTrack(from, to))}
             onproperties={(track) => pickTrack(track, null).then(() => (dialog = 'track'))}

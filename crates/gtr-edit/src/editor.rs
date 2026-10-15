@@ -258,6 +258,28 @@ impl Editor {
         self.settle();
     }
 
+    /// Selects every beat of the bars from `from` to `to`, either way round. The cursor goes
+    /// to the `to` end, so that the selection grows from `from` as `to` moves.
+    pub fn select_bars(&mut self, from: usize, to: usize) {
+        let last_bar = self.score.master_bars.len() - 1;
+        let (from, to) = (from.min(last_bar), to.min(last_bar));
+        let last_beat = |e: &Self, bar: usize| e.beats(bar).len().saturating_sub(1);
+        let (anchor, beat) = if to >= from {
+            ((from, 0), last_beat(self, to))
+        } else {
+            ((from, last_beat(self, from)), 0)
+        };
+        self.anchor = Some(anchor);
+        self.cursor.bar = to;
+        self.cursor.beat = beat;
+        self.settle();
+    }
+
+    /// Selects every beat of the staff being edited.
+    pub fn select_all(&mut self) {
+        self.select_bars(0, self.score.master_bars.len() - 1);
+    }
+
     /// Moves the cursor to the start of a bar, on the string or pitch it is on.
     pub fn go_to_bar(&mut self, bar: usize) {
         self.set_cursor(bar, 0, self.cursor.string, false);

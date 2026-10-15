@@ -25,6 +25,9 @@
       extend: boolean,
       staff: { track: number; staff: number } | null,
     ) => void;
+    /** Selects every beat of the bars from `from` to `to` on the staff being edited, with
+     *  the cursor at the `to` end: a double or triple click, or a drag that follows one. */
+    onselect?: (from: number, to: number) => void;
     /** Reports the first bar in view whenever it changes. */
     onview?: (bar: number) => void;
     /** In design mode a bar's right edge can be dragged to widen or narrow it. */
@@ -35,14 +38,59 @@
     onwiden?: (bar: number, percent: number) => void;
   }
 
-  let { getLayout, revision, editor, keys, playhead, zoom, theme, onpick, onview, design = false, widths = [], onwiden }: Props =
-    $props();
+  let {
+    getLayout,
+    revision,
+    editor,
+    keys,
+    playhead,
+    zoom,
+    theme,
+    onpick,
+    onselect,
+    onview,
+    design = false,
+    widths = [],
+    onwiden,
+  }: Props = $props();
 
   /** How near a bar's right edge, in score pixels, a press is to take hold of it. */
   const EDGE = 5;
   /** The bar whose edge is being dragged: where it started, and where it is now. */
   let dragging = $state<{ bar: number; from: number; to: number } | null>(null);
   let overEdge = $state(false);
+
+  /** How far, in view pixels, a press has to move before it is a drag that selects. */
+  const DRAG_START = 4;
+  /** How soon, in milliseconds, and how near, in view pixels, a press has to follow the one
+   *  before for the two to be a double click. */
+  const MULTI_CLICK = { time: 400, near: 6 };
+  /** How near the edge of the view, in view pixels, a drag has to be to scroll it. */
+  const SCROLL_EDGE = 32;
+  /** The furthest, in view pixels, the view scrolls in a frame while a drag holds it there. */
+  const SCROLL_STEP = 24;
+
+  /**
+   * A press on the score, held to select what it is dragged across: beat by beat, or after a
+   * double click bar by bar. `from` and `to` are the bars first selected, which a drag by bars
+   * always keeps; `last` is where the pointer last was, so that only a change is sent on.
+   */
+  let selecting: {
+    bars: boolean;
+    from: number;
+    to: number;
+    last: string;
+    pointer: number;
+    startX: number;
+    startY: number;
+    clientX: number;
+    clientY: number;
+    moved: boolean;
+  } | null = null;
+  /** The last press: when and where it was, and how many presses in a row it ended. */
+  let lastPress = { time: 0, x: 0, y: 0, count: 0 };
+  /** The frame that next scrolls the view under a drag held at its edge. */
+  let scrollFrame = 0;
 
   const MAX_PAGE_WIDTH = 1100;
   const CURSOR_WIDTH = 20;
@@ -304,7 +352,8 @@
     if (playhead) follow(playhead);
     else {
       followed = null;
-      reveal(editor.cursor);
+      // A drag scrolls the view itself, at the edges, and the cursor under the pointer is in view.
+      if (!selecting?.moved) reveal(editor.cursor);
     }
   });
 
@@ -335,8 +384,20 @@
     return `${Math.round(x)},${Math.round(y)}`;
   });
 
+  /**
+   * Where the cursor is, as `x,y` from the score's top left corner in view pixels, and the
+   * selection as its first and last `bar,beat`: for the end-to-end tests to press and drag on
+   * the score and see what was selected.
+   */
+  const cursorPoint = $derived.by(() => {
+    const at = layout && locate(layout, editor.cursor, editor.cursor.string);
+    if (!at) return undefined;
+    return `${Math.round(at.x * zoom + offsetX - scrollLeft)},${Math.round(at.y * zoom - scrollTop)}`;
+  });
+  const selected = $derived(editor.selection?.flat().join(','));
+
   /** Where a pointer is on the score, in score pixels. */
-  function pointAt(event: PointerEvent) {
+  function pointAt(event: { clientX: number; clientY: number }) {
     const bounds = scroller.getBoundingClientRect();
     return {
       x: (event.clientX - bounds.left - offsetX + scroller.scrollLeft) / zoom,
@@ -354,13 +415,112 @@
     return at < 0 ? null : at;
   }
 
+  /**
+   * The line at a point on the score, or -1 for none. Pages side by side have lines at the
+   * same height: the one at the point is on that page, between its first bar's start and its
+   * last bar's end, with room either side. With `loose`, as when dragging, a point between
+   * lines or past the last is on the nearest.
+   */
+  function systemAt(l: Layout, x: number, y: number, loose = false): number {
+    const across = (system: number) => {
+      const own = l.bars.filter((b) => b.system === system);
+      return !own.length || (x >= own[0].x - 80 && x <= own[own.length - 1].x + own[own.length - 1].w + 40);
+    };
+    const found = l.systems.findIndex((s, i) => y >= s.top && y <= s.bottom && across(i));
+    if (found >= 0 || !loose) return found;
+    const nearest = (only: (i: number) => boolean) => {
+      let best = -1;
+      let distance = Infinity;
+      l.systems.forEach((s, i) => {
+        const d = Math.max(s.top - y, y - s.bottom, 0);
+        if (only(i) && d < distance) [best, distance] = [i, d];
+      });
+      return best;
+    };
+    const near = nearest(across);
+    return near >= 0 ? near : nearest(() => true);
+  }
+
+  /**
+   * The bar at a point across a line, or beside the line its first or last bar; the index of
+   * the line's first bar; and the beat, or the empty place after the last, nearest the point.
+   */
+  function beatAt(l: Layout, system: number, x: number) {
+    const inSystem = l.bars.map((b, i) => ({ b, i })).filter(({ b }) => b.system === system);
+    const hit =
+      inSystem.find(({ b }) => x >= b.x && x < b.x + b.w) ??
+      (x < inSystem[0].b.x ? inSystem[0] : inSystem[inSystem.length - 1]);
+    const stops = [...hit.b.beats, ...(hit.b.slot === null ? [] : [hit.b.slot])];
+    let beat = 0;
+    stops.forEach((stop, i) => {
+      if (Math.abs(stop - x) < Math.abs(stops[beat] - x)) beat = i;
+    });
+    return { hit, first: inSystem[0].i, beat };
+  }
+
+  /** Selects up to where a held press has been dragged, once it has moved far enough. */
+  function dragSelect() {
+    const s = selecting;
+    if (!s || !layout) return;
+    if (!s.moved && Math.hypot(s.clientX - s.startX, s.clientY - s.startY) < DRAG_START) return;
+    s.moved = true;
+    const { x, y } = pointAt(s);
+    const system = systemAt(layout, x, y, true);
+    if (system < 0) return;
+    const { hit, beat } = beatAt(layout, system, x);
+    const here = s.bars ? String(hit.i) : `${hit.i}:${beat}`;
+    if (here === s.last) return;
+    s.last = here;
+    if (!s.bars) onpick(hit.i, beat, editor.cursor.string, true, null);
+    // By bars, the bars first selected stay selected whichever way the drag goes.
+    else if (hit.i > s.to) onselect?.(s.from, hit.i);
+    else if (hit.i < s.from) onselect?.(s.to, hit.i);
+    else onselect?.(s.from, s.to);
+  }
+
+  /** While a drag is held at the edge of the view, scrolls on towards it and selects as it goes. */
+  function edgeScroll() {
+    scrollFrame = 0;
+    if (!selecting?.moved) return;
+    const bounds = scroller.getBoundingClientRect();
+    const past = (at: number, start: number, end: number) => {
+      const by = at < start + SCROLL_EDGE ? at - start - SCROLL_EDGE : at > end - SCROLL_EDGE ? at - end + SCROLL_EDGE : 0;
+      return Math.max(-SCROLL_STEP, Math.min(SCROLL_STEP, by / 2));
+    };
+    const down = past(selecting.clientY, bounds.top, bounds.bottom);
+    const right = past(selecting.clientX, bounds.left, bounds.right);
+    if (!down && !right) return;
+    const before = [scroller.scrollTop, scroller.scrollLeft];
+    scroller.scrollTop += down;
+    scroller.scrollLeft += right;
+    if (scroller.scrollTop === before[0] && scroller.scrollLeft === before[1]) return;
+    dragSelect();
+    scrollFrame = requestAnimationFrame(edgeScroll);
+  }
+
+  function endSelecting() {
+    if (!selecting) return;
+    if (scroller.hasPointerCapture(selecting.pointer)) scroller.releasePointerCapture(selecting.pointer);
+    selecting = null;
+    cancelAnimationFrame(scrollFrame);
+    scrollFrame = 0;
+  }
+
   function onPointerMove(event: PointerEvent) {
+    if (selecting) {
+      selecting.clientX = event.clientX;
+      selecting.clientY = event.clientY;
+      dragSelect();
+      if (!scrollFrame) scrollFrame = requestAnimationFrame(edgeScroll);
+      return;
+    }
     const { x, y } = pointAt(event);
     if (dragging) dragging = { ...dragging, to: Math.max(layout!.bars[dragging.bar].x + 12, x) };
     else overEdge = edgeAt(x, y) !== null;
   }
 
   function onPointerUp() {
+    endSelecting();
     if (!dragging || !layout) return;
     const { bar, from, to } = dragging;
     dragging = null;
@@ -383,24 +543,44 @@
       return;
     }
 
-    // Pages side by side have lines at the same height: the one clicked is on the page
-    // clicked, between its first bar's start and its last bar's end, with room either side.
-    const across = (system: number) => {
-      const own = layout.bars.filter((b) => b.system === system);
-      return !own.length || (x >= own[0].x - 80 && x <= own[own.length - 1].x + own[own.length - 1].w + 40);
-    };
-    const system = layout.systems.findIndex((s, i) => y >= s.top && y <= s.bottom && across(i));
+    const system = systemAt(layout, x, y);
     if (system < 0) return;
-    const inSystem = layout.bars.map((b, i) => ({ b, i })).filter(({ b }) => b.system === system);
-    const hit =
-      inSystem.find(({ b }) => x >= b.x && x < b.x + b.w) ??
-      (x < inSystem[0].b.x ? inSystem[0] : inSystem[inSystem.length - 1]);
+    const { hit, first, beat } = beatAt(layout, system, x);
 
-    const stops = [...hit.b.beats, ...(hit.b.slot === null ? [] : [hit.b.slot])];
-    let beat = 0;
-    stops.forEach((stop, i) => {
-      if (Math.abs(stop - x) < Math.abs(stops[beat] - x)) beat = i;
-    });
+    // Presses close together in time and place count up to a double or triple click.
+    const now = performance.now();
+    const again =
+      !event.shiftKey &&
+      now - lastPress.time < MULTI_CLICK.time &&
+      Math.hypot(event.clientX - lastPress.x, event.clientY - lastPress.y) < MULTI_CLICK.near;
+    const count = again ? lastPress.count + 1 : 1;
+    lastPress = { time: now, x: event.clientX, y: event.clientY, count };
+
+    scroller.setPointerCapture(event.pointerId);
+    selecting = {
+      bars: count > 1,
+      from: hit.i,
+      to: hit.i,
+      last: `${hit.i}:${beat}`,
+      pointer: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      moved: false,
+    };
+    // A double click selects the bar, and a triple click the whole line.
+    if (count > 1) {
+      if (count > 2) {
+        const line = layout.bars.flatMap((b, i) => (b.system === system ? [i] : []));
+        selecting.from = line[0];
+        selecting.to = line[line.length - 1];
+      }
+      selecting.last = String(hit.i);
+      onselect?.(selecting.from, selecting.to);
+      return;
+    }
+
     /** The pitch written at `y` on a staff without strings whose middle line is at `lineY`. */
     const pitchAt = (lineY: number, middle: number) =>
       pitchOfStep(middle + Math.round((lineY - y) / layout.step), keys[hit.i] ?? 0);
@@ -409,12 +589,13 @@
     if (row && (row.track !== editor.cursor.track || row.staff !== editor.cursor.staff)) {
       // Another staff: it has its own beats, the nearest of which is the one clicked. A
       // click well past the last of them is on the empty place after it, if there is one.
-      const own = row.beats[hit.i - inSystem[0].i] ?? [];
+      const own = row.beats[hit.i - first] ?? [];
       let at = 0;
       own.forEach((stop, i) => {
         if (Math.abs(stop - x) < Math.abs(own[at] - x)) at = i;
       });
       if (own.length && x > own[own.length - 1] + PAST_LAST) at = own.length;
+      selecting.last = `${hit.i}:${at}`;
       const staff = { track: row.track, staff: row.staff };
       if (row.middle !== null) {
         onpick(hit.i, at, pitchAt(row.y, row.middle), false, staff);
@@ -468,10 +649,15 @@
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
     onpointerup={onPointerUp}
-    onpointercancel={() => (dragging = null)}
+    onpointercancel={() => {
+      dragging = null;
+      endSelecting();
+    }}
     class:resize={overEdge || !!dragging}
     data-lines={layout?.systems.length}
     data-edge={cursorEdge}
+    data-cursor={cursorPoint}
+    data-selection={selected}
   >
     <div
       style:width="{Math.max(viewWidth, (layout?.width ?? 0) * zoom)}px"

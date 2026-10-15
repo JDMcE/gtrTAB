@@ -26,6 +26,7 @@ The installers are not signed yet, so each system warns you the first time you o
 
 - **Tab and notation together.** Type frets on the tab and the notation is written for you. Show a track as tab and notation, tab only, notation only, or rhythm slashes.
 - **Every technique a guitarist needs:** bends and whammy bar dives drawn on a curve, slides, hammer-ons and pull-offs, harmonics, vibrato, palm muting, let ring, tapping, dead and ghost notes, trills, tremolo picking, grace notes, rasgueado, and slap and pop for bass.
+- **Keyboard or mouse.** Drag across beats to select them, double-click for a bar and triple-click for a line, Shift+click to extend, or drag along a track's bars in the track pane; Ctrl+A selects everything.
 - **Whole songs and bands.** Guitars of any tuning with a capo, bass, drums and piano, each on its own track, with up to four voices on a staff.
 - **The rest of the score:** repeats and alternate endings, segno, coda and fine, sections, tempo and key changes, dynamics, chord names and diagrams, lyrics and text. Playback follows the repeats and jumps.
 

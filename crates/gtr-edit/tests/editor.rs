@@ -152,6 +152,34 @@ fn copy_and_paste_bars_and_beats() {
 }
 
 #[test]
+fn whole_bars_are_selected_either_way_round() {
+    let mut e = Editor::new(demo_score());
+    let len = beats(&e, 0).len();
+    let selection = |e: &Editor| e.state().selection.map(|[a, b]| (a, b));
+
+    e.select_bars(0, 0);
+    assert_eq!(selection(&e), Some(((0, 0), (0, len - 1))));
+    assert_eq!((e.cursor().bar, e.cursor().beat), (0, len - 1));
+
+    // Dragged back from the second bar, the cursor is at the start of the first.
+    let second = beats(&e, 1).len();
+    e.select_bars(1, 0);
+    assert_eq!(selection(&e), Some(((0, 0), (1, second.saturating_sub(1)))));
+    assert_eq!((e.cursor().bar, e.cursor().beat), (0, 0));
+
+    // Everything, copied as bars.
+    e.select_all();
+    e.copy();
+    e.move_cursor(Move::Last, false).unwrap();
+    e.paste().unwrap();
+    // Pasted in before the last bar, the two bars come out in order.
+    assert_eq!(e.score().master_bars.len(), 4);
+    assert_eq!(beats(&e, 1), beats(&e, 0));
+    assert_eq!(beats(&e, 2), beats(&e, 3));
+    e.score().validate().unwrap();
+}
+
+#[test]
 fn time_signature_applies_until_the_next_change() {
     let mut score = demo_score();
     score

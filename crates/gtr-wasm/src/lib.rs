@@ -620,6 +620,18 @@ impl Document {
         self.editor.set_cursor(bar, beat, string, extend);
     }
 
+    /// Selects every beat of the bars from `from` to `to`, either way round, with the cursor
+    /// at the `to` end.
+    #[wasm_bindgen(js_name = selectBars)]
+    pub fn select_bars(&mut self, from: usize, to: usize) {
+        self.editor.select_bars(from, to);
+    }
+
+    #[wasm_bindgen(js_name = selectAll)]
+    pub fn select_all(&mut self) {
+        self.editor.select_all();
+    }
+
     /// Moves the cursor to the start of a bar, staying on its string or pitch.
     #[wasm_bindgen(js_name = goToBar)]
     pub fn go_to_bar(&mut self, bar: usize) {
