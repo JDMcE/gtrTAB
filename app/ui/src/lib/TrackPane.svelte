@@ -29,6 +29,8 @@
     track: number;
     /** The cursor's bar. */
     bar: number;
+    /** The first and last bars of the selection on the track being edited, if there is one. */
+    selection: [number, number] | null;
     /** The bar sounding now, while playing. */
     playBar: number | null;
     /** The first bar visible in the score, which the grid keeps in view. */
@@ -38,6 +40,8 @@
     /** Track actions shown above the names; they act on the current track. */
     commands: Command[];
     onpick: (track: number, bar: number | null) => void;
+    /** Selects the bars of a track from `from` to `to`, with the cursor at the `to` end. */
+    onselect: (track: number, from: number, to: number) => void;
     onmix: (track: number, mix: Mix) => void;
     /** Puts the track at `from` where the one at `to` is. */
     onmove: (from: number, to: number) => void;
@@ -53,11 +57,13 @@
     audio,
     track,
     bar,
+    selection,
     playBar,
     viewBar,
     height,
     commands,
     onpick,
+    onselect,
     onmix,
     onmove,
     onproperties,
@@ -158,10 +164,38 @@
     else if (top + ROW > scroller.scrollTop + visible) scroller.scrollTop = top + ROW - visible;
   });
 
-  function pickBar(event: MouseEvent, index: number) {
+  /**
+   * A press on a track's bars: a click goes to the bar, with Shift it selects from the cursor
+   * to the bar, and a drag selects the bars it crosses.
+   */
+  function pressBars(event: PointerEvent, index: number) {
+    if (event.button !== 0) return;
     const cells = event.currentTarget as HTMLElement;
-    const x = event.clientX - cells.getBoundingClientRect().left;
-    onpick(index, Math.max(0, Math.min(barCount - 1, Math.floor(x / CELL))));
+    const barAt = (clientX: number) =>
+      Math.max(0, Math.min(barCount - 1, Math.floor((clientX - cells.getBoundingClientRect().left) / CELL)));
+    const start = barAt(event.clientX);
+    // Shift carries on from the end of the selection the cursor is not at, or else from the cursor.
+    const anchor = !selection ? bar : bar === selection[0] ? selection[1] : selection[0];
+    const from = event.shiftKey && index === track ? anchor : start;
+    if (event.shiftKey && index === track) onselect(index, from, start);
+    else onpick(index, start);
+
+    let last = start;
+    cells.setPointerCapture(event.pointerId);
+    const move = (e: PointerEvent) => {
+      const at = barAt(e.clientX);
+      if (at === last) return;
+      last = at;
+      onselect(index, from, at);
+    };
+    const end = () => {
+      cells.removeEventListener('pointermove', move);
+      cells.removeEventListener('pointerup', end);
+      cells.removeEventListener('pointercancel', end);
+    };
+    cells.addEventListener('pointermove', move);
+    cells.addEventListener('pointerup', end);
+    cells.addEventListener('pointercancel', end);
   }
 
   function slide(index: number, field: 'volume' | 'pan', event: Event, commit: boolean) {
@@ -389,11 +423,18 @@
           </button>
           {@render controls(index, t.name, mix)}
         </div>
-        <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-        <div class="cells" style:width="{barCount * CELL}px" onclick={(e) => pickBar(e, index)}>
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
+        <div class="cells" style:width="{barCount * CELL}px" onpointerdown={(e) => pressBars(e, index)}>
           {#each runs[index] as [first, length]}
             <span class="run" style:left="{first * CELL}px" style:width="{length * CELL - 1}px"></span>
           {/each}
+          {#if index === track && selection}
+            <span
+              class="selected"
+              style:left="{selection[0] * CELL}px"
+              style:width="{(selection[1] - selection[0] + 1) * CELL}px"
+            ></span>
+          {/if}
           {#if index === track}
             <span class="at" style:left="{bar * CELL}px"></span>
           {/if}
@@ -719,6 +760,8 @@
         transparent 1px var(--cell)
       );
     cursor: pointer;
+    /* A drag along the bars selects them rather than scrolling the grid. */
+    touch-action: pan-y;
   }
 
   .run {
@@ -744,6 +787,14 @@
 
   .row.silent .run {
     opacity: 0.45;
+  }
+
+  .selected {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    background: var(--select);
+    pointer-events: none;
   }
 
   .at {
